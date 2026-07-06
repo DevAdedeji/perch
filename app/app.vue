@@ -28,10 +28,10 @@ useSeoMeta({
 
 <template>
   <UApp>
-    <div class="relative min-h-screen overflow-x-clip bg-default text-default antialiased">
-      <AppHeader />
-      <NuxtPage />
-      <AppFooter />
+    <div class="min-h-screen bg-default text-default antialiased">
+      <NuxtLayout>
+        <NuxtPage />
+      </NuxtLayout>
     </div>
   </UApp>
 </template>

@@ -56,7 +56,7 @@ onBeforeUnmount(() => window.removeEventListener('scroll', onScroll))
         <div class="flex items-center gap-1.5">
           <UColorModeButton />
           <UButton
-            to="#"
+            to="/login"
             variant="ghost"
             color="neutral"
             size="md"
@@ -65,7 +65,7 @@ onBeforeUnmount(() => window.removeEventListener('scroll', onScroll))
             Sign in
           </UButton>
           <UButton
-            to="#pricing"
+            to="/signup"
             color="primary"
             size="md"
             trailing-icon="i-lucide-arrow-right"
@@ -109,7 +109,7 @@ onBeforeUnmount(() => window.removeEventListener('scroll', onScroll))
           </UButton>
           <div class="grid grid-cols-2 gap-2 p-1 pt-2">
             <UButton
-              to="#"
+              to="/login"
               variant="soft"
               color="neutral"
               block
@@ -117,7 +117,7 @@ onBeforeUnmount(() => window.removeEventListener('scroll', onScroll))
               Sign in
             </UButton>
             <UButton
-              to="#pricing"
+              to="/signup"
               color="primary"
               block
             >

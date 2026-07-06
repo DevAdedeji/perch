@@ -121,7 +121,7 @@ const plans = [
 
             <div class="mt-8 flex flex-wrap items-center gap-3">
               <UButton
-                to="#pricing"
+                to="/signup"
                 size="xl"
                 color="primary"
                 trailing-icon="i-lucide-arrow-right"
@@ -552,7 +552,7 @@ const plans = [
           </p>
           <div class="mt-8 flex flex-wrap justify-center gap-3">
             <UButton
-              to="#"
+              to="/signup"
               size="xl"
               color="primary"
               trailing-icon="i-lucide-arrow-right"

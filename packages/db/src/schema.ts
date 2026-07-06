@@ -41,6 +41,9 @@ export const workspaces = pgTable('workspaces', {
   id: uuid('id').defaultRandom().primaryKey(),
   name: text('name').notNull(),
   siteId: text('site_id').notNull().unique(),
+  // branding shown in the visitor widget
+  logoUrl: text('logo_url'),
+  widgetPrimaryColor: text('widget_primary_color').default('#f59e0b').notNull(),
   autoAssignEnabled: boolean('auto_assign_enabled').default(false).notNull(),
   prechatFormEnabled: boolean('prechat_form_enabled').default(true).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull()
