@@ -1,9 +1,11 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
+// Perch dashboard — Nuxt app + Nitro API + (soon) WS handler
 export default defineNuxtConfig({
   modules: [
     '@nuxt/eslint',
     '@nuxt/ui',
-    '@vueuse/motion/nuxt'
+    '@vueuse/motion/nuxt',
+    'nuxt-auth-utils'
   ],
 
   devtools: {
@@ -11,6 +13,11 @@ export default defineNuxtConfig({
   },
 
   css: ['~/assets/css/main.css'],
+
+  runtimeConfig: {
+    // server-only: Neon/Postgres connection string (read from .env)
+    databaseUrl: process.env.NEON_CONNECTION_STRING
+  },
 
   routeRules: {
     '/': { prerender: true }
