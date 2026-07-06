@@ -127,7 +127,7 @@ async function finish() {
         <span
           v-if="i < steps.length - 1"
           class="w-6 sm:w-10 h-px"
-          :class="i < step ? 'bg-amber-400' : 'bg-default'"
+          :class="i < step ? 'bg-amber-400' : 'bg-(--ui-border-accented)'"
         />
       </li>
     </ol>

@@ -86,19 +86,15 @@ const plans = [
       <!-- backdrop -->
       <div class="pointer-events-none absolute inset-0 -z-10">
         <div class="absolute inset-0 bg-grid [mask-image:radial-gradient(ellipse_70%_60%_at_50%_0%,#000_40%,transparent_100%)]" />
-        <div class="absolute top-[-10%] left-1/2 -translate-x-1/2 size-[560px] rounded-full bg-amber-400/25 blur-[120px] animate-aurora" />
-        <div class="absolute top-[10%] right-[8%] size-[380px] rounded-full bg-orange-500/12 blur-[120px] animate-aurora [animation-delay:-6s]" />
-        <div class="absolute top-[20%] left-[6%] size-[320px] rounded-full bg-amber-500/15 blur-[110px] animate-aurora [animation-delay:-11s]" />
+        <div class="absolute top-[-10%] left-1/2 -translate-x-1/2 size-[560px] rounded-full bg-amber-400/25 blur-[120px]" />
+        <div class="absolute top-[10%] right-[8%] size-[380px] rounded-full bg-orange-500/12 blur-[120px]" />
+        <div class="absolute top-[20%] left-[6%] size-[320px] rounded-full bg-amber-500/15 blur-[110px]" />
       </div>
 
       <UContainer>
         <div class="grid lg:grid-cols-[1.05fr_0.95fr] gap-14 lg:gap-10 items-center">
           <!-- copy -->
-          <div
-            v-motion
-            :initial="{ opacity: 0, y: 30 }"
-            :enter="{ opacity: 1, y: 0, transition: { duration: 700 } }"
-          >
+          <div>
             <div class="inline-flex items-center gap-2 rounded-full glass ring-1 ring-default pl-1.5 pr-3 py-1.5 text-xs">
               <span class="rounded-full bg-amber-400/15 px-2 py-0.5 font-medium text-amber-400">New</span>
               <span class="text-muted">Real-time support, owned end to end</span>
@@ -158,23 +154,15 @@ const plans = [
 
           <!-- visual -->
           <div
-            v-motion
-            :initial="{ opacity: 0, scale: 0.92, y: 30 }"
-            :enter="{ opacity: 1, scale: 1, y: 0, transition: { duration: 800, delay: 150 } }"
             class="relative"
           >
-            <div class="absolute inset-0 -z-10 blur-2xl bg-amber-400/10 rounded-full animate-pulse-glow" />
+            <div class="absolute inset-0 -z-10 blur-2xl bg-amber-400/10 rounded-full" />
             <HeroChat />
           </div>
         </div>
 
         <!-- brand marquee -->
-        <div
-          v-motion
-          :initial="{ opacity: 0 }"
-          :enter="{ opacity: 1, transition: { duration: 800, delay: 500 } }"
-          class="mt-20"
-        >
+        <div class="mt-20">
           <p class="text-center text-xs uppercase tracking-[0.2em] text-dimmed">
             Built for teams who live in the inbox
           </p>
@@ -199,9 +187,6 @@ const plans = [
     >
       <UContainer>
         <div
-          v-motion
-          :initial="{ opacity: 0, y: 24 }"
-          :visible-once="{ opacity: 1, y: 0, transition: { duration: 600 } }"
           class="max-w-2xl"
         >
           <p class="flex items-center gap-2 text-sm font-medium text-amber-400">
@@ -217,11 +202,8 @@ const plans = [
 
         <div class="mt-14 grid md:grid-cols-3 gap-5">
           <div
-            v-for="(p, i) in pillars"
+            v-for="p in pillars"
             :key="p.title"
-            v-motion
-            :initial="{ opacity: 0, y: 36 }"
-            :visible-once="{ opacity: 1, y: 0, transition: { duration: 600, delay: i * 120 } }"
             class="group relative rounded-2xl border-glow bg-elevated/30 glass p-7 transition-transform duration-300 hover:-translate-y-1"
           >
             <div class="grid place-items-center size-12 rounded-xl bg-amber-400/10 ring-1 ring-amber-400/20">
@@ -245,11 +227,8 @@ const plans = [
         <!-- supporting feature bento -->
         <div class="mt-6 grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
           <div
-            v-for="(f, i) in features"
+            v-for="f in features"
             :key="f.title"
-            v-motion
-            :initial="{ opacity: 0, y: 28 }"
-            :visible-once="{ opacity: 1, y: 0, transition: { duration: 500, delay: (i % 3) * 100 } }"
             class="group relative rounded-2xl bg-elevated/20 ring-1 ring-default p-6 hover:ring-amber-400/30 transition-colors"
           >
             <div class="flex items-center gap-3">
@@ -280,11 +259,7 @@ const plans = [
       <UContainer>
         <!-- header + feature bullets -->
         <div class="grid lg:grid-cols-[1fr_1.1fr] gap-10 lg:gap-16 items-end">
-          <div
-            v-motion
-            :initial="{ opacity: 0, y: 24 }"
-            :visible-once="{ opacity: 1, y: 0, transition: { duration: 650 } }"
-          >
+          <div>
             <p class="flex items-center gap-2 text-sm font-medium text-amber-400">
               <span class="h-px w-8 bg-amber-400" /> The Control Room
             </p>
@@ -299,9 +274,6 @@ const plans = [
           </div>
 
           <ul
-            v-motion
-            :initial="{ opacity: 0, y: 24 }"
-            :visible-once="{ opacity: 1, y: 0, transition: { duration: 650, delay: 120 } }"
             class="grid sm:grid-cols-3 gap-5"
           >
             <li
@@ -331,9 +303,6 @@ const plans = [
 
         <!-- full-width product shot -->
         <div
-          v-motion
-          :initial="{ opacity: 0, y: 40, scale: 0.98 }"
-          :visible-once="{ opacity: 1, y: 0, scale: 1, transition: { duration: 750, delay: 150 } }"
           class="mt-12"
         >
           <ControlRoomMock />
@@ -345,9 +314,6 @@ const plans = [
     <section class="relative py-16">
       <UContainer>
         <div
-          v-motion
-          :initial="{ opacity: 0, y: 24 }"
-          :visible-once="{ opacity: 1, y: 0, transition: { duration: 600 } }"
           class="rounded-3xl border-glow bg-elevated/30 glass overflow-hidden"
         >
           <div class="grid grid-cols-2 lg:grid-cols-4 divide-x divide-y lg:divide-y-0 divide-default">
@@ -375,9 +341,6 @@ const plans = [
     >
       <UContainer>
         <div
-          v-motion
-          :initial="{ opacity: 0, y: 24 }"
-          :visible-once="{ opacity: 1, y: 0, transition: { duration: 600 } }"
           class="text-center max-w-2xl mx-auto"
         >
           <p class="flex items-center justify-center gap-2 text-sm font-medium text-amber-400">
@@ -394,9 +357,6 @@ const plans = [
           <div
             v-for="(s, i) in steps"
             :key="s.n"
-            v-motion
-            :initial="{ opacity: 0, y: 32 }"
-            :visible-once="{ opacity: 1, y: 0, transition: { duration: 600, delay: i * 150 } }"
             class="relative text-center"
           >
             <div class="relative mx-auto grid place-items-center size-18 rounded-2xl border-glow bg-elevated/50 glass">
@@ -417,9 +377,6 @@ const plans = [
 
         <!-- code snippet -->
         <div
-          v-motion
-          :initial="{ opacity: 0, y: 24 }"
-          :visible-once="{ opacity: 1, y: 0, transition: { duration: 600, delay: 200 } }"
           class="mt-14 max-w-2xl mx-auto"
         >
           <div class="rounded-2xl border-glow bg-elevated/40 glass overflow-hidden">
@@ -454,9 +411,6 @@ const plans = [
       </div>
       <UContainer>
         <div
-          v-motion
-          :initial="{ opacity: 0, y: 24 }"
-          :visible-once="{ opacity: 1, y: 0, transition: { duration: 600 } }"
           class="text-center max-w-2xl mx-auto"
         >
           <h2 class="font-display text-4xl sm:text-5xl font-bold tracking-tight text-highlighted">
@@ -469,11 +423,8 @@ const plans = [
 
         <div class="mt-14 grid lg:grid-cols-3 gap-5 items-start">
           <div
-            v-for="(plan, i) in plans"
+            v-for="plan in plans"
             :key="plan.name"
-            v-motion
-            :initial="{ opacity: 0, y: 32 }"
-            :visible-once="{ opacity: 1, y: 0, transition: { duration: 600, delay: i * 120 } }"
             class="relative rounded-2xl p-7 transition-transform duration-300 hover:-translate-y-1"
             :class="plan.featured
               ? 'border-glow bg-elevated/50 glass shadow-2xl shadow-amber-500/10 lg:-mt-4 lg:mb-4'
@@ -528,14 +479,11 @@ const plans = [
     <section class="relative py-16">
       <UContainer>
         <div
-          v-motion
-          :initial="{ opacity: 0, y: 30 }"
-          :visible-once="{ opacity: 1, y: 0, transition: { duration: 700 } }"
           class="relative overflow-hidden rounded-3xl border-glow bg-elevated/40 glass px-8 py-16 sm:px-16 text-center"
         >
           <div class="pointer-events-none absolute inset-0 -z-10">
             <div class="absolute inset-0 bg-grid [mask-image:radial-gradient(ellipse_60%_80%_at_50%_50%,#000,transparent)]" />
-            <div class="absolute top-0 left-1/2 -translate-x-1/2 size-[400px] rounded-full bg-amber-400/20 blur-[100px] animate-pulse-glow" />
+            <div class="absolute top-0 left-1/2 -translate-x-1/2 size-[400px] rounded-full bg-amber-400/20 blur-[100px]" />
           </div>
 
           <div class="mx-auto mb-6 grid place-items-center size-16 rounded-2xl bg-amber-400/10 ring-1 ring-amber-400/20">

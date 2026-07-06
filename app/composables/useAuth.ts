@@ -26,6 +26,19 @@ export function useAuth() {
   const state = useState<AuthState>('auth', () => ({ user: null, workspaces: [] }))
   const loaded = useState<boolean>('auth:loaded', () => false)
 
+  // which workspace the dashboard is currently scoped to (persisted across reloads)
+  const activeWorkspaceId = useCookie<string | null>('perch:ws', { sameSite: 'lax', default: () => null })
+
+  const currentWorkspace = computed(() => {
+    const list = state.value.workspaces
+    if (!list.length) return null
+    return list.find(w => w.workspaceId === activeWorkspaceId.value) ?? list[0]
+  })
+
+  function setWorkspace(id: string) {
+    activeWorkspaceId.value = id
+  }
+
   async function refresh() {
     const request = useRequestFetch()
     try {
@@ -52,7 +65,8 @@ export function useAuth() {
     workspaces: computed(() => state.value.workspaces),
     loggedIn: computed(() => !!state.value.user),
     hasWorkspace: computed(() => state.value.workspaces.length > 0),
-    primaryWorkspace: computed(() => state.value.workspaces[0] ?? null),
+    currentWorkspace,
+    setWorkspace,
     refresh,
     ensureLoaded,
     logout

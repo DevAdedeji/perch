@@ -67,10 +67,7 @@ const year = new Date().getFullYear()
           © {{ year }} Perch. A portfolio build, made with care.
         </p>
         <p class="flex items-center gap-2 text-sm text-dimmed">
-          <span class="relative flex size-2">
-            <span class="absolute inline-flex size-full rounded-full bg-amber-400 opacity-75 animate-ping" />
-            <span class="relative inline-flex size-2 rounded-full bg-amber-400" />
-          </span>
+          <span class="size-2 rounded-full bg-amber-400" />
           All systems operational
         </p>
       </div>

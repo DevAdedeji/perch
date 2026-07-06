@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const { user, primaryWorkspace, logout } = useAuth()
+const { user, workspaces, currentWorkspace, setWorkspace, logout } = useAuth()
 
 const nav = [
   { label: 'Inbox', icon: 'i-lucide-inbox', to: '/dashboard', soon: false },
@@ -10,6 +10,17 @@ const nav = [
 const initials = computed(() =>
   (user.value?.name ?? '?').split(' ').map(p => p[0]).slice(0, 2).join('').toUpperCase()
 )
+
+const canSwitch = computed(() => workspaces.value.length > 1)
+
+// workspace switcher menu — active workspace gets a check, others a building icon
+const workspaceItems = computed(() => [
+  workspaces.value.map(w => ({
+    label: w.workspaceName,
+    icon: w.workspaceId === currentWorkspace.value?.workspaceId ? 'i-lucide-check' : 'i-lucide-building-2',
+    onSelect: () => setWorkspace(w.workspaceId)
+  }))
+])
 </script>
 
 <template>
@@ -20,20 +31,36 @@ const initials = computed(() =>
         <PerchLogo />
       </div>
 
+      <!-- workspace switcher -->
       <div class="px-3 py-3 border-b border-default">
-        <div class="flex items-center gap-2.5 rounded-lg px-2.5 py-2 bg-elevated/50 ring-1 ring-default">
-          <span class="grid place-items-center size-8 rounded-lg bg-amber-400/15 text-amber-400 text-xs font-bold ring-1 ring-amber-400/20">
-            {{ (primaryWorkspace?.workspaceName ?? 'W').charAt(0).toUpperCase() }}
-          </span>
-          <div class="min-w-0">
-            <p class="truncate text-sm font-medium text-highlighted">
-              {{ primaryWorkspace?.workspaceName ?? 'Workspace' }}
-            </p>
-            <p class="truncate text-[11px] text-dimmed font-mono">
-              {{ primaryWorkspace?.siteId }}
-            </p>
-          </div>
-        </div>
+        <UDropdownMenu
+          :items="workspaceItems"
+          :disabled="!canSwitch"
+          :content="{ align: 'start' }"
+          :ui="{ content: 'w-(--reka-dropdown-menu-trigger-width) min-w-52' }"
+        >
+          <button
+            class="w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 bg-elevated/50 ring-1 ring-default text-left transition-colors"
+            :class="canSwitch ? 'hover:bg-elevated cursor-pointer' : 'cursor-default'"
+          >
+            <span class="grid place-items-center size-8 shrink-0 rounded-lg bg-amber-400/15 text-amber-400 text-xs font-bold ring-1 ring-amber-400/20">
+              {{ (currentWorkspace?.workspaceName ?? 'W').charAt(0).toUpperCase() }}
+            </span>
+            <div class="min-w-0 flex-1">
+              <p class="truncate text-sm font-medium text-highlighted">
+                {{ currentWorkspace?.workspaceName ?? 'Workspace' }}
+              </p>
+              <p class="truncate text-[11px] text-dimmed font-mono">
+                {{ currentWorkspace?.siteId }}
+              </p>
+            </div>
+            <UIcon
+              v-if="canSwitch"
+              name="i-lucide-chevrons-up-down"
+              class="size-4 shrink-0 text-dimmed"
+            />
+          </button>
+        </UDropdownMenu>
       </div>
 
       <nav class="flex-1 p-3 space-y-0.5">
@@ -89,7 +116,7 @@ const initials = computed(() =>
       <header class="h-16 shrink-0 flex items-center justify-between gap-3 px-5 border-b border-default bg-default">
         <div class="flex items-center gap-2 md:hidden">
           <PerchLogo :show-text="false" />
-          <span class="font-display font-semibold text-highlighted">{{ primaryWorkspace?.workspaceName }}</span>
+          <span class="font-display font-semibold text-highlighted">{{ currentWorkspace?.workspaceName }}</span>
         </div>
         <div class="hidden md:block" />
         <div class="flex items-center gap-2">

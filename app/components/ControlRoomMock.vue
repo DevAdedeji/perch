@@ -153,10 +153,7 @@ function dot(status: string) {
         <div class="flex items-center justify-between px-4 py-3 border-b border-default">
           <span class="text-sm font-semibold text-highlighted">Open</span>
           <span class="flex items-center gap-1.5 text-[11px] text-amber-400">
-            <span class="relative flex size-2">
-              <span class="absolute inline-flex size-full rounded-full bg-amber-400 opacity-75 animate-ping" />
-              <span class="relative inline-flex size-2 rounded-full bg-amber-400" />
-            </span>
+            <span class="size-2 rounded-full bg-amber-400" />
             live
           </span>
         </div>
@@ -200,7 +197,6 @@ function dot(status: string) {
 
       <!-- conversation pane -->
       <section class="hidden lg:flex flex-col bg-grid relative overflow-hidden">
-        <span class="pointer-events-none absolute inset-x-0 top-11 h-px bg-linear-to-r from-transparent via-amber-400/50 to-transparent animate-scan" />
         <div class="flex items-center gap-3 px-5 py-3 border-b border-default bg-elevated/40">
           <span class="grid place-items-center size-9 rounded-lg bg-elevated ring-1 ring-default text-sm font-semibold text-muted">A</span>
           <div class="min-w-0">

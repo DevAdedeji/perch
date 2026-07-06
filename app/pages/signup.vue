@@ -8,11 +8,15 @@ useHead({ title: 'Create your account · Perch' })
 const schema = z.object({
   name: z.string().trim().min(1, 'Enter your name'),
   email: z.string().email('Enter a valid email'),
-  password: z.string().min(8, 'At least 8 characters')
+  password: z.string().min(8, 'At least 8 characters'),
+  confirmPassword: z.string().min(1, 'Confirm your password')
+}).refine(d => d.password === d.confirmPassword, {
+  message: 'Passwords do not match',
+  path: ['confirmPassword']
 })
 type Schema = z.output<typeof schema>
 
-const state = reactive({ name: '', email: '', password: '' })
+const state = reactive({ name: '', email: '', password: '', confirmPassword: '' })
 const loading = ref(false)
 const error = ref('')
 
@@ -26,7 +30,8 @@ async function onSubmit(event: FormSubmitEvent<Schema>) {
   loading.value = true
   error.value = ''
   try {
-    await $fetch('/api/auth/signup', { method: 'POST', body: event.data })
+    const { name, email, password } = event.data
+    await $fetch('/api/auth/signup', { method: 'POST', body: { name, email, password } })
     await refresh()
     await navigateTo(redirect.value)
   } catch (e) {
@@ -95,13 +100,19 @@ async function onSubmit(event: FormSubmitEvent<Schema>) {
           name="password"
           hint="Min. 8 characters"
         >
-          <UInput
+          <PasswordInput
             v-model="state.password"
-            type="password"
-            placeholder="••••••••"
             autocomplete="new-password"
-            size="lg"
-            class="w-full"
+          />
+        </UFormField>
+
+        <UFormField
+          label="Confirm password"
+          name="confirmPassword"
+        >
+          <PasswordInput
+            v-model="state.confirmPassword"
+            autocomplete="new-password"
           />
         </UFormField>
 

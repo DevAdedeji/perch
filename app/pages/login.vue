@@ -78,13 +78,9 @@ async function onSubmit(event: FormSubmitEvent<Schema>) {
           label="Password"
           name="password"
         >
-          <UInput
+          <PasswordInput
             v-model="state.password"
-            type="password"
-            placeholder="••••••••"
             autocomplete="current-password"
-            size="lg"
-            class="w-full"
           />
         </UFormField>
 

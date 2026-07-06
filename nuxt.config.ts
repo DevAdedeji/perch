@@ -16,7 +16,9 @@ export default defineNuxtConfig({
 
   runtimeConfig: {
     // server-only: Neon/Postgres connection string (read from .env)
-    databaseUrl: process.env.NEON_CONNECTION_STRING
+    databaseUrl: process.env.NEON_CONNECTION_STRING,
+    // HMAC secret for short-lived WebSocket auth tickets (reuse the session secret)
+    realtimeSecret: process.env.NUXT_SESSION_PASSWORD
   },
 
   routeRules: {
@@ -28,6 +30,12 @@ export default defineNuxtConfig({
   },
 
   compatibilityDate: '2026-06-30',
+
+  nitro: {
+    experimental: {
+      websocket: true
+    }
+  },
 
   eslint: {
     config: {
