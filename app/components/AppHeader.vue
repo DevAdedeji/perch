@@ -28,7 +28,7 @@ onBeforeUnmount(() => window.removeEventListener('scroll', onScroll))
     <UContainer>
       <div
         class="flex items-center justify-between gap-4 rounded-2xl px-3 sm:px-4 h-14 transition-all duration-300"
-        :class="scrolled
+        :class="(scrolled || mobileOpen)
           ? 'glass ring-1 ring-default shadow-lg shadow-black/5'
           : 'ring-1 ring-transparent'"
       >
@@ -66,7 +66,7 @@ onBeforeUnmount(() => window.removeEventListener('scroll', onScroll))
           </UButton>
           <UButton
             to="/signup"
-            color="primary"
+            color="neutral"
             size="md"
             trailing-icon="i-lucide-arrow-right"
             class="hidden sm:inline-flex font-medium"
@@ -93,7 +93,7 @@ onBeforeUnmount(() => window.removeEventListener('scroll', onScroll))
       >
         <div
           v-if="mobileOpen"
-          class="md:hidden mt-2 glass ring-1 ring-default rounded-2xl p-2"
+          class="md:hidden mt-2 bg-elevated ring-1 ring-default rounded-2xl p-2 shadow-xl shadow-black/10"
         >
           <UButton
             v-for="link in links"
@@ -118,7 +118,7 @@ onBeforeUnmount(() => window.removeEventListener('scroll', onScroll))
             </UButton>
             <UButton
               to="/signup"
-              color="primary"
+              color="neutral"
               block
             >
               Get started

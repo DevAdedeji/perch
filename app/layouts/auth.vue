@@ -4,11 +4,8 @@ const { loggedIn, logout } = useAuth()
 
 <template>
   <div class="relative min-h-screen flex flex-col">
-    <!-- ambient backdrop -->
-    <div class="pointer-events-none fixed inset-0 -z-10">
-      <div class="absolute inset-0 bg-grid [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_30%,transparent_100%)]" />
-      <div class="absolute top-[-15%] left-1/2 -translate-x-1/2 size-[520px] rounded-full bg-amber-400/15 blur-[130px]" />
-    </div>
+    <!-- ambient backdrop: faint grid only -->
+    <div class="pointer-events-none fixed inset-0 -z-10 bg-grid [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_25%,transparent_90%)]" />
 
     <header class="flex items-center justify-between px-5 sm:px-8 h-16">
       <NuxtLink

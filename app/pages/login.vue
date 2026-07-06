@@ -86,7 +86,7 @@ async function onSubmit(event: FormSubmitEvent<Schema>) {
 
         <UButton
           type="submit"
-          color="primary"
+          color="neutral"
           size="lg"
           block
           :loading="loading"
@@ -101,7 +101,7 @@ async function onSubmit(event: FormSubmitEvent<Schema>) {
       New to Perch?
       <NuxtLink
         to="/signup"
-        class="font-medium text-amber-500 hover:text-amber-400"
+        class="font-medium text-highlighted hover:text-highlighted"
       >Create an account</NuxtLink>
     </p>
   </div>

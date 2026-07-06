@@ -16,6 +16,12 @@ export function createDb(connectionString: string) {
   if (!connectionString) {
     throw new Error('[@perch/db] DATABASE_URL is required to create a database client')
   }
-  const sql = postgres(connectionString, { prepare: false })
+  const sql = postgres(connectionString, {
+    prepare: false,
+    // recycle connections before Neon closes idle ones (avoids ECONNRESET churn)
+    idle_timeout: 20,
+    max_lifetime: 60 * 30,
+    connect_timeout: 10
+  })
   return drizzle(sql, { schema })
 }

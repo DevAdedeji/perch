@@ -83,12 +83,9 @@ const plans = [
   <main class="relative">
     <!-- ═══════════════ HERO ═══════════════ -->
     <section class="relative pt-36 pb-20 sm:pt-44 sm:pb-28 overflow-hidden">
-      <!-- backdrop -->
+      <!-- backdrop: just a faint grid, faded out -->
       <div class="pointer-events-none absolute inset-0 -z-10">
-        <div class="absolute inset-0 bg-grid [mask-image:radial-gradient(ellipse_70%_60%_at_50%_0%,#000_40%,transparent_100%)]" />
-        <div class="absolute top-[-10%] left-1/2 -translate-x-1/2 size-[560px] rounded-full bg-amber-400/25 blur-[120px]" />
-        <div class="absolute top-[10%] right-[8%] size-[380px] rounded-full bg-orange-500/12 blur-[120px]" />
-        <div class="absolute top-[20%] left-[6%] size-[320px] rounded-full bg-amber-500/15 blur-[110px]" />
+        <div class="absolute inset-0 bg-grid [mask-image:radial-gradient(ellipse_70%_55%_at_50%_0%,#000_30%,transparent_85%)]" />
       </div>
 
       <UContainer>
@@ -96,7 +93,7 @@ const plans = [
           <!-- copy -->
           <div>
             <div class="inline-flex items-center gap-2 rounded-full glass ring-1 ring-default pl-1.5 pr-3 py-1.5 text-xs">
-              <span class="rounded-full bg-amber-400/15 px-2 py-0.5 font-medium text-amber-400">New</span>
+              <span class="rounded-full bg-inverted/15 px-2 py-0.5 font-medium text-highlighted">New</span>
               <span class="text-muted">Real-time support, owned end to end</span>
               <UIcon
                 name="i-lucide-arrow-right"
@@ -106,7 +103,7 @@ const plans = [
 
             <h1 class="mt-6 font-display text-5xl sm:text-6xl lg:text-[4.25rem] font-bold leading-[1.02] tracking-tight text-highlighted">
               Your team, perched on
-              <span class="text-gradient">every conversation.</span>
+              <span class="text-accent">every conversation.</span>
             </h1>
 
             <p class="mt-6 max-w-xl text-lg text-muted leading-relaxed">
@@ -119,9 +116,9 @@ const plans = [
               <UButton
                 to="/signup"
                 size="xl"
-                color="primary"
+                color="neutral"
                 trailing-icon="i-lucide-arrow-right"
-                class="font-semibold shadow-lg shadow-amber-500/20"
+                class="font-semibold shadow-lg shadow-black/20"
               >
                 Get started free
               </UButton>
@@ -139,24 +136,21 @@ const plans = [
             <div class="mt-7 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-muted">
               <span class="flex items-center gap-1.5"><UIcon
                 name="i-lucide-check"
-                class="size-4 text-amber-400"
+                class="size-4 text-highlighted"
               /> No credit card</span>
               <span class="flex items-center gap-1.5"><UIcon
                 name="i-lucide-check"
-                class="size-4 text-amber-400"
+                class="size-4 text-highlighted"
               /> One script tag</span>
               <span class="flex items-center gap-1.5"><UIcon
                 name="i-lucide-check"
-                class="size-4 text-amber-400"
+                class="size-4 text-highlighted"
               /> Under 2 minutes to live</span>
             </div>
           </div>
 
           <!-- visual -->
-          <div
-            class="relative"
-          >
-            <div class="absolute inset-0 -z-10 blur-2xl bg-amber-400/10 rounded-full" />
+          <div class="relative">
             <HeroChat />
           </div>
         </div>
@@ -189,8 +183,8 @@ const plans = [
         <div
           class="max-w-2xl"
         >
-          <p class="flex items-center gap-2 text-sm font-medium text-amber-400">
-            <span class="h-px w-8 bg-amber-400" /> Three pillars
+          <p class="flex items-center gap-2 text-sm font-medium text-highlighted">
+            <span class="h-px w-8 bg-inverted" /> Three pillars
           </p>
           <h2 class="mt-4 font-display text-4xl sm:text-5xl font-bold tracking-tight text-highlighted">
             Depth where it counts.
@@ -206,10 +200,10 @@ const plans = [
             :key="p.title"
             class="group relative rounded-2xl border-glow bg-elevated/30 glass p-7 transition-transform duration-300 hover:-translate-y-1"
           >
-            <div class="grid place-items-center size-12 rounded-xl bg-amber-400/10 ring-1 ring-amber-400/20">
+            <div class="grid place-items-center size-12 rounded-xl bg-inverted/10 ring-1 ring-inverted/20">
               <UIcon
                 :name="p.icon"
-                class="size-6 text-amber-400"
+                class="size-6 text-highlighted"
               />
             </div>
             <h3 class="mt-5 font-display text-xl font-semibold text-highlighted">
@@ -218,7 +212,7 @@ const plans = [
             <p class="mt-2.5 text-sm text-muted leading-relaxed">
               {{ p.desc }}
             </p>
-            <p class="mt-5 inline-block rounded-lg bg-default/70 ring-1 ring-default px-2.5 py-1 font-mono text-xs text-amber-400">
+            <p class="mt-5 inline-block rounded-lg bg-default/70 ring-1 ring-default px-2.5 py-1 font-mono text-xs text-highlighted">
               {{ p.tag }}
             </p>
           </div>
@@ -229,12 +223,12 @@ const plans = [
           <div
             v-for="f in features"
             :key="f.title"
-            class="group relative rounded-2xl bg-elevated/20 ring-1 ring-default p-6 hover:ring-amber-400/30 transition-colors"
+            class="group relative rounded-2xl bg-elevated/20 ring-1 ring-default p-6 hover:ring-inverted/30 transition-colors"
           >
             <div class="flex items-center gap-3">
               <UIcon
                 :name="f.icon"
-                class="size-5 text-amber-400"
+                class="size-5 text-highlighted"
               />
               <h3 class="font-medium text-highlighted">
                 {{ f.title }}
@@ -251,17 +245,14 @@ const plans = [
     <!-- ═══════════════ CONTROL ROOM ═══════════════ -->
     <section
       id="control-room"
-      class="relative py-20 sm:py-28 overflow-hidden"
+      class="relative py-20 sm:py-28"
     >
-      <div class="pointer-events-none absolute inset-0 -z-10">
-        <div class="absolute bottom-0 left-1/2 -translate-x-1/2 size-[600px] rounded-full bg-amber-400/10 blur-[130px]" />
-      </div>
       <UContainer>
         <!-- header + feature bullets -->
         <div class="grid lg:grid-cols-[1fr_1.1fr] gap-10 lg:gap-16 items-end">
           <div>
-            <p class="flex items-center gap-2 text-sm font-medium text-amber-400">
-              <span class="h-px w-8 bg-amber-400" /> The Control Room
+            <p class="flex items-center gap-2 text-sm font-medium text-highlighted">
+              <span class="h-px w-8 bg-inverted" /> The Control Room
             </p>
             <h2 class="mt-4 font-display text-4xl sm:text-5xl font-bold tracking-tight text-highlighted">
               Where your team perches.
@@ -285,10 +276,10 @@ const plans = [
               :key="item.t"
               class="rounded-xl bg-elevated/20 ring-1 ring-default p-4"
             >
-              <span class="grid place-items-center size-9 rounded-lg bg-amber-400/10 ring-1 ring-amber-400/20">
+              <span class="grid place-items-center size-9 rounded-lg bg-inverted/10 ring-1 ring-inverted/20">
                 <UIcon
                   :name="item.icon"
-                  class="size-5 text-amber-400"
+                  class="size-5 text-highlighted"
                 />
               </span>
               <p class="mt-3 font-medium text-sm text-highlighted">
@@ -322,7 +313,7 @@ const plans = [
               :key="s.label"
               class="p-8 text-center"
             >
-              <p class="font-display text-4xl sm:text-5xl font-bold text-gradient">
+              <p class="font-display text-4xl sm:text-5xl font-bold text-accent">
                 {{ s.value }}
               </p>
               <p class="mt-2 text-sm text-muted">
@@ -343,8 +334,8 @@ const plans = [
         <div
           class="text-center max-w-2xl mx-auto"
         >
-          <p class="flex items-center justify-center gap-2 text-sm font-medium text-amber-400">
-            <span class="h-px w-8 bg-amber-400" /> How it works <span class="h-px w-8 bg-amber-400" />
+          <p class="flex items-center justify-center gap-2 text-sm font-medium text-highlighted">
+            <span class="h-px w-8 bg-inverted" /> How it works <span class="h-px w-8 bg-inverted" />
           </p>
           <h2 class="mt-4 font-display text-4xl sm:text-5xl font-bold tracking-tight text-highlighted">
             Live in three steps.
@@ -353,7 +344,7 @@ const plans = [
 
         <div class="relative mt-16 grid md:grid-cols-3 gap-6">
           <!-- connecting line -->
-          <div class="hidden md:block absolute top-9 left-[16%] right-[16%] h-px bg-linear-to-r from-transparent via-amber-400/40 to-transparent" />
+          <div class="hidden md:block absolute top-9 left-[16%] right-[16%] h-px bg-default" />
           <div
             v-for="(s, i) in steps"
             :key="s.n"
@@ -362,9 +353,9 @@ const plans = [
             <div class="relative mx-auto grid place-items-center size-18 rounded-2xl border-glow bg-elevated/50 glass">
               <UIcon
                 :name="s.icon"
-                class="size-7 text-amber-400"
+                class="size-7 text-highlighted"
               />
-              <span class="absolute -top-2 -right-2 grid place-items-center size-6 rounded-full bg-amber-500 text-[11px] font-bold text-white font-mono">{{ i + 1 }}</span>
+              <span class="absolute -top-2 -right-2 grid place-items-center size-6 rounded-full bg-inverted text-[11px] font-bold text-inverted font-mono">{{ i + 1 }}</span>
             </div>
             <h3 class="mt-5 font-display text-lg font-semibold text-highlighted">
               {{ s.title }}
@@ -395,7 +386,7 @@ const plans = [
                 label="Copy"
               />
             </div>
-            <pre class="p-5 text-sm font-mono leading-relaxed overflow-x-auto"><code><span class="text-dimmed">&lt;</span><span class="text-amber-400">script</span> <span class="text-orange-300">src</span>=<span class="text-muted">"https://perch.app/widget.js"</span> <span class="text-orange-300">data-site-id</span>=<span class="text-muted">"ws_abc123"</span> <span class="text-orange-300">async</span><span class="text-dimmed">&gt;&lt;/</span><span class="text-amber-400">script</span><span class="text-dimmed">&gt;</span></code></pre>
+            <pre class="p-5 text-sm font-mono leading-relaxed overflow-x-auto"><code><span class="text-dimmed">&lt;</span><span class="text-highlighted">script</span> <span class="text-highlighted">src</span>=<span class="text-muted">"https://perch.app/widget.js"</span> <span class="text-highlighted">data-site-id</span>=<span class="text-muted">"ws_abc123"</span> <span class="text-highlighted">async</span><span class="text-dimmed">&gt;&lt;/</span><span class="text-highlighted">script</span><span class="text-dimmed">&gt;</span></code></pre>
           </div>
         </div>
       </UContainer>
@@ -404,11 +395,8 @@ const plans = [
     <!-- ═══════════════ PRICING ═══════════════ -->
     <section
       id="pricing"
-      class="relative py-20 sm:py-28 overflow-hidden"
+      class="relative py-20 sm:py-28"
     >
-      <div class="pointer-events-none absolute inset-0 -z-10">
-        <div class="absolute top-1/4 left-1/2 -translate-x-1/2 size-[500px] rounded-full bg-amber-400/12 blur-[130px]" />
-      </div>
       <UContainer>
         <div
           class="text-center max-w-2xl mx-auto"
@@ -427,12 +415,12 @@ const plans = [
             :key="plan.name"
             class="relative rounded-2xl p-7 transition-transform duration-300 hover:-translate-y-1"
             :class="plan.featured
-              ? 'border-glow bg-elevated/50 glass shadow-2xl shadow-amber-500/10 lg:-mt-4 lg:mb-4'
+              ? 'border-glow bg-elevated/50 glass shadow-2xl shadow-black/10 lg:-mt-4 lg:mb-4'
               : 'ring-1 ring-default bg-elevated/20'"
           >
             <span
               v-if="plan.featured"
-              class="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-amber-500 px-3 py-1 text-xs font-semibold text-white shadow-lg shadow-amber-500/30"
+              class="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-inverted px-3 py-1 text-xs font-semibold text-inverted shadow-lg shadow-black/30"
             >Most popular</span>
 
             <p class="font-display text-lg font-semibold text-highlighted">
@@ -447,7 +435,7 @@ const plans = [
             </p>
 
             <UButton
-              :color="plan.featured ? 'primary' : 'neutral'"
+              :color="plan.featured ? 'neutral' : 'neutral'"
               :variant="plan.featured ? 'solid' : 'subtle'"
               block
               size="lg"
@@ -465,7 +453,7 @@ const plans = [
               >
                 <UIcon
                   name="i-lucide-check"
-                  class="mt-0.5 size-4 shrink-0 text-amber-400"
+                  class="mt-0.5 size-4 shrink-0 text-highlighted"
                 />
                 <span class="text-muted">{{ feat }}</span>
               </li>
@@ -481,15 +469,12 @@ const plans = [
         <div
           class="relative overflow-hidden rounded-3xl border-glow bg-elevated/40 glass px-8 py-16 sm:px-16 text-center"
         >
-          <div class="pointer-events-none absolute inset-0 -z-10">
-            <div class="absolute inset-0 bg-grid [mask-image:radial-gradient(ellipse_60%_80%_at_50%_50%,#000,transparent)]" />
-            <div class="absolute top-0 left-1/2 -translate-x-1/2 size-[400px] rounded-full bg-amber-400/20 blur-[100px]" />
-          </div>
+          <div class="pointer-events-none absolute inset-0 -z-10 bg-grid [mask-image:radial-gradient(ellipse_60%_80%_at_50%_50%,#000,transparent)]" />
 
-          <div class="mx-auto mb-6 grid place-items-center size-16 rounded-2xl bg-amber-400/10 ring-1 ring-amber-400/20">
+          <div class="mx-auto mb-6 grid place-items-center size-16 rounded-2xl bg-inverted/10 ring-1 ring-inverted/20">
             <UIcon
               name="i-lucide-bird"
-              class="size-8 text-amber-400"
+              class="size-8 text-highlighted"
             />
           </div>
           <h2 class="font-display text-4xl sm:text-5xl font-bold tracking-tight text-highlighted">
@@ -502,9 +487,9 @@ const plans = [
             <UButton
               to="/signup"
               size="xl"
-              color="primary"
+              color="neutral"
               trailing-icon="i-lucide-arrow-right"
-              class="font-semibold shadow-lg shadow-amber-500/20"
+              class="font-semibold shadow-lg shadow-black/20"
             >
               Get started free
             </UButton>

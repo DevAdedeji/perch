@@ -116,7 +116,7 @@ const joinRedirect = `/join/${token}`
       <!-- logged in → accept -->
       <UButton
         v-if="loggedIn"
-        color="primary"
+        color="neutral"
         size="lg"
         block
         class="mt-6 font-medium"
@@ -135,7 +135,7 @@ const joinRedirect = `/join/${token}`
       >
         <UButton
           :to="`/signup?redirect=${encodeURIComponent(joinRedirect)}`"
-          color="primary"
+          color="neutral"
           size="lg"
           block
           class="font-medium"

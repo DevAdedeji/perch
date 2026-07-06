@@ -1,8 +1,8 @@
 export default defineAppConfig({
   ui: {
     colors: {
-      primary: 'amber',
-      neutral: 'zinc'
+      primary: 'slate',
+      neutral: 'slate'
     },
     button: {
       // by default Nuxt UI pins leading/trailing icons to the edges on `block`
@@ -16,6 +16,11 @@ export default defineAppConfig({
           }
         }
       ]
+    },
+    dropdownMenu: {
+      slots: {
+        content: 'min-w-54'
+      }
     }
   }
 })

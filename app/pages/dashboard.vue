@@ -18,6 +18,19 @@ const reply = ref('')
 const internalNote = ref(false)
 const sending = ref(false)
 
+function tabCount(value: InboxFilter): number {
+  const c = cr.counts.value
+  return value === 'all' ? c.unassigned + c.open + c.resolved : c[value]
+}
+
+// keep the thread pinned to the newest message
+const threadEl = ref<HTMLElement | null>(null)
+watch(() => cr.messages.value.length, () => {
+  nextTick(() => {
+    if (threadEl.value) threadEl.value.scrollTop = threadEl.value.scrollHeight
+  })
+})
+
 function initials(name: string | null, fallback = 'V') {
   return (name ?? fallback).trim().split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase() || fallback
 }
@@ -46,7 +59,7 @@ async function onClaim(id: string) {
     toast.add({
       title: 'Already claimed',
       description: owner ? `Taken by ${cr.memberName(owner) ?? 'another agent'}` : 'Another agent got there first',
-      color: 'warning'
+      color: 'neutral'
     })
   }
 }
@@ -54,8 +67,11 @@ async function onClaim(id: string) {
 
 <template>
   <div class="flex h-full">
-    <!-- ── inbox list ── -->
-    <div class="w-80 lg:w-96 shrink-0 flex flex-col border-r border-default bg-default">
+    <!-- ── inbox list (full-width on mobile; hidden once a chat is open) ── -->
+    <div
+      class="w-full md:w-80 lg:w-96 shrink-0 flex-col border-r border-default bg-default"
+      :class="cr.activeId.value ? 'hidden md:flex' : 'flex'"
+    >
       <div class="px-4 pt-4 pb-3 border-b border-default">
         <div class="flex items-center justify-between gap-2">
           <h1 class="font-display text-lg font-bold text-highlighted">
@@ -63,11 +79,11 @@ async function onClaim(id: string) {
           </h1>
           <span
             class="flex items-center gap-1.5 text-[11px]"
-            :class="cr.status.value === 'open' ? 'text-amber-500' : 'text-dimmed'"
+            :class="cr.status.value === 'open' ? 'text-green-600 dark:text-green-500' : 'text-dimmed'"
           >
             <span
               class="size-1.5 rounded-full"
-              :class="cr.status.value === 'open' ? 'bg-amber-400' : 'bg-zinc-400'"
+              :class="cr.status.value === 'open' ? 'bg-green-500 animate-pulse' : 'bg-zinc-400'"
             />
             {{ cr.status.value === 'open' ? 'live' : 'connecting…' }}
           </span>
@@ -77,26 +93,28 @@ async function onClaim(id: string) {
           <button
             v-for="f in filters"
             :key="f.value"
-            class="relative rounded-lg px-2.5 py-1 text-xs font-medium transition-colors"
-            :class="cr.filter.value === f.value ? 'bg-amber-400/10 text-amber-500' : 'text-muted hover:text-highlighted'"
+            class="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium transition-colors"
+            :class="cr.filter.value === f.value ? 'bg-inverted/10 text-highlighted' : 'text-muted hover:text-highlighted'"
             @click="cr.filter.value = f.value"
           >
             {{ f.label }}
             <span
-              v-if="f.value === 'unassigned' && cr.unassignedCount.value > 0"
-              class="ml-1 rounded-full bg-amber-400 text-stone-900 px-1.5 text-[10px] font-bold"
-            >{{ cr.unassignedCount.value }}</span>
+              class="rounded-full px-1.5 text-[10px] font-semibold tabular-nums"
+              :class="f.value === 'unassigned' && tabCount('unassigned') > 0
+                ? 'bg-inverted text-inverted'
+                : cr.filter.value === f.value ? 'bg-inverted/15 text-highlighted' : 'bg-elevated text-dimmed'"
+            >{{ tabCount(f.value) }}</span>
           </button>
         </div>
       </div>
 
       <div class="flex-1 overflow-y-auto">
         <div
-          v-if="cr.loadingList.value && !cr.conversations.value.length"
+          v-if="cr.loadingList.value"
           class="p-4 space-y-3"
         >
           <USkeleton
-            v-for="n in 5"
+            v-for="n in 6"
             :key="n"
             class="h-14 w-full"
           />
@@ -106,10 +124,10 @@ async function onClaim(id: string) {
           v-else-if="!cr.conversations.value.length"
           class="p-8 text-center"
         >
-          <div class="mx-auto grid place-items-center size-12 rounded-xl bg-amber-400/15 ring-1 ring-amber-400/25">
+          <div class="mx-auto grid place-items-center size-12 rounded-xl bg-inverted/15 ring-1 ring-inverted/25">
             <UIcon
               name="i-lucide-inbox"
-              class="size-6 text-amber-400"
+              class="size-6 text-highlighted"
             />
           </div>
           <p class="mt-3 text-sm font-medium text-highlighted">
@@ -130,12 +148,12 @@ async function onClaim(id: string) {
           >
             <button
               class="relative w-full flex gap-3 px-4 py-3 text-left transition-colors"
-              :class="cr.activeId.value === c.id ? 'bg-amber-400/6' : 'hover:bg-elevated/50'"
+              :class="cr.activeId.value === c.id ? 'bg-inverted/6' : 'hover:bg-elevated/50'"
               @click="cr.select(c.id)"
             >
               <span
                 v-if="cr.activeId.value === c.id"
-                class="absolute inset-y-0 left-0 w-0.5 bg-amber-400"
+                class="absolute inset-y-0 left-0 w-0.5 bg-inverted"
               />
               <span class="grid place-items-center size-9 shrink-0 rounded-lg bg-elevated ring-1 ring-default text-xs font-semibold text-muted">
                 {{ initials(c.visitor.name) }}
@@ -150,7 +168,7 @@ async function onClaim(id: string) {
                 </p>
                 <div class="mt-1.5 flex items-center gap-1.5">
                   <UBadge
-                    :color="c.status === 'unassigned' ? 'warning' : c.status === 'open' ? 'primary' : 'neutral'"
+                    :color="c.status === 'unassigned' ? 'warning' : c.status === 'open' ? 'info' : 'success'"
                     variant="subtle"
                     size="sm"
                     class="capitalize"
@@ -165,7 +183,7 @@ async function onClaim(id: string) {
               </div>
               <span
                 v-if="c.unread"
-                class="mt-1.5 size-2 shrink-0 rounded-full bg-amber-400"
+                class="mt-1.5 size-2 shrink-0 rounded-full bg-inverted"
               />
             </button>
           </li>
@@ -173,8 +191,11 @@ async function onClaim(id: string) {
       </div>
     </div>
 
-    <!-- ── conversation pane ── -->
-    <div class="flex-1 flex flex-col min-w-0 bg-elevated/10">
+    <!-- ── conversation pane (full-screen on mobile when a chat is open) ── -->
+    <div
+      class="flex-1 flex-col min-w-0 bg-elevated/10"
+      :class="cr.activeId.value ? 'flex' : 'hidden md:flex'"
+    >
       <div
         v-if="!cr.activeConversation.value"
         class="flex-1 grid place-items-center p-8"
@@ -194,7 +215,15 @@ async function onClaim(id: string) {
 
       <template v-else>
         <!-- header -->
-        <div class="h-16 shrink-0 flex items-center gap-3 px-5 border-b border-default bg-default">
+        <div class="h-16 shrink-0 flex items-center gap-3 px-4 sm:px-5 border-b border-default bg-default">
+          <UButton
+            class="md:hidden -ml-1"
+            color="neutral"
+            variant="ghost"
+            icon="i-lucide-arrow-left"
+            aria-label="Back to inbox"
+            @click="cr.deselect()"
+          />
           <span class="grid place-items-center size-9 rounded-lg bg-elevated ring-1 ring-default text-sm font-semibold text-muted">
             {{ initials(cr.activeConversation.value.visitor.name) }}
           </span>
@@ -210,13 +239,13 @@ async function onClaim(id: string) {
           <div class="ml-auto flex items-center gap-2">
             <span
               v-if="cr.activeConversation.value.assignedAgentId"
-              class="rounded-md bg-amber-400/10 px-2.5 py-1 text-[11px] font-medium text-amber-500 ring-1 ring-amber-400/20"
+              class="rounded-md bg-inverted/10 px-2.5 py-1 text-[11px] font-medium text-highlighted ring-1 ring-inverted/20"
             >{{ cr.memberName(cr.activeConversation.value.assignedAgentId) }}</span>
 
             <UButton
               v-if="cr.activeConversation.value.status === 'unassigned'"
               size="sm"
-              color="primary"
+              color="neutral"
               icon="i-lucide-hand"
               @click="onClaim(cr.activeConversation.value.id)"
             >
@@ -246,8 +275,20 @@ async function onClaim(id: string) {
           </div>
         </div>
 
+        <!-- thread loading -->
+        <div
+          v-if="cr.loadingThread.value"
+          class="flex-1 px-5 py-5 space-y-3 bg-grid"
+        >
+          <USkeleton class="h-9 w-44 rounded-2xl rounded-bl-md" />
+          <USkeleton class="h-9 w-56 rounded-2xl rounded-br-md ml-auto" />
+          <USkeleton class="h-9 w-40 rounded-2xl rounded-bl-md" />
+          <USkeleton class="h-16 w-52 rounded-2xl rounded-br-md ml-auto" />
+        </div>
+
         <!-- thread -->
         <div
+          v-else
           ref="threadEl"
           class="flex-1 overflow-y-auto px-5 py-5 space-y-3 bg-grid"
         >
@@ -267,8 +308,8 @@ async function onClaim(id: string) {
               v-else-if="m.is_internal_note"
               class="flex justify-center"
             >
-              <div class="max-w-[80%] rounded-xl bg-amber-400/10 ring-1 ring-amber-400/25 px-3.5 py-2 text-sm text-highlighted">
-                <p class="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide text-amber-500 mb-1">
+              <div class="max-w-[80%] rounded-xl bg-inverted/10 ring-1 ring-inverted/25 px-3.5 py-2 text-sm text-highlighted">
+                <p class="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide text-highlighted mb-1">
                   <UIcon
                     name="i-lucide-lock"
                     class="size-3"
@@ -285,12 +326,12 @@ async function onClaim(id: string) {
             >
               <span
                 v-if="m.sender_type === 'agent'"
-                class="grid place-items-center size-6 shrink-0 rounded-lg bg-amber-400/15 ring-1 ring-amber-400/25 text-[10px] font-semibold text-amber-500"
+                class="grid place-items-center size-6 shrink-0 rounded-lg bg-inverted/15 ring-1 ring-inverted/25 text-[10px] font-semibold text-highlighted"
               >{{ initials(cr.memberName(m.sender_id), 'A') }}</span>
               <div
                 class="max-w-[72%] rounded-2xl px-3.5 py-2 text-sm leading-snug"
                 :class="m.sender_type === 'agent'
-                  ? 'bg-amber-500 text-white rounded-br-md'
+                  ? 'bg-inverted text-inverted rounded-br-md'
                   : 'bg-default ring-1 ring-default text-highlighted rounded-bl-md'"
               >
                 {{ m.content }}
@@ -313,7 +354,7 @@ async function onClaim(id: string) {
         <div class="shrink-0 border-t border-default bg-default p-3">
           <div
             class="rounded-xl ring-1 transition-colors"
-            :class="internalNote ? 'ring-amber-400/40 bg-amber-400/5' : 'ring-default bg-elevated/40'"
+            :class="internalNote ? 'ring-inverted/40 bg-inverted/5' : 'ring-default bg-elevated/40'"
           >
             <UTextarea
               v-model="reply"
@@ -331,12 +372,12 @@ async function onClaim(id: string) {
               />
               <span
                 class="text-xs"
-                :class="internalNote ? 'text-amber-500 font-medium' : 'text-muted'"
+                :class="internalNote ? 'text-highlighted font-medium' : 'text-muted'"
               >Internal note</span>
               <UButton
                 class="ml-auto"
                 size="sm"
-                :color="internalNote ? 'warning' : 'primary'"
+                :color="internalNote ? 'neutral' : 'neutral'"
                 icon="i-lucide-send-horizontal"
                 :loading="sending"
                 :disabled="!reply.trim()"

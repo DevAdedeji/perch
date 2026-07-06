@@ -18,8 +18,7 @@ const year = new Date().getFullYear()
 </script>
 
 <template>
-  <footer class="relative mt-24 border-t border-default overflow-hidden">
-    <div class="absolute inset-x-0 -top-px h-px bg-linear-to-r from-transparent via-amber-400/60 to-transparent" />
+  <footer class="relative mt-24 border-t border-default">
     <UContainer class="py-14">
       <div class="grid gap-10 lg:grid-cols-5">
         <div class="lg:col-span-2">
@@ -67,7 +66,7 @@ const year = new Date().getFullYear()
           © {{ year }} Perch. A portfolio build, made with care.
         </p>
         <p class="flex items-center gap-2 text-sm text-dimmed">
-          <span class="size-2 rounded-full bg-amber-400" />
+          <span class="size-2 rounded-full bg-green-500" />
           All systems operational
         </p>
       </div>

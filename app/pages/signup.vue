@@ -118,7 +118,7 @@ async function onSubmit(event: FormSubmitEvent<Schema>) {
 
         <UButton
           type="submit"
-          color="primary"
+          color="neutral"
           size="lg"
           block
           :loading="loading"
@@ -133,7 +133,7 @@ async function onSubmit(event: FormSubmitEvent<Schema>) {
       Already have an account?
       <NuxtLink
         to="/login"
-        class="font-medium text-amber-500 hover:text-amber-400"
+        class="font-medium text-highlighted hover:text-highlighted"
       >Sign in</NuxtLink>
     </p>
   </div>

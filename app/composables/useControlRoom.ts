@@ -40,9 +40,15 @@ export function useControlRoom() {
   const loadingThread = ref(false)
   const visitorTyping = ref(false)
 
+  // per-status counts for the tabs — fetched independently of the active filter
+  const counts = ref({ unassigned: 0, open: 0, resolved: 0 })
+
   const workspaceId = computed(() => currentWorkspace.value?.workspaceId ?? null)
   const activeConversation = computed(() => conversations.value.find(c => c.id === activeId.value) ?? null)
-  const unassignedCount = computed(() => conversations.value.filter(c => c.status === 'unassigned').length)
+
+  // monotonic request tokens so a slow response never overwrites a newer selection
+  let listSeq = 0
+  let threadSeq = 0
 
   function memberName(id: string | null): string | null {
     if (!id) return null
@@ -54,15 +60,27 @@ export function useControlRoom() {
   }
 
   /* ── loaders ─────────────────────────────────────────────── */
-  async function loadConversations() {
+  // `showLoader` is used for user-driven loads (tab switch, workspace change);
+  // live-event refreshes pass nothing so the list updates without flashing skeletons.
+  async function loadConversations({ showLoader = false } = {}) {
     if (!workspaceId.value) return
-    loadingList.value = true
+    const seq = ++listSeq
+    if (showLoader) loadingList.value = true
     try {
       const query = filter.value === 'all' ? '' : `?status=${filter.value}`
-      conversations.value = await $fetch<InboxItem[]>(`/api/workspaces/${workspaceId.value}/conversations${query}`)
+      const data = await $fetch<InboxItem[]>(`/api/workspaces/${workspaceId.value}/conversations${query}`)
+      if (seq !== listSeq) return // a newer load superseded this one
+      conversations.value = data
     } finally {
-      loadingList.value = false
+      if (seq === listSeq) loadingList.value = false
     }
+  }
+
+  async function loadCounts() {
+    if (!workspaceId.value) return
+    counts.value = await $fetch<{ unassigned: number, open: number, resolved: number }>(
+      `/api/workspaces/${workspaceId.value}/conversation-counts`
+    )
   }
 
   async function loadMembers() {
@@ -71,19 +89,31 @@ export function useControlRoom() {
   }
 
   async function select(id: string) {
-    if (activeId.value && activeId.value !== id) rt.unsubscribe(channels.conversation(activeId.value))
+    if (activeId.value === id) return
+    if (activeId.value) rt.unsubscribe(channels.conversation(activeId.value))
     activeId.value = id
-    visitorTyping.value = false
-    loadingThread.value = true
-    try {
-      messages.value = await $fetch<MessageDTO[]>(`/api/conversations/${id}/messages`)
-    } finally {
-      loadingThread.value = false
-    }
     rt.subscribe(channels.conversation(id))
-    await $fetch(`/api/conversations/${id}/read`, { method: 'POST' }).catch(() => {})
-    const item = conversations.value.find(c => c.id === id)
-    if (item) item.unread = false
+    visitorTyping.value = false
+    messages.value = [] // clear the previous thread immediately so it can't linger
+    loadingThread.value = true
+
+    const seq = ++threadSeq
+    try {
+      const data = await $fetch<MessageDTO[]>(`/api/conversations/${id}/messages`)
+      if (seq !== threadSeq) return // switched to another chat mid-load
+      messages.value = data
+      await $fetch(`/api/conversations/${id}/read`, { method: 'POST' }).catch(() => {})
+      const item = conversations.value.find(c => c.id === id)
+      if (item) item.unread = false
+    } finally {
+      if (seq === threadSeq) loadingThread.value = false
+    }
+  }
+
+  function deselect() {
+    if (activeId.value) rt.unsubscribe(channels.conversation(activeId.value))
+    activeId.value = null
+    messages.value = []
   }
 
   /* ── actions ─────────────────────────────────────────────── */
@@ -112,6 +142,7 @@ export function useControlRoom() {
       case 'conversation.new':
         // reload to pick up visitor name + preview + unread in one shot
         loadConversations()
+        loadCounts()
         break
       case 'conversation.updated': {
         const c = conversations.value.find(x => x.id === ev.payload.id)
@@ -121,7 +152,8 @@ export function useControlRoom() {
           c.lastMessageAt = ev.payload.last_message_at
           resort()
         }
-        // a status change may move it out of the current filter
+        // a status change moves it between tabs — refresh counts, and the list if filtered
+        loadCounts()
         if (filter.value !== 'all') loadConversations()
         break
       }
@@ -151,13 +183,18 @@ export function useControlRoom() {
   /* ── lifecycle ───────────────────────────────────────────── */
   let off: (() => void) | undefined
 
+  function loadAll() {
+    loadConversations({ showLoader: true })
+    loadCounts()
+    loadMembers()
+  }
+
   onMounted(() => {
     rt.connect()
     off = rt.on(applyEvent)
     if (workspaceId.value) {
       rt.subscribe(channels.workspace(workspaceId.value))
-      loadConversations()
-      loadMembers()
+      loadAll()
     }
   })
 
@@ -173,14 +210,14 @@ export function useControlRoom() {
     activeId.value = null
     messages.value = []
     conversations.value = []
+    counts.value = { unassigned: 0, open: 0, resolved: 0 }
     if (next) {
       rt.subscribe(channels.workspace(next))
-      loadConversations()
-      loadMembers()
+      loadAll()
     }
   })
 
-  watch(filter, loadConversations)
+  watch(filter, () => loadConversations({ showLoader: true }))
 
   return {
     conversations,
@@ -192,10 +229,11 @@ export function useControlRoom() {
     loadingList,
     loadingThread,
     visitorTyping,
-    unassignedCount,
+    counts,
     status: rt.status,
     memberName,
     select,
+    deselect,
     sendReply,
     claim,
     resolve,

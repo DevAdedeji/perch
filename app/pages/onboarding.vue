@@ -10,8 +10,8 @@ const steps = ['Workspace', 'Invite team', 'You’re live'] as const
 const step = ref(0)
 
 /* ── step 1: workspace ─────────────────────────────── */
-const swatches = ['#f59e0b', '#f97316', '#f43f5e', '#ec4899', '#8b5cf6', '#6366f1', '#0ea5e9', '#10b981']
-const form = reactive({ name: '', color: '#f59e0b' })
+const swatches = ['#8b5cf6', '#6366f1', '#f43f5e', '#ec4899', '#f59e0b', '#f97316', '#0ea5e9', '#10b981']
+const form = reactive({ name: '', color: '#8b5cf6' })
 const creating = ref(false)
 const createError = ref('')
 
@@ -111,7 +111,7 @@ async function finish() {
       >
         <span
           class="grid place-items-center size-7 rounded-full text-xs font-semibold ring-1 transition-colors"
-          :class="i <= step ? 'bg-amber-400 text-stone-900 ring-amber-400' : 'bg-elevated text-dimmed ring-default'"
+          :class="i <= step ? 'bg-inverted text-inverted ring-inverted' : 'bg-elevated text-dimmed ring-default'"
         >
           <UIcon
             v-if="i < step"
@@ -127,7 +127,7 @@ async function finish() {
         <span
           v-if="i < steps.length - 1"
           class="w-6 sm:w-10 h-px"
-          :class="i < step ? 'bg-amber-400' : 'bg-(--ui-border-accented)'"
+          :class="i < step ? 'bg-inverted' : 'bg-(--ui-border-accented)'"
         />
       </li>
     </ol>
@@ -215,7 +215,7 @@ async function finish() {
         </div>
 
         <UButton
-          color="primary"
+          color="neutral"
           size="lg"
           block
           class="mt-8 font-medium"
@@ -299,7 +299,7 @@ async function finish() {
               Skip for now
             </UButton>
             <UButton
-              color="primary"
+              color="neutral"
               size="lg"
               class="flex-1 font-medium"
               :loading="sending"
@@ -322,7 +322,7 @@ async function finish() {
             >
               <UIcon
                 name="i-lucide-link"
-                class="size-4 text-amber-400 shrink-0"
+                class="size-4 text-highlighted shrink-0"
               />
               <span class="text-sm text-highlighted truncate">{{ inv.email }}</span>
               <UButton
@@ -338,7 +338,7 @@ async function finish() {
             </div>
           </div>
           <UButton
-            color="primary"
+            color="neutral"
             size="lg"
             block
             class="mt-8 font-medium"
@@ -355,17 +355,17 @@ async function finish() {
         v-else
         class="text-center"
       >
-        <div class="mx-auto grid place-items-center size-14 rounded-2xl bg-amber-400/15 ring-1 ring-amber-400/25">
+        <div class="mx-auto grid place-items-center size-14 rounded-2xl bg-inverted/15 ring-1 ring-inverted/25">
           <UIcon
             name="i-lucide-party-popper"
-            class="size-7 text-amber-400"
+            class="size-7 text-highlighted"
           />
         </div>
         <h1 class="mt-5 font-display text-2xl font-bold text-highlighted">
           You’re live!
         </h1>
         <p class="mt-1.5 text-sm text-muted">
-          Paste this snippet before <code class="font-mono text-amber-400">&lt;/body&gt;</code> on your site to start receiving chats.
+          Paste this snippet before <code class="font-mono text-highlighted">&lt;/body&gt;</code> on your site to start receiving chats.
         </p>
 
         <div class="mt-6 text-left rounded-xl bg-default ring-1 ring-default overflow-hidden">
@@ -390,7 +390,7 @@ async function finish() {
         </div>
 
         <UButton
-          color="primary"
+          color="neutral"
           size="lg"
           block
           class="mt-8 font-medium"

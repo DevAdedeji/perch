@@ -12,7 +12,7 @@ const messages = [
   <div class="relative w-full max-w-sm mx-auto">
     <!-- floating status pill -->
     <div class="absolute -top-4 -left-4 z-20 hidden sm:flex items-center gap-2 rounded-full glass ring-1 ring-default px-3 py-1.5 shadow-xl shadow-black/10">
-      <span class="size-2 rounded-full bg-amber-400" />
+      <span class="size-2 rounded-full bg-green-500" />
       <span class="text-xs font-medium text-highlighted">Maya claimed this chat</span>
     </div>
 
@@ -20,7 +20,7 @@ const messages = [
     <div class="absolute -bottom-4 -right-3 z-20 hidden sm:flex items-center gap-1.5 rounded-full glass ring-1 ring-default px-3 py-1.5 shadow-xl shadow-black/10">
       <UIcon
         name="i-lucide-zap"
-        class="size-3.5 text-amber-400"
+        class="size-3.5 text-highlighted"
       />
       <span class="font-mono text-xs text-muted">41ms delivery</span>
     </div>
@@ -29,10 +29,10 @@ const messages = [
     <div class="relative rounded-3xl border-glow bg-elevated/40 glass shadow-2xl shadow-black/20 overflow-hidden">
       <!-- header -->
       <div class="flex items-center gap-3 px-4 py-3.5 border-b border-default bg-elevated/50">
-        <span class="relative grid place-items-center size-9 rounded-xl bg-amber-400/15 ring-1 ring-amber-400/30">
+        <span class="relative grid place-items-center size-9 rounded-xl bg-inverted/15 ring-1 ring-inverted/30">
           <UIcon
             name="i-lucide-bird"
-            class="size-4.5 text-amber-400"
+            class="size-4.5 text-highlighted"
           />
         </span>
         <div class="min-w-0">
@@ -40,7 +40,7 @@ const messages = [
             Perch Support
           </p>
           <p class="flex items-center gap-1.5 text-xs text-muted">
-            <span class="size-1.5 rounded-full bg-amber-400" />
+            <span class="size-1.5 rounded-full bg-green-500" />
             Online · replies in seconds
           </p>
         </div>
@@ -60,12 +60,12 @@ const messages = [
         >
           <span
             v-if="m.from === 'agent'"
-            class="grid place-items-center size-6 shrink-0 rounded-lg bg-amber-400/15 ring-1 ring-amber-400/25 text-[10px] font-semibold text-amber-400"
+            class="grid place-items-center size-6 shrink-0 rounded-lg bg-inverted/15 ring-1 ring-inverted/25 text-[10px] font-semibold text-highlighted"
           >M</span>
           <div
             class="max-w-[78%] rounded-2xl px-3.5 py-2 text-sm leading-snug shadow-sm"
             :class="m.from === 'visitor'
-              ? 'bg-amber-500 text-white rounded-br-md'
+              ? 'bg-inverted text-inverted rounded-br-md'
               : 'bg-default ring-1 ring-default text-highlighted rounded-bl-md'"
           >
             {{ m.text }}
@@ -78,7 +78,7 @@ const messages = [
         <div class="flex-1 flex items-center gap-2 rounded-xl bg-default ring-1 ring-default px-3 py-2">
           <span class="text-sm text-dimmed">Type a message…</span>
         </div>
-        <span class="grid place-items-center size-9 rounded-xl bg-amber-500 text-white">
+        <span class="grid place-items-center size-9 rounded-xl bg-inverted text-inverted">
           <UIcon
             name="i-lucide-arrow-up"
             class="size-4"
