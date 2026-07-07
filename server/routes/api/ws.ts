@@ -45,6 +45,7 @@ async function handleSubscribe(peer: import('crossws').Peer, channel: unknown) {
       const member = await getMember(ctx.userId as string, id)
       if (member) {
         ctx.memberId = member.id
+        ctx.memberRole = member.role
         ctx.wid = id
         subscribe(channel, peer)
         peer.send(JSON.stringify({ type: 'subscribed', channel }))

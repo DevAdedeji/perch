@@ -17,7 +17,6 @@ const filters: { label: string, value: InboxFilter }[] = [
 
 const reply = ref('')
 const internalNote = ref(false)
-const sending = ref(false)
 
 function tabCount(value: InboxFilter): number {
   const c = cr.counts.value
@@ -38,16 +37,17 @@ function initials(name: string | null, fallback = 'V') {
 
 async function onSend() {
   const text = reply.value.trim()
-  if (!text || sending.value) return
-  sending.value = true
+  if (!text) return
+  const note = internalNote.value
+  // clear instantly — the message appears optimistically (see useControlRoom.sendReply)
+  reply.value = ''
+  internalNote.value = false
   try {
-    await cr.sendReply(text, internalNote.value)
-    reply.value = ''
-    internalNote.value = false
+    await cr.sendReply(text, note)
   } catch {
     toast.add({ title: 'Could not send message', color: 'error' })
-  } finally {
-    sending.value = false
+    reply.value = text
+    internalNote.value = note
   }
 }
 
@@ -66,7 +66,7 @@ async function onClaim(id: string) {
 }
 
 function presenceDot(status: string) {
-  return status === 'online' ? 'bg-green-500' : status === 'away' ? 'bg-amber-400' : 'bg-red-500'
+  return status === 'online' ? 'bg-green-500' : status === 'away' ? 'bg-amber-400' : 'bg-zinc-500'
 }
 
 // transfer menu — online agents first, current owner checked
@@ -402,10 +402,13 @@ async function onAssign(memberId: string, memberName: string) {
                 class="grid place-items-center size-6 shrink-0 rounded-lg bg-inverted/15 ring-1 ring-inverted/25 text-[10px] font-semibold text-highlighted"
               >{{ initials(cr.memberName(m.sender_id), 'A') }}</span>
               <div
-                class="max-w-[72%] rounded-2xl px-3.5 py-2 text-sm leading-snug"
-                :class="m.sender_type === 'agent'
-                  ? 'bg-inverted text-inverted rounded-br-md'
-                  : 'bg-default ring-1 ring-default text-highlighted rounded-bl-md'"
+                class="max-w-[72%] rounded-2xl px-3.5 py-2 text-sm leading-snug transition-opacity"
+                :class="[
+                  m.sender_type === 'agent'
+                    ? 'bg-inverted text-inverted rounded-br-md'
+                    : 'bg-default ring-1 ring-default text-highlighted rounded-bl-md',
+                  { 'opacity-60': m.pending }
+                ]"
               >
                 {{ m.content }}
               </div>
@@ -450,9 +453,8 @@ async function onAssign(memberId: string, memberName: string) {
               <UButton
                 class="ml-auto"
                 size="sm"
-                :color="internalNote ? 'neutral' : 'neutral'"
+                color="neutral"
                 icon="i-lucide-send-horizontal"
-                :loading="sending"
                 :disabled="!reply.trim()"
                 @click="onSend"
               >

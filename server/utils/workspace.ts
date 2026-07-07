@@ -1,6 +1,17 @@
 import type { H3Event } from 'h3'
-import { and, conversations, eq, workspaceMembers } from '@perch/db'
+import { and, conversations, eq, users, workspaceMembers } from '@perch/db'
 import type { Conversation, Workspace, WorkspaceMember } from '@perch/db'
+
+/** The display name of a workspace member (for the widget's "chatting with…"). */
+export async function getMemberName(memberId: string): Promise<string | null> {
+  const rows = await useDb()
+    .select({ name: users.name })
+    .from(workspaceMembers)
+    .innerJoin(users, eq(users.id, workspaceMembers.userId))
+    .where(eq(workspaceMembers.id, memberId))
+    .limit(1)
+  return rows[0]?.name ?? null
+}
 
 /**
  * Assert the current user belongs to `workspaceId`, optionally requiring admin.

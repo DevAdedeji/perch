@@ -57,6 +57,8 @@ export default defineEventHandler(async (event) => {
   const secret = useRuntimeConfig(event).realtimeSecret!
   const wsTicket = signTicket({ role: 'visitor', wid: workspace.id, vid: visitor!.id }, secret)
 
+  const agentName = conversation?.assignedAgentId ? await getMemberName(conversation.assignedAgentId) : null
+
   return {
     workspace: {
       name: workspace.name,
@@ -64,6 +66,7 @@ export default defineEventHandler(async (event) => {
       logo_url: workspace.logoUrl,
       prechat_enabled: workspace.prechatFormEnabled
     },
+    agent: agentName ? { name: agentName } : null,
     visitor: { name: visitor!.name, email: visitor!.email },
     business_online: isBusinessOnline(workspace.id),
     conversation_id: conversation?.id ?? null,

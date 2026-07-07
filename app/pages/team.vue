@@ -118,7 +118,7 @@ function initials(n: string) {
   return n.trim().split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase()
 }
 function presenceDot(status: string) {
-  return status === 'online' ? 'bg-green-500' : status === 'away' ? 'bg-amber-400' : 'bg-red-500'
+  return status === 'online' ? 'bg-green-500' : status === 'away' ? 'bg-amber-400' : 'bg-zinc-500'
 }
 </script>
 

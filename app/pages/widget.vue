@@ -8,7 +8,7 @@ const perchUrl = useRequestURL().origin
 
 const widget = useWidget(siteId.value)
 const {
-  workspace, businessOnline, conversationId, messages, status, agentTyping, visitorName
+  workspace, agentName, businessOnline, conversationId, messages, status, agentTyping, visitorName
 } = widget
 
 const draft = ref('')
@@ -71,14 +71,13 @@ function stopTyping() {
 /* ── send ───────────────────────────────── */
 async function onSend() {
   const text = draft.value.trim()
-  if (!text || sending.value) return
-  sending.value = true
+  if (!text) return
+  draft.value = '' // clear instantly — the message appears optimistically
   stopTyping()
   try {
     await widget.sendMessage(text)
-    draft.value = ''
-  } finally {
-    sending.value = false
+  } catch {
+    draft.value = text // restore on failure
   }
 }
 
@@ -152,18 +151,23 @@ onBeforeUnmount(() => {
           class="size-full object-cover"
           alt=""
         >
-        <template v-else>{{ initial(workspace?.name) }}</template>
+        <template v-else>{{ initial(agentName || workspace?.name) }}</template>
       </span>
       <div class="min-w-0 flex-1">
         <p class="text-sm font-semibold truncate">
-          {{ workspace?.name ?? 'Chat' }}
+          {{ agentName || workspace?.name || 'Chat' }}
         </p>
         <p class="flex items-center gap-1.5 text-xs opacity-90">
           <span
             class="size-1.5 rounded-full"
             :style="{ background: businessOnline ? '#22c55e' : 'rgba(255,255,255,0.5)' }"
           />
-          {{ businessOnline ? 'Online' : 'Away — we’ll reply by email' }}
+          <template v-if="agentName">
+            from {{ workspace?.name }}
+          </template>
+          <template v-else>
+            {{ businessOnline ? 'Online' : 'Away — we’ll reply by email' }}
+          </template>
         </p>
       </div>
       <button
@@ -265,12 +269,28 @@ onBeforeUnmount(() => {
         <div
           v-for="m in messages"
           :key="m.id"
-          class="flex"
-          :class="m.sender_type === 'visitor' ? 'justify-end' : 'justify-start'"
+          class="flex items-end gap-2"
+          :class="m.sender_type === 'visitor' ? 'flex-row-reverse' : ''"
         >
+          <span
+            v-if="m.sender_type === 'agent'"
+            class="grid place-items-center size-6 shrink-0 rounded-lg overflow-hidden text-[10px] font-semibold"
+            :style="{ background: `${accent}22`, color: accent }"
+          >
+            <img
+              v-if="workspace?.logo_url"
+              :src="workspace.logo_url"
+              class="size-full object-cover"
+              alt=""
+            >
+            <template v-else>{{ initial(agentName || workspace?.name) }}</template>
+          </span>
           <div
-            class="max-w-[80%] rounded-2xl px-3.5 py-2 text-sm leading-snug"
-            :class="m.sender_type === 'visitor' ? 'rounded-br-md' : 'bg-elevated ring-1 ring-default text-highlighted rounded-bl-md'"
+            class="max-w-[78%] rounded-2xl px-3.5 py-2 text-sm leading-snug shadow-sm transition-opacity"
+            :class="[
+              m.sender_type === 'visitor' ? 'rounded-br-md' : 'bg-elevated ring-1 ring-default text-highlighted rounded-bl-md',
+              { 'opacity-60': m.pending }
+            ]"
             :style="m.sender_type === 'visitor' ? { background: accent, color: onAccent } : {}"
           >
             {{ m.content }}
@@ -278,8 +298,12 @@ onBeforeUnmount(() => {
         </div>
         <div
           v-if="agentTyping"
-          class="flex justify-start"
+          class="flex items-end gap-2"
         >
+          <span
+            class="grid place-items-center size-6 shrink-0 rounded-lg text-[10px] font-semibold"
+            :style="{ background: `${accent}22`, color: accent }"
+          >{{ initial(agentName || workspace?.name) }}</span>
           <div class="flex items-center gap-1 rounded-2xl rounded-bl-md bg-elevated ring-1 ring-default px-3.5 py-3">
             <span class="size-1.5 rounded-full bg-dimmed animate-bounce [animation-delay:-0.3s]" />
             <span class="size-1.5 rounded-full bg-dimmed animate-bounce [animation-delay:-0.15s]" />
@@ -302,7 +326,7 @@ onBeforeUnmount(() => {
           <button
             class="grid place-items-center size-10 shrink-0 rounded-xl disabled:opacity-50"
             :style="{ background: accent, color: onAccent }"
-            :disabled="!draft.trim() || sending"
+            :disabled="!draft.trim()"
             aria-label="Send"
             @click="onSend"
           >

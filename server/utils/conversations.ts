@@ -125,10 +125,20 @@ export async function ingestVisitorMessage(input: IncomingVisitorMessage) {
     })
   }
   const msgEvent = { type: 'message.new' as const, payload: serializeMessage(message!) }
-  publish(wsChannel, msgEvent)
+  // scope the inbox copy so agents don't receive chats assigned to someone else
+  publishFiltered(wsChannel, msgEvent, inboxScope(conversation.assignedAgentId))
   publish(convChannel, msgEvent)
 
   return { visitor: visitor!, conversation, message: message! }
+}
+
+/**
+ * Predicate for inbox broadcasts: admins see all; agents only receive the
+ * unassigned pool + conversations assigned to them (§ agent visibility).
+ */
+function inboxScope(assignedAgentId: string | null) {
+  return (ctx: Record<string, unknown>) =>
+    ctx.memberRole === 'admin' || assignedAgentId == null || ctx.memberId === assignedAgentId
 }
 
 /* ── agent → visitor ─────────────────────────────────────────────── */
@@ -153,13 +163,14 @@ export async function addAgentMessage(input: AgentMessageInput) {
     isInternalNote: input.isInternalNote ?? false
   }).returning()
 
-  await db.update(conversations)
+  const [conv] = await db.update(conversations)
     .set({ lastMessageAt: now, updatedAt: now })
     .where(eq(conversations.id, input.conversationId))
+    .returning()
 
   const event = { type: 'message.new' as const, payload: serializeMessage(message!) }
-  // agents always see it; the workspace channel is agent-only by construction
-  publish(channels.workspace(input.workspaceId), event)
+  // inbox copy scoped to the assigned agent + admins
+  publishFiltered(channels.workspace(input.workspaceId), event, inboxScope(conv?.assignedAgentId ?? null))
   // on the shared conversation channel, keep internal notes away from the visitor (§4)
   publish(channels.conversation(input.conversationId), event, { agentsOnly: message!.isInternalNote })
 

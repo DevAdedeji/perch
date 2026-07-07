@@ -1,4 +1,4 @@
-import { and, conversationReads, conversations, desc, eq, messages, sql, visitors } from '@perch/db'
+import { and, conversationReads, conversations, desc, eq, isNull, messages, or, sql, visitors } from '@perch/db'
 import { CONVERSATION_STATUSES } from '@perch/shared'
 import type { ConversationStatus } from '@perch/shared'
 
@@ -10,6 +10,11 @@ export default defineEventHandler(async (event) => {
   const statusParam = getQuery(event).status as string | undefined
   const status = CONVERSATION_STATUSES.includes(statusParam as ConversationStatus)
     ? (statusParam as ConversationStatus)
+    : undefined
+
+  // agents see only the unassigned pool + their own chats; admins see everything
+  const scope = member.role === 'agent'
+    ? or(isNull(conversations.assignedAgentId), eq(conversations.assignedAgentId, member.id))
     : undefined
 
   const db = useDb()
@@ -33,7 +38,7 @@ export default defineEventHandler(async (event) => {
       conversationReads,
       and(eq(conversationReads.conversationId, conversations.id), eq(conversationReads.memberId, member.id))
     )
-    .where(and(eq(conversations.workspaceId, workspaceId), status ? eq(conversations.status, status) : undefined))
+    .where(and(eq(conversations.workspaceId, workspaceId), status ? eq(conversations.status, status) : undefined, scope))
     .orderBy(desc(conversations.lastMessageAt))
     .limit(100)
 

@@ -60,6 +60,29 @@ export function publish(channel: string, event: WsEvent, opts?: { agentsOnly?: b
   }
 }
 
+/**
+ * Like `publish`, but only to peers whose context passes `predicate`. Used to
+ * scope inbox events so an agent never receives a conversation assigned to
+ * someone else (agents see only the unassigned pool + their own chats).
+ */
+export function publishFiltered(
+  channel: string,
+  event: WsEvent,
+  predicate: (context: Record<string, unknown>) => boolean
+): void {
+  const set = registry.channels.get(channel)
+  if (!set || set.size === 0) return
+  const data = JSON.stringify(event)
+  for (const peer of set) {
+    if (!predicate(peer.context as Record<string, unknown>)) continue
+    try {
+      peer.send(data)
+    } catch {
+      // peer gone
+    }
+  }
+}
+
 /** Number of peers on a channel — used for `business.presence` (any agent online?). */
 export function subscriberCount(channel: string): number {
   return registry.channels.get(channel)?.size ?? 0

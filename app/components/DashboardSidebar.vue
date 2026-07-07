@@ -18,7 +18,7 @@ const initials = computed(() =>
 )
 
 function presenceDot(status: string) {
-  return status === 'online' ? 'bg-green-500' : status === 'away' ? 'bg-amber-400' : 'bg-red-500'
+  return status === 'online' ? 'bg-green-500' : status === 'away' ? 'bg-amber-400' : 'bg-zinc-500'
 }
 
 const userMenuItems = computed(() => [[
@@ -162,7 +162,7 @@ function pickWorkspace(id: string) {
               class="truncate text-[11px] capitalize"
               :class="away ? 'text-amber-500' : 'text-dimmed'"
             >
-              {{ myPresence }}
+              {{ currentWorkspace?.role }} · {{ myPresence }}
             </p>
           </div>
           <UIcon

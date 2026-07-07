@@ -10,6 +10,7 @@ interface WidgetWorkspace {
 
 interface SessionResponse {
   workspace: WidgetWorkspace
+  agent: { name: string } | null
   visitor: { name: string | null, email: string | null }
   business_online: boolean
   conversation_id: string | null
@@ -25,9 +26,10 @@ interface SessionResponse {
  */
 export function useWidget(siteId: string) {
   const workspace = ref<WidgetWorkspace | null>(null)
+  const agentName = ref<string | null>(null)
   const businessOnline = ref(false)
   const conversationId = ref<string | null>(null)
-  const messages = ref<MessageDTO[]>([])
+  const messages = ref<Array<MessageDTO & { pending?: boolean }>>([])
   const status = ref<'loading' | 'ready' | 'error'>('loading')
   const agentTyping = ref(false)
   const visitorName = ref<string | null>(null)
@@ -56,6 +58,7 @@ export function useWidget(siteId: string) {
       body: { site_id: siteId, visitor_id: visitorId, page_url: document.referrer, ua: navigator.userAgent }
     })
     workspace.value = res.workspace
+    agentName.value = res.agent?.name ?? null
     businessOnline.value = res.business_online
     conversationId.value = res.conversation_id
     messages.value = res.messages
@@ -63,6 +66,18 @@ export function useWidget(siteId: string) {
     visitorEmail.value = res.visitor.email
     ticket = res.ws_ticket
     presenceChan = res.presence_channel
+  }
+
+  async function refreshAgent() {
+    try {
+      const res = await $fetch<{ agent: { name: string } | null }>('/api/widget/agent', {
+        method: 'POST',
+        body: { site_id: siteId, visitor_id: visitorId }
+      })
+      agentName.value = res.agent?.name ?? null
+    } catch {
+      // keep the last known agent
+    }
   }
 
   function connectWs() {
@@ -125,6 +140,10 @@ export function useWidget(siteId: string) {
           agentTyping.value = ev.payload.is_typing
         }
         break
+      case 'conversation.updated':
+        // an agent claimed/was reassigned — refresh who's handling the chat
+        if (ev.payload.id === conversationId.value) refreshAgent()
+        break
       case 'business.presence':
         businessOnline.value = ev.payload.online
         break
@@ -145,18 +164,39 @@ export function useWidget(siteId: string) {
   async function sendMessage(content: string, identity?: { name?: string, email?: string }) {
     const text = content.trim()
     if (!text) return
-    const res = await $fetch<{ conversation_id: string, message: MessageDTO }>('/api/widget/messages', {
-      method: 'POST',
-      body: { site_id: siteId, visitor_id: visitorId, content: text, page_url: document.referrer, ...identity }
+
+    // optimistic: show the message instantly, reconcile with the server response
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    messages.value.push({
+      id: tempId,
+      conversation_id: conversationId.value ?? 'pending',
+      sender_type: 'visitor',
+      sender_id: null,
+      content: text,
+      attachment_url: null,
+      attachment_type: null,
+      is_internal_note: false,
+      created_at: new Date().toISOString(),
+      pending: true
     })
-    if (!conversationId.value) {
-      conversationId.value = res.conversation_id
-      subscribeConversation()
+
+    try {
+      const res = await $fetch<{ conversation_id: string, message: MessageDTO }>('/api/widget/messages', {
+        method: 'POST',
+        body: { site_id: siteId, visitor_id: visitorId, content: text, page_url: document.referrer, ...identity }
+      })
+      if (!conversationId.value) {
+        conversationId.value = res.conversation_id
+        subscribeConversation()
+      }
+      if (identity?.name) visitorName.value = identity.name
+      if (identity?.email) visitorEmail.value = identity.email
+      messages.value = messages.value.filter(m => m.id !== tempId)
+      if (!messages.value.some(m => m.id === res.message.id)) messages.value.push(res.message)
+    } catch (e) {
+      messages.value = messages.value.filter(m => m.id !== tempId)
+      throw e
     }
-    if (identity?.name) visitorName.value = identity.name
-    if (identity?.email) visitorEmail.value = identity.email
-    // append immediately (the WS echo, if any, is de-duped by id)
-    if (!messages.value.some(m => m.id === res.message.id)) messages.value.push(res.message)
   }
 
   function sendTyping(isTyping: boolean) {
@@ -172,6 +212,7 @@ export function useWidget(siteId: string) {
 
   return {
     workspace,
+    agentName,
     businessOnline,
     conversationId,
     messages,

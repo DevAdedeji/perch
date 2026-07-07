@@ -35,7 +35,7 @@ export function useControlRoom() {
   const members = ref<TeamMember[]>([])
   // shared so the dashboard layout can tell whether this conversation is being viewed
   const activeId = useState<string | null>('inbox:activeId', () => null)
-  const messages = ref<MessageDTO[]>([])
+  const messages = ref<Array<MessageDTO & { pending?: boolean }>>([])
   const filter = ref<InboxFilter>('all')
   const loadingList = ref(false)
   const loadingThread = ref(false)
@@ -46,6 +46,13 @@ export function useControlRoom() {
 
   const workspaceId = computed(() => currentWorkspace.value?.workspaceId ?? null)
   const activeConversation = computed(() => conversations.value.find(c => c.id === activeId.value) ?? null)
+
+  // agents only see the unassigned pool + their own chats; admins see all
+  const myRole = computed(() => currentWorkspace.value?.role ?? 'agent')
+  const myMemberId = computed(() => currentWorkspace.value?.memberId ?? null)
+  function canSee(assignedAgentId: string | null): boolean {
+    return myRole.value === 'admin' || assignedAgentId == null || assignedAgentId === myMemberId.value
+  }
 
   // monotonic request tokens so a slow response never overwrites a newer selection
   let listSeq = 0
@@ -124,12 +131,37 @@ export function useControlRoom() {
 
   /* ── actions ─────────────────────────────────────────────── */
   async function sendReply(content: string, isInternalNote = false) {
-    if (!activeId.value || !content.trim()) return
-    await $fetch(`/api/conversations/${activeId.value}/messages`, {
-      method: 'POST',
-      body: { content: content.trim(), is_internal_note: isInternalNote }
+    const text = content.trim()
+    const conversationId = activeId.value
+    if (!conversationId || !text) return
+
+    // optimistic: show the message instantly, reconcile with the server + WS echo
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    messages.value.push({
+      id: tempId,
+      conversation_id: conversationId,
+      sender_type: 'agent',
+      sender_id: myMemberId.value,
+      content: text,
+      attachment_url: null,
+      attachment_type: null,
+      is_internal_note: isInternalNote,
+      created_at: new Date().toISOString(),
+      pending: true
     })
-    // the new message arrives back over the conversation channel
+
+    try {
+      const { message } = await $fetch<{ message: MessageDTO }>(`/api/conversations/${conversationId}/messages`, {
+        method: 'POST',
+        body: { content: text, is_internal_note: isInternalNote }
+      })
+      // swap the temp for the real one (the WS echo, if it arrives, dedups by id)
+      messages.value = messages.value.filter(m => m.id !== tempId)
+      if (!messages.value.some(m => m.id === message.id)) messages.value.push(message)
+    } catch (e) {
+      messages.value = messages.value.filter(m => m.id !== tempId)
+      throw e
+    }
   }
 
   async function claim(id: string) {
@@ -154,16 +186,32 @@ export function useControlRoom() {
         loadCounts()
         break
       case 'conversation.updated': {
-        const c = conversations.value.find(x => x.id === ev.payload.id)
+        const p = ev.payload
+        const c = conversations.value.find(x => x.id === p.id)
         if (c) {
-          c.status = ev.payload.status
-          c.assignedAgentId = ev.payload.assigned_agent_id
-          c.lastMessageAt = ev.payload.last_message_at
-          resort()
+          const assignmentChanged = c.assignedAgentId !== p.assigned_agent_id
+          const statusChanged = c.status !== p.status
+          c.status = p.status
+          c.assignedAgentId = p.assigned_agent_id
+          c.lastMessageAt = p.last_message_at
+
+          if (assignmentChanged && !canSee(p.assigned_agent_id)) {
+            // reassigned to another agent — drop it from my view
+            conversations.value = conversations.value.filter(x => x.id !== p.id)
+            if (activeId.value === p.id) deselect()
+            loadCounts()
+          } else {
+            resort()
+            if (statusChanged) {
+              loadCounts()
+              if (filter.value !== 'all') loadConversations()
+            }
+          }
+        } else if (canSee(p.assigned_agent_id)) {
+          // newly visible to me (assigned to me / returned to the pool)
+          loadConversations()
+          loadCounts()
         }
-        // a status change moves it between tabs — refresh counts, and the list if filtered
-        loadCounts()
-        if (filter.value !== 'all') loadConversations()
         break
       }
       case 'message.new': {
