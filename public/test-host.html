@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Acme Inc — (Perch widget test host)</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; color: #0f172a; background: #f8fafc; }
+    header { padding: 20px 32px; border-bottom: 1px solid #e2e8f0; font-weight: 700; }
+    main { max-width: 720px; margin: 0 auto; padding: 64px 24px; }
+    h1 { font-size: 40px; line-height: 1.1; margin: 0 0 16px; }
+    p { color: #475569; font-size: 18px; line-height: 1.6; }
+    .note { margin-top: 32px; padding: 16px 20px; background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; font-size: 14px; color: #64748b; }
+    code { background: #f1f5f9; padding: 2px 6px; border-radius: 6px; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <header>🛒 Acme Inc</header>
+  <main>
+    <h1>Welcome to a pretend customer website</h1>
+    <p>This static page simulates a business that has embedded Perch. The chat launcher should appear in the bottom-right corner — click it to start a conversation, then watch it land in the Control Room inbox in real time.</p>
+    <div class="note">
+      Open this page with your workspace's <code>site_id</code>:
+      <code>/test-host.html?site_id=ws_xxxxxxxxxx</code><br>
+      (find it in the dashboard sidebar or the onboarding "you're live" step).
+    </div>
+  </main>
+
+  <script>
+    // Inject the embed exactly as a customer would, using ?site_id= from the URL.
+    (function () {
+      var siteId = new URLSearchParams(location.search).get('site_id') || 'ws_REPLACE_ME'
+      var s = document.createElement('script')
+      s.src = '/widget.js'
+      s.async = true
+      s.setAttribute('data-site-id', siteId)
+      document.body.appendChild(s)
+    })()
+  </script>
+</body>
+</html>

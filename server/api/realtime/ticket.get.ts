@@ -5,5 +5,5 @@ export default defineEventHandler(async (event) => {
   if (!secret) {
     throw createError({ statusCode: 500, statusMessage: 'Realtime is not configured' })
   }
-  return { ticket: signTicket(user.id, secret) }
+  return { ticket: signTicket({ role: 'agent', uid: user.id }, secret) }
 })

@@ -12,12 +12,12 @@ export default defineEventHandler(async (event) => {
       userId: workspaceMembers.userId,
       name: users.name,
       email: users.email,
-      role: workspaceMembers.role,
-      presence: workspaceMembers.presence
+      role: workspaceMembers.role
     })
     .from(workspaceMembers)
     .innerJoin(users, eq(users.id, workspaceMembers.userId))
     .where(eq(workspaceMembers.workspaceId, workspaceId))
 
-  return rows
+  // live presence from the in-process registry (§6.5)
+  return rows.map(m => ({ ...m, presence: memberPresence(workspaceId, m.id) }))
 })

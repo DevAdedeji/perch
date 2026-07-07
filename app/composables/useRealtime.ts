@@ -93,5 +93,9 @@ export function useRealtime() {
     sendRaw({ type: isTyping ? 'typing.start' : 'typing.stop', payload: { conversation_id: conversationId } })
   }
 
-  return { status, connect, subscribe, unsubscribe, on, sendTyping }
+  function sendPresence(presence: 'online' | 'away') {
+    sendRaw({ type: 'presence.update', payload: { presence } })
+  }
+
+  return { status, connect, subscribe, unsubscribe, on, sendTyping, sendPresence }
 }

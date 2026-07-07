@@ -55,6 +55,11 @@ export function useControlRoom() {
     return members.value.find(m => m.id === id)?.name ?? null
   }
 
+  function memberPresence(id: string | null): 'online' | 'away' | 'offline' {
+    if (!id) return 'offline'
+    return members.value.find(m => m.id === id)?.presence ?? 'offline'
+  }
+
   function resort() {
     conversations.value.sort((a, b) => b.lastMessageAt.localeCompare(a.lastMessageAt))
   }
@@ -177,6 +182,11 @@ export function useControlRoom() {
           visitorTyping.value = ev.payload.is_typing
         }
         break
+      case 'presence': {
+        const member = members.value.find(m => m.id === ev.payload.member_id)
+        if (member) member.presence = ev.payload.presence
+        break
+      }
     }
   }
 
@@ -232,6 +242,7 @@ export function useControlRoom() {
     counts,
     status: rt.status,
     memberName,
+    memberPresence,
     select,
     deselect,
     sendReply,

@@ -1,25 +1,30 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
 
 /**
- * Short-lived, HMAC-signed WebSocket auth ticket. The dashboard fetches one from
- * an authenticated REST endpoint, then passes it as `?ticket=` on the WS URL —
- * so the socket is authorized without unsealing the session cookie mid-upgrade.
+ * Short-lived, HMAC-signed WebSocket auth ticket. Two subjects:
+ *  - agent   → identified by user id; may subscribe to their workspaces.
+ *  - visitor → scoped to one workspace + visitor; may only ever subscribe to
+ *    that visitor's own conversations (§6.1).
+ * The ticket is fetched from a REST endpoint and passed as `?ticket=` on the WS URL.
  */
-interface TicketPayload {
-  uid: string
-  exp: number
-}
+export type TicketSubject
+  = | { role: 'agent', uid: string }
+    | { role: 'visitor', wid: string, vid: string }
 
-const DEFAULT_TTL_MS = 60_000
+type TicketPayload = TicketSubject & { exp: number }
 
-export function signTicket(uid: string, secret: string, ttlMs = DEFAULT_TTL_MS): string {
-  const payload: TicketPayload = { uid, exp: Date.now() + ttlMs }
+const AGENT_TTL_MS = 60_000
+const VISITOR_TTL_MS = 10 * 60_000
+
+export function signTicket(subject: TicketSubject, secret: string, ttlMs?: number): string {
+  const ttl = ttlMs ?? (subject.role === 'visitor' ? VISITOR_TTL_MS : AGENT_TTL_MS)
+  const payload: TicketPayload = { ...subject, exp: Date.now() + ttl }
   const data = Buffer.from(JSON.stringify(payload)).toString('base64url')
   const sig = createHmac('sha256', secret).update(data).digest('base64url')
   return `${data}.${sig}`
 }
 
-export function verifyTicket(token: string, secret: string): { uid: string } | null {
+export function verifyTicket(token: string, secret: string): TicketSubject | null {
   const [data, sig] = token.split('.')
   if (!data || !sig) return null
 
@@ -31,7 +36,11 @@ export function verifyTicket(token: string, secret: string): { uid: string } | n
   try {
     const payload = JSON.parse(Buffer.from(data, 'base64url').toString()) as TicketPayload
     if (typeof payload.exp !== 'number' || payload.exp < Date.now()) return null
-    return { uid: payload.uid }
+    if (payload.role === 'agent' && payload.uid) return { role: 'agent', uid: payload.uid }
+    if (payload.role === 'visitor' && payload.wid && payload.vid) {
+      return { role: 'visitor', wid: payload.wid, vid: payload.vid }
+    }
+    return null
   } catch {
     return null
   }

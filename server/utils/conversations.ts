@@ -63,7 +63,11 @@ export async function ingestVisitorMessage(input: IncomingVisitorMessage) {
     metadata: input.pageUrl ? { page_url: input.pageUrl } : {}
   }).onConflictDoUpdate({
     target: [visitors.workspaceId, visitors.visitorId],
-    set: { lastSeenAt: now, ...(input.name ? { name: input.name } : {}) }
+    set: {
+      lastSeenAt: now,
+      ...(input.name ? { name: input.name } : {}),
+      ...(input.email ? { email: input.email } : {})
+    }
   }).returning()
 
   // resume an existing non-resolved conversation, else open a new one

@@ -72,7 +72,7 @@ async function onClaim(id: string) {
       class="w-full md:w-80 lg:w-96 shrink-0 flex-col border-r border-default bg-default"
       :class="cr.activeId.value ? 'hidden md:flex' : 'flex'"
     >
-      <div class="px-4 pt-4 pb-3 border-b border-default">
+      <div class="px-4 pt-4 pb-3 border-b border-default overflow-hidden">
         <div class="flex items-center justify-between gap-2">
           <h1 class="font-display text-lg font-bold text-highlighted">
             Inbox
@@ -89,17 +89,17 @@ async function onClaim(id: string) {
           </span>
         </div>
 
-        <div class="mt-3 flex items-center gap-1">
+        <div class="mt-3 flex items-center gap-1 overflow-x-scroll">
           <button
             v-for="f in filters"
             :key="f.value"
-            class="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium transition-colors"
+            class="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-sm font-medium transition-colors"
             :class="cr.filter.value === f.value ? 'bg-inverted/10 text-highlighted' : 'text-muted hover:text-highlighted'"
             @click="cr.filter.value = f.value"
           >
             {{ f.label }}
             <span
-              class="rounded-full px-1.5 text-[10px] font-semibold tabular-nums"
+              class="rounded-full px-1.5 text-xs font-semibold tabular-nums"
               :class="f.value === 'unassigned' && tabCount('unassigned') > 0
                 ? 'bg-inverted text-inverted'
                 : cr.filter.value === f.value ? 'bg-inverted/15 text-highlighted' : 'bg-elevated text-dimmed'"

@@ -2,11 +2,12 @@
 const emit = defineEmits<{ navigate: [] }>()
 
 const { user, workspaces, currentWorkspace, setWorkspace, logout } = useAuth()
+const { status: myPresence, away, setAway } = usePresence()
 
 const nav = [
   { label: 'Inbox', icon: 'i-lucide-inbox', to: '/dashboard', soon: false },
-  { label: 'Team', icon: 'i-lucide-users', to: '/dashboard', soon: true },
-  { label: 'Settings', icon: 'i-lucide-settings', to: '/dashboard', soon: true }
+  { label: 'Team', icon: 'i-lucide-users', to: '/settings', soon: false },
+  { label: 'Settings', icon: 'i-lucide-settings', to: '/settings', soon: false }
 ]
 
 const canSwitch = computed(() => workspaces.value.length > 1)
@@ -15,6 +16,20 @@ const switcherOpen = ref(false)
 const initials = computed(() =>
   (user.value?.name ?? '?').split(' ').map(p => p[0]).slice(0, 2).join('').toUpperCase()
 )
+
+function presenceDot(status: string) {
+  return status === 'online' ? 'bg-green-500' : status === 'away' ? 'bg-amber-400' : 'bg-zinc-500'
+}
+
+const userMenuItems = computed(() => [[
+  { label: user.value?.name ?? '', type: 'label' as const },
+  {
+    label: away.value ? 'Set as online' : 'Set as away',
+    icon: away.value ? 'i-lucide-circle-check' : 'i-lucide-moon',
+    onSelect: () => setAway(!away.value)
+  },
+  { label: 'Sign out', icon: 'i-lucide-log-out', onSelect: logout }
+]])
 
 function pickWorkspace(id: string) {
   setWorkspace(id)
@@ -130,19 +145,24 @@ function pickWorkspace(id: string) {
 
     <!-- user menu -->
     <div class="p-3 border-t border-default">
-      <UDropdownMenu
-        :items="[[
-          { label: 'Sign out', icon: 'i-lucide-log-out', onSelect: logout }
-        ]]"
-      >
+      <UDropdownMenu :items="userMenuItems">
         <button class="w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 hover:bg-elevated/60 transition-colors">
-          <span class="grid place-items-center size-8 rounded-full bg-elevated ring-1 ring-default text-xs font-semibold text-highlighted">{{ initials }}</span>
+          <span class="relative grid place-items-center size-8 rounded-full bg-elevated ring-1 ring-default text-xs font-semibold text-highlighted">
+            {{ initials }}
+            <span
+              class="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full ring-2 ring-default"
+              :class="presenceDot(myPresence)"
+            />
+          </span>
           <div class="min-w-0 text-left">
             <p class="truncate text-sm font-medium text-highlighted">
               {{ user?.name }}
             </p>
-            <p class="truncate text-[11px] text-dimmed">
-              {{ user?.email }}
+            <p
+              class="truncate text-[11px] capitalize"
+              :class="away ? 'text-amber-500' : 'text-dimmed'"
+            >
+              {{ myPresence }}
             </p>
           </div>
           <UIcon

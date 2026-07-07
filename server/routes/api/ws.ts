@@ -1,38 +1,63 @@
 import { and, conversations, eq, workspaceMembers } from '@perch/db'
+import type { WorkspaceMember } from '@perch/db'
 import { channels } from '@perch/shared'
 
 /**
- * The Control Room WebSocket (§6). Agents connect with a signed ticket, then
- * subscribe to the channels they're authorized for. A visitor's socket (later)
- * will only ever be allowed on its own `conversation:{id}`.
+ * The Control Room WebSocket (§6). Agents connect with an agent ticket and may
+ * subscribe to their workspaces + any conversation in them. A visitor connects
+ * with a visitor ticket scoped to one workspace+visitor and may ONLY subscribe
+ * to its own conversations (and the workspace's `presence:` channel).
  *
  * Mutations happen over REST and fan out via `publish()`; this handler owns the
- * connection lifecycle, authorized subscription, and ephemeral typing relay.
+ * connection lifecycle, authorized subscription, presence, and typing relay.
  */
 
-async function isWorkspaceMember(userId: string, workspaceId: string): Promise<boolean> {
+async function getMember(userId: string, workspaceId: string): Promise<WorkspaceMember | undefined> {
   const db = useDb()
-  const member = await db.query.workspaceMembers.findFirst({
+  return db.query.workspaceMembers.findFirst({
     where: and(eq(workspaceMembers.userId, userId), eq(workspaceMembers.workspaceId, workspaceId))
   })
-  return !!member
 }
 
-async function canAccessConversation(userId: string, conversationId: string): Promise<boolean> {
+async function agentCanAccessConversation(userId: string, conversationId: string): Promise<boolean> {
   const db = useDb()
   const convo = await db.query.conversations.findFirst({ where: eq(conversations.id, conversationId) })
   if (!convo) return false
-  return isWorkspaceMember(userId, convo.workspaceId)
+  return !!(await getMember(userId, convo.workspaceId))
 }
 
-async function handleSubscribe(peer: import('crossws').Peer, userId: string, channel: unknown) {
+async function visitorCanAccessConversation(wid: string, vid: string, conversationId: string): Promise<boolean> {
+  const db = useDb()
+  const convo = await db.query.conversations.findFirst({ where: eq(conversations.id, conversationId) })
+  return !!convo && convo.workspaceId === wid && convo.visitorRef === vid
+}
+
+async function handleSubscribe(peer: import('crossws').Peer, channel: unknown) {
   if (typeof channel !== 'string') return
   const [kind, id] = channel.split(':')
   if (!id) return
 
+  const ctx = peer.context
   let allowed = false
-  if (kind === 'workspace') allowed = await isWorkspaceMember(userId, id)
-  else if (kind === 'conversation') allowed = await canAccessConversation(userId, id)
+
+  if (ctx.role === 'agent') {
+    if (kind === 'workspace') {
+      const member = await getMember(ctx.userId as string, id)
+      if (member) {
+        ctx.memberId = member.id
+        ctx.wid = id
+        subscribe(channel, peer)
+        peer.send(JSON.stringify({ type: 'subscribed', channel }))
+        agentJoined(id, member.id, peer)
+        return
+      }
+    } else if (kind === 'conversation') {
+      allowed = await agentCanAccessConversation(ctx.userId as string, id)
+    }
+  } else if (ctx.role === 'visitor') {
+    if (kind === 'conversation') allowed = await visitorCanAccessConversation(ctx.wid as string, ctx.vid as string, id)
+    else if (kind === 'presence') allowed = id === ctx.wid
+  }
 
   if (!allowed) {
     peer.send(JSON.stringify({ type: 'subscribe.error', channel }))
@@ -47,25 +72,31 @@ export default defineWebSocketHandler({
     const url = new URL(peer.request?.url ?? '/', 'http://localhost')
     const ticket = url.searchParams.get('ticket')
     const secret = useRuntimeConfig().realtimeSecret
-    const verified = ticket && secret ? verifyTicket(ticket, secret) : null
+    const subject = ticket && secret ? verifyTicket(ticket, secret) : null
 
-    if (!verified) {
+    if (!subject) {
       peer.close(1008, 'unauthorized')
       return
     }
-    peer.context.userId = verified.uid
-    peer.context.role = 'agent'
+    if (subject.role === 'agent') {
+      peer.context.role = 'agent'
+      peer.context.userId = subject.uid
+    } else {
+      peer.context.role = 'visitor'
+      peer.context.wid = subject.wid
+      peer.context.vid = subject.vid
+    }
     peer.send(JSON.stringify({ type: 'connected' }))
   },
 
   async message(peer, message) {
-    const userId = peer.context.userId as string | undefined
-    if (!userId) {
+    const ctx = peer.context
+    if (!ctx.role) {
       peer.close(1008, 'unauthorized')
       return
     }
 
-    let msg: { type?: string, channel?: unknown, payload?: { conversation_id?: string } }
+    let msg: { type?: string, channel?: unknown, payload?: { conversation_id?: string, presence?: string } }
     try {
       msg = JSON.parse(message.text())
     } catch {
@@ -74,10 +105,21 @@ export default defineWebSocketHandler({
 
     switch (msg.type) {
       case 'subscribe':
-        await handleSubscribe(peer, userId, msg.channel)
+        await handleSubscribe(peer, msg.channel)
         break
-      case 'unsubscribe':
-        if (typeof msg.channel === 'string') unsubscribe(msg.channel, peer)
+      case 'unsubscribe': {
+        if (typeof msg.channel !== 'string') break
+        unsubscribe(msg.channel, peer)
+        // leaving a workspace channel = going offline there
+        if (ctx.role === 'agent' && ctx.memberId && msg.channel === channels.workspace(ctx.wid as string)) {
+          agentLeft(ctx.wid as string, ctx.memberId as string, peer)
+        }
+        break
+      }
+      case 'presence.update':
+        if (ctx.role === 'agent' && ctx.memberId && ctx.wid) {
+          agentSetAway(ctx.wid as string, ctx.memberId as string, msg.payload?.presence === 'away')
+        }
         break
       case 'typing.start':
       case 'typing.stop': {
@@ -85,7 +127,11 @@ export default defineWebSocketHandler({
         if (!conversationId) break
         publish(channels.conversation(conversationId), {
           type: 'typing',
-          payload: { conversation_id: conversationId, actor: 'agent', is_typing: msg.type === 'typing.start' }
+          payload: {
+            conversation_id: conversationId,
+            actor: ctx.role === 'visitor' ? 'visitor' : 'agent',
+            is_typing: msg.type === 'typing.start'
+          }
         })
         break
       }
@@ -93,10 +139,12 @@ export default defineWebSocketHandler({
   },
 
   close(peer) {
+    presencePeerGone(peer)
     unsubscribeAll(peer)
   },
 
   error(peer) {
+    presencePeerGone(peer)
     unsubscribeAll(peer)
   }
 })
