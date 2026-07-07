@@ -33,7 +33,8 @@ export function useControlRoom() {
 
   const conversations = ref<InboxItem[]>([])
   const members = ref<TeamMember[]>([])
-  const activeId = ref<string | null>(null)
+  // shared so the dashboard layout can tell whether this conversation is being viewed
+  const activeId = useState<string | null>('inbox:activeId', () => null)
   const messages = ref<MessageDTO[]>([])
   const filter = ref<InboxFilter>('all')
   const loadingList = ref(false)
@@ -134,6 +135,9 @@ export function useControlRoom() {
   async function claim(id: string) {
     await $fetch(`/api/conversations/${id}/claim`, { method: 'POST' })
   }
+  async function assign(id: string, memberId: string) {
+    await $fetch(`/api/conversations/${id}/assign`, { method: 'POST', body: { member_id: memberId } })
+  }
   async function resolve(id: string) {
     await $fetch(`/api/conversations/${id}/resolve`, { method: 'POST' })
   }
@@ -199,32 +203,27 @@ export function useControlRoom() {
     loadMembers()
   }
 
+  // NB: the workspace channel is owned by the dashboard layout (so notifications
+  // + presence persist across in-app navigation). Here we only manage the
+  // conversation channel for the open thread + the event handler.
   onMounted(() => {
     rt.connect()
     off = rt.on(applyEvent)
-    if (workspaceId.value) {
-      rt.subscribe(channels.workspace(workspaceId.value))
-      loadAll()
-    }
+    if (workspaceId.value) loadAll()
   })
 
   onBeforeUnmount(() => {
     off?.()
     if (activeId.value) rt.unsubscribe(channels.conversation(activeId.value))
-    if (workspaceId.value) rt.unsubscribe(channels.workspace(workspaceId.value))
   })
 
   // follow the workspace switcher
-  watch(workspaceId, (next, prev) => {
-    if (prev) rt.unsubscribe(channels.workspace(prev))
+  watch(workspaceId, (next) => {
     activeId.value = null
     messages.value = []
     conversations.value = []
     counts.value = { unassigned: 0, open: 0, resolved: 0 }
-    if (next) {
-      rt.subscribe(channels.workspace(next))
-      loadAll()
-    }
+    if (next) loadAll()
   })
 
   watch(filter, () => loadConversations({ showLoader: true }))
@@ -245,6 +244,7 @@ export function useControlRoom() {
     memberPresence,
     select,
     deselect,
+    assign,
     sendReply,
     claim,
     resolve,

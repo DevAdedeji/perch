@@ -1,15 +1,63 @@
 <script setup lang="ts">
+import { channels } from '@perch/shared'
+import type { ServerEvent } from '@perch/shared'
+
 const { currentWorkspace } = useAuth()
+const rt = useRealtime()
+const toast = useToast()
+const { play } = useNotificationSound()
+const route = useRoute()
+
 const drawerOpen = ref(false)
+const wid = computed(() => currentWorkspace.value?.workspaceId ?? null)
+// the conversation the agent is actively viewing (set by the inbox)
+const activeConversationId = useState<string | null>('inbox:activeId', () => null)
 
 function openDrawer() {
   drawerOpen.value = true
 }
 
 // close the mobile drawer on route change
-const route = useRoute()
 watch(() => route.fullPath, () => {
   drawerOpen.value = false
+})
+
+/**
+ * In-dashboard new-message notifications (§3.4). The layout owns the workspace
+ * subscription so this fires on any dashboard page (inbox, team, settings), and
+ * so agent presence stays stable across in-app navigation. Skipped when the
+ * agent is already looking at that exact conversation in a focused tab.
+ */
+function onEvent(ev: ServerEvent) {
+  if (ev.type !== 'message.new' || ev.payload.sender_type !== 'visitor') return
+  const viewing = !document.hidden
+    && route.path === '/dashboard'
+    && activeConversationId.value === ev.payload.conversation_id
+  if (viewing) return
+
+  toast.add({
+    title: 'New message',
+    description: ev.payload.content.slice(0, 90),
+    icon: 'i-lucide-message-circle',
+    color: 'info',
+    actions: [{ label: 'View', onClick: () => { navigateTo('/dashboard') } }]
+  })
+  play()
+}
+
+let off: (() => void) | undefined
+onMounted(() => {
+  rt.connect()
+  off = rt.on(onEvent)
+  if (wid.value) rt.subscribe(channels.workspace(wid.value))
+})
+onBeforeUnmount(() => {
+  off?.()
+  if (wid.value) rt.unsubscribe(channels.workspace(wid.value))
+})
+watch(wid, (next, prev) => {
+  if (prev) rt.unsubscribe(channels.workspace(prev))
+  if (next) rt.subscribe(channels.workspace(next))
 })
 </script>
 

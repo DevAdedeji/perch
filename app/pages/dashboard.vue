@@ -6,6 +6,7 @@ useHead({ title: 'Inbox · Perch' })
 
 const toast = useToast()
 const cr = useControlRoom()
+const { enabled: soundEnabled, toggle: toggleSound } = useNotificationSound()
 
 const filters: { label: string, value: InboxFilter }[] = [
   { label: 'All', value: 'all' },
@@ -63,6 +64,34 @@ async function onClaim(id: string) {
     })
   }
 }
+
+function presenceDot(status: string) {
+  return status === 'online' ? 'bg-green-500' : status === 'away' ? 'bg-amber-400' : 'bg-red-500'
+}
+
+// transfer menu — online agents first, current owner checked
+const assignMenuItems = computed(() => {
+  const active = cr.activeConversation.value
+  const rank = (p: string) => (p === 'online' ? 0 : p === 'away' ? 1 : 2)
+  const sorted = [...cr.members.value].sort((a, b) => rank(a.presence) - rank(b.presence))
+  return [sorted.map(m => ({
+    label: m.name,
+    presence: m.presence,
+    trailingIcon: active?.assignedAgentId === m.id ? 'i-lucide-check' : undefined,
+    onSelect: () => onAssign(m.id, m.name)
+  }))]
+})
+
+async function onAssign(memberId: string, memberName: string) {
+  const active = cr.activeConversation.value
+  if (!active || active.assignedAgentId === memberId) return
+  try {
+    await cr.assign(active.id, memberId)
+    toast.add({ title: `Transferred to ${memberName}`, icon: 'i-lucide-arrow-right-left', color: 'success' })
+  } catch (e) {
+    toast.add({ title: getErrorMessage(e, 'Could not transfer'), color: 'error' })
+  }
+}
 </script>
 
 <template>
@@ -77,16 +106,27 @@ async function onClaim(id: string) {
           <h1 class="font-display text-lg font-bold text-highlighted">
             Inbox
           </h1>
-          <span
-            class="flex items-center gap-1.5 text-[11px]"
-            :class="cr.status.value === 'open' ? 'text-green-600 dark:text-green-500' : 'text-dimmed'"
-          >
+          <div class="flex items-center gap-1.5">
             <span
-              class="size-1.5 rounded-full"
-              :class="cr.status.value === 'open' ? 'bg-green-500 animate-pulse' : 'bg-zinc-400'"
+              class="flex items-center gap-1.5 text-[11px]"
+              :class="cr.status.value === 'open' ? 'text-green-600 dark:text-green-500' : 'text-dimmed'"
+            >
+              <span
+                class="size-1.5 rounded-full"
+                :class="cr.status.value === 'open' ? 'bg-green-500 animate-pulse' : 'bg-zinc-400'"
+              />
+              {{ cr.status.value === 'open' ? 'live' : 'connecting…' }}
+            </span>
+            <UButton
+              :icon="soundEnabled ? 'i-lucide-bell' : 'i-lucide-bell-off'"
+              color="neutral"
+              variant="ghost"
+              size="xs"
+              square
+              :aria-label="soundEnabled ? 'Mute new-message sound' : 'Unmute new-message sound'"
+              @click="toggleSound"
             />
-            {{ cr.status.value === 'open' ? 'live' : 'connecting…' }}
-          </span>
+          </div>
         </div>
 
         <div class="mt-3 flex items-center gap-1 overflow-x-scroll">
@@ -237,10 +277,43 @@ async function onClaim(id: string) {
           </div>
 
           <div class="ml-auto flex items-center gap-2">
-            <span
-              v-if="cr.activeConversation.value.assignedAgentId"
-              class="rounded-md bg-inverted/10 px-2.5 py-1 text-[11px] font-medium text-highlighted ring-1 ring-inverted/20"
-            >{{ cr.memberName(cr.activeConversation.value.assignedAgentId) }}</span>
+            <!-- assignee / transfer -->
+            <UDropdownMenu
+              :items="assignMenuItems"
+              :content="{ align: 'end' }"
+            >
+              <UButton
+                size="sm"
+                color="neutral"
+                :variant="cr.activeConversation.value.assignedAgentId ? 'subtle' : 'ghost'"
+                trailing-icon="i-lucide-chevron-down"
+              >
+                <span
+                  v-if="cr.activeConversation.value.assignedAgentId"
+                  class="flex items-center gap-1.5"
+                >
+                  <span
+                    class="size-1.5 rounded-full"
+                    :class="presenceDot(cr.memberPresence(cr.activeConversation.value.assignedAgentId))"
+                  />
+                  {{ cr.memberName(cr.activeConversation.value.assignedAgentId) }}
+                </span>
+                <span
+                  v-else
+                  class="text-muted"
+                >Assign</span>
+              </UButton>
+
+              <template #item-label="{ item }">
+                <span class="flex items-center gap-2">
+                  <span
+                    class="size-1.5 rounded-full"
+                    :class="presenceDot((item as { presence: string }).presence)"
+                  />
+                  {{ item.label }}
+                </span>
+              </template>
+            </UDropdownMenu>
 
             <UButton
               v-if="cr.activeConversation.value.status === 'unassigned'"

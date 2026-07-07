@@ -18,7 +18,7 @@ export default defineNuxtRouteMiddleware(async (to) => {
   const isOnboarding = path === '/onboarding'
   // authed app routes that require a workspace
   const isApp = path === '/dashboard' || path.startsWith('/dashboard/')
-    || path === '/settings' || path.startsWith('/settings/')
+    || path === '/settings' || path === '/team'
 
   if (!loggedIn.value) {
     if (isOnboarding || isApp) {

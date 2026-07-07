@@ -6,7 +6,7 @@ const { status: myPresence, away, setAway } = usePresence()
 
 const nav = [
   { label: 'Inbox', icon: 'i-lucide-inbox', to: '/dashboard', soon: false },
-  { label: 'Team', icon: 'i-lucide-users', to: '/settings', soon: false },
+  { label: 'Team', icon: 'i-lucide-users', to: '/team', soon: false },
   { label: 'Settings', icon: 'i-lucide-settings', to: '/settings', soon: false }
 ]
 
@@ -18,7 +18,7 @@ const initials = computed(() =>
 )
 
 function presenceDot(status: string) {
-  return status === 'online' ? 'bg-green-500' : status === 'away' ? 'bg-amber-400' : 'bg-zinc-500'
+  return status === 'online' ? 'bg-green-500' : status === 'away' ? 'bg-amber-400' : 'bg-red-500'
 }
 
 const userMenuItems = computed(() => [[

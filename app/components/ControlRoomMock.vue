@@ -34,11 +34,11 @@ const onlineCount = computed(() => team.filter(a => a.status === 'online').lengt
 const stack = computed(() => team.slice(0, 3)) // avatars shown before "+N"
 const extra = computed(() => Math.max(team.length - stack.value.length, 0))
 
-// presence dots — green online, amber away, gray offline
+// presence dots — green online, amber away, red offline
 function dot(status: string) {
   if (status === 'online') return 'bg-green-500'
   if (status === 'away') return 'bg-amber-400'
-  return 'bg-zinc-500'
+  return 'bg-red-500'
 }
 </script>
 
