@@ -25,6 +25,17 @@ function init() {
 
   const Z = 2147483000
 
+  // ── frame styles (a stylesheet so we can size responsively) ──
+  // Desktop/tablet: a floating 380×600 panel above the launcher.
+  // Mobile (≤480px): an inset sheet — full width minus margins, with a top gap
+  // and safe-area insets, so it never eats the entire screen height.
+  const style = document.createElement('style')
+  style.textContent = `
+.perch-frame{position:fixed;bottom:88px;right:20px;width:380px;height:600px;max-width:calc(100vw - 40px);max-height:calc(100vh - 120px);border:none;border-radius:16px;box-shadow:0 12px 48px rgba(0,0,0,0.28);z-index:${Z};background:transparent}
+@media (max-width:480px){.perch-frame{top:calc(env(safe-area-inset-top, 0px) + 16px);left:12px;right:12px;bottom:calc(env(safe-area-inset-bottom, 0px) + 16px);width:auto;height:auto;max-width:none;max-height:none;border-radius:18px}}
+`
+  document.head.appendChild(style)
+
   // ── launcher bubble ──
   const bubble = document.createElement('button')
   bubble.setAttribute('aria-label', 'Open chat')
@@ -61,13 +72,9 @@ function init() {
     const f = document.createElement('iframe')
     f.src = `${origin}/widget?site_id=${encodeURIComponent(siteId!)}`
     f.title = 'Chat'
+    f.className = 'perch-frame'
     f.setAttribute('allow', 'clipboard-write')
-    Object.assign(f.style, {
-      position: 'fixed', bottom: '88px', right: '20px', width: '380px', height: '600px',
-      maxWidth: 'calc(100vw - 40px)', maxHeight: 'calc(100vh - 120px)', border: 'none',
-      borderRadius: '16px', boxShadow: '0 12px 48px rgba(0,0,0,0.28)', zIndex: String(Z),
-      display: 'none', background: 'transparent'
-    })
+    f.style.display = 'none'
     document.body.appendChild(f)
     iframe = f
     return f

@@ -354,3 +354,14 @@ onBeforeUnmount(() => {
     </a>
   </div>
 </template>
+
+<style scoped>
+/* Mobile browsers auto-zoom when a focused field's font-size is < 16px.
+   Keep the compact 14px look on desktop; bump to 16px only on touch devices. */
+@media (pointer: coarse) {
+  textarea,
+  input {
+    font-size: 16px;
+  }
+}
+</style>

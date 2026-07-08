@@ -172,21 +172,7 @@ Notes from getting this live on a free tier:
 
 ---
 
-## Scaling the real-time layer
 
-v1 runs on **one instance** with in-process fan-out — correct and simple for a portfolio build. Every
-broadcast goes through one small interface in `server/utils/realtime.ts`:
-
-```ts
-publish(channel: string, event: WsEvent): void
-subscribe(channel: string, peer): void
-```
-
-To scale horizontally, that single file swaps the in-memory bus for **Redis pub/sub** (and presence
-moves to a Redis set with TTL heartbeats). No call sites change. This is deliberately *not* built for
-v1 — the point is to show the seam, not to prematurely optimize.
-
----
 
 ## Status & roadmap
 
@@ -194,15 +180,6 @@ v1 — the point is to show the seam, not to prematurely optimize.
 reassign · resolve/reopen · per-agent unread · internal notes · live presence · settings & team
 management · the embeddable widget with pre-chat, typing, and presence · notification toast + sound.
 
-**Planned (schema/hooks in place):**
-- Canned responses (`/shortcut` templates)
-- Image attachments via signed Cloudinary uploads
-- Visitor context panel (page URL, device, past conversations)
-- Email notifications for unanswered conversations (Resend)
-- Agent workload view
-
-**Deliberately skipped for v1:** real Stripe billing (plan UI only) and auto round-robin assignment
-(manual claim covers the interesting concurrency case).
 
 ---
 
