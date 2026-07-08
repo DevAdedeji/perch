@@ -3,6 +3,8 @@
 # ---------- builder ----------
 FROM node:22-slim AS builder
 ENV NITRO_PRESET=node-server
+# raise V8's heap ceiling — the Nitro bundle OOMs on the default ~2 GB limit
+ENV NODE_OPTIONS=--max-old-space-size=4096
 RUN corepack enable
 WORKDIR /app
 

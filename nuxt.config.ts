@@ -25,6 +25,13 @@ export default defineNuxtConfig({
     '/': { prerender: true }
   },
 
+  // sourcemaps are the main memory hog in the production build — off keeps the
+  // Nitro bundle within a small (free-tier) builder's RAM
+  sourcemap: {
+    server: false,
+    client: false
+  },
+
   devServer: {
     port: 2222
   },
