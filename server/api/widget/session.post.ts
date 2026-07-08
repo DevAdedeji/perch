@@ -54,7 +54,7 @@ export default defineEventHandler(async (event) => {
     thread = rows.map(serializeMessage)
   }
 
-  const secret = useRuntimeConfig(event).realtimeSecret!
+  const secret = (useRuntimeConfig(event).realtimeSecret || process.env.NUXT_SESSION_PASSWORD)!
   const wsTicket = signTicket({ role: 'visitor', wid: workspace.id, vid: visitor!.id }, secret)
 
   const agentName = conversation?.assignedAgentId ? await getMemberName(conversation.assignedAgentId) : null
