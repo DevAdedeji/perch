@@ -95,7 +95,7 @@ function dot(status: string) {
             v-for="f in filters"
             :key="f.label"
             class="flex items-center justify-between rounded-lg px-2.5 py-2 text-[13px] transition-colors"
-            :class="f.active ? 'bg-inverted/10 text-highlighted ring-1 ring-inverted/20 font-medium' : 'text-muted'"
+            :class="f.active ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400 ring-1 ring-amber-500/25 font-medium' : 'text-muted'"
           >
             <span>{{ f.label }}</span>
             <span class="font-mono text-xs">{{ f.count }}</span>
@@ -162,11 +162,11 @@ function dot(status: string) {
             v-for="c in convos"
             :key="c.name"
             class="relative flex items-center gap-3 px-4 py-3.5"
-            :class="c.active ? 'bg-inverted/6' : ''"
+            :class="c.active ? 'bg-amber-500/6' : ''"
           >
             <span
               v-if="c.active"
-              class="absolute inset-y-0 left-0 w-0.5 bg-inverted"
+              class="absolute inset-y-0 left-0 w-0.5 bg-amber-500"
             />
             <span class="grid place-items-center size-8 shrink-0 rounded-lg bg-elevated ring-1 ring-default text-xs font-semibold text-muted">
               {{ c.name.charAt(0) }}
@@ -185,11 +185,11 @@ function dot(status: string) {
             </div>
             <span
               v-if="c.unread"
-              class="size-2 shrink-0 rounded-full bg-inverted"
+              class="size-2 shrink-0 rounded-full bg-amber-500"
             />
             <span
               v-else-if="c.owner"
-              class="grid place-items-center size-5 shrink-0 rounded-full bg-inverted/15 text-[9px] font-bold text-highlighted"
+              class="grid place-items-center size-5 shrink-0 rounded-full bg-amber-500/15 text-[9px] font-bold text-amber-700 dark:text-amber-400"
             >{{ c.owner }}</span>
           </div>
         </div>
@@ -208,7 +208,7 @@ function dot(status: string) {
             </p>
           </div>
           <div class="ml-auto flex items-center gap-2">
-            <span class="rounded-md bg-inverted/10 px-2.5 py-1 text-[11px] font-medium text-highlighted ring-1 ring-inverted/20 whitespace-nowrap">Owned by Maya</span>
+            <span class="rounded-md bg-amber-500/10 px-2.5 py-1 text-[11px] font-medium text-amber-700 dark:text-amber-400 ring-1 ring-amber-500/25 whitespace-nowrap">Owned by Maya</span>
             <span class="grid place-items-center size-7 rounded-md ring-1 ring-default text-dimmed">
               <UIcon
                 name="i-lucide-check"
@@ -225,7 +225,7 @@ function dot(status: string) {
             </div>
           </div>
           <div class="flex flex-row-reverse gap-2">
-            <div class="max-w-[65%] rounded-2xl rounded-br-md bg-inverted px-3.5 py-2 text-[13px] text-inverted">
+            <div class="max-w-[65%] rounded-2xl rounded-br-md bg-amber-500 px-3.5 py-2 text-[13px] text-slate-950">
               Yes — CSV and JSON, on every plan.
             </div>
           </div>
@@ -241,9 +241,9 @@ function dot(status: string) {
 
         <div class="flex items-center gap-2 px-4 py-3 border-t border-default bg-elevated/40">
           <div class="flex-1 rounded-lg bg-default ring-1 ring-default px-3.5 py-2.5 text-xs text-dimmed">
-            Type <span class="font-mono text-highlighted">/hello</span> to insert a canned reply…
+            Type <span class="font-mono text-amber-600 dark:text-amber-400">/hello</span> to insert a canned reply…
           </div>
-          <span class="grid place-items-center size-9 rounded-lg bg-inverted text-inverted">
+          <span class="grid place-items-center size-9 rounded-lg bg-amber-500 text-slate-950">
             <UIcon
               name="i-lucide-arrow-up"
               class="size-4"

@@ -1,7 +1,8 @@
 export default defineAppConfig({
   ui: {
     colors: {
-      primary: 'slate',
+      // brand accent — amber/gold, used deliberately (primary actions, unread, notes)
+      primary: 'amber',
       neutral: 'slate'
     },
     button: {

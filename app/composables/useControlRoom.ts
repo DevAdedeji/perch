@@ -21,6 +21,31 @@ export interface TeamMember {
   presence: 'online' | 'offline' | 'away'
 }
 
+export interface CannedResponse {
+  id: string
+  shortcut: string
+  content: string
+}
+
+export interface VisitorContext {
+  visitor: {
+    name: string | null
+    email: string | null
+    visitor_id: string
+    first_seen_at: string
+    last_seen_at: string
+    page_url: string | null
+    browser: string | null
+    os: string | null
+  }
+  conversation: {
+    created_at: string
+    status: ConversationStatus
+    resolved_at: string | null
+  }
+  past_conversations: number
+}
+
 export type InboxFilter = 'all' | ConversationStatus
 
 /**
@@ -43,6 +68,10 @@ export function useControlRoom() {
 
   // per-status counts for the tabs — fetched independently of the active filter
   const counts = ref({ unassigned: 0, open: 0, resolved: 0 })
+
+  // composer `/shortcut` templates + the context panel for the open thread
+  const canned = ref<CannedResponse[]>([])
+  const context = ref<VisitorContext | null>(null)
 
   const workspaceId = computed(() => currentWorkspace.value?.workspaceId ?? null)
   const activeConversation = computed(() => conversations.value.find(c => c.id === activeId.value) ?? null)
@@ -101,6 +130,11 @@ export function useControlRoom() {
     members.value = await $fetch<TeamMember[]>(`/api/workspaces/${workspaceId.value}/members`)
   }
 
+  async function loadCanned() {
+    if (!workspaceId.value) return
+    canned.value = await $fetch<CannedResponse[]>(`/api/workspaces/${workspaceId.value}/canned`)
+  }
+
   async function select(id: string) {
     if (activeId.value === id) return
     if (activeId.value) rt.unsubscribe(channels.conversation(activeId.value))
@@ -108,9 +142,16 @@ export function useControlRoom() {
     rt.subscribe(channels.conversation(id))
     visitorTyping.value = false
     messages.value = [] // clear the previous thread immediately so it can't linger
+    context.value = null
     loadingThread.value = true
 
     const seq = ++threadSeq
+    // context loads alongside the thread; it must never block or fail the select
+    $fetch<VisitorContext>(`/api/conversations/${id}/context`)
+      .then((ctx) => {
+        if (seq === threadSeq) context.value = ctx
+      })
+      .catch(() => {})
     try {
       const data = await $fetch<MessageDTO[]>(`/api/conversations/${id}/messages`)
       if (seq !== threadSeq) return // switched to another chat mid-load
@@ -127,6 +168,7 @@ export function useControlRoom() {
     if (activeId.value) rt.unsubscribe(channels.conversation(activeId.value))
     activeId.value = null
     messages.value = []
+    context.value = null
   }
 
   /* ── actions ─────────────────────────────────────────────── */
@@ -249,6 +291,7 @@ export function useControlRoom() {
     loadConversations({ showLoader: true })
     loadCounts()
     loadMembers()
+    loadCanned()
   }
 
   // NB: the workspace channel is owned by the dashboard layout (so notifications
@@ -287,6 +330,8 @@ export function useControlRoom() {
     loadingThread,
     visitorTyping,
     counts,
+    canned,
+    context,
     status: rt.status,
     memberName,
     memberPresence,

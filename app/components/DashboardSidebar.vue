@@ -1,6 +1,7 @@
 <script setup lang="ts">
 const emit = defineEmits<{ navigate: [] }>()
 
+const route = useRoute()
 const { user, workspaces, currentWorkspace, setWorkspace, logout } = useAuth()
 const { status: myPresence, away, setAway } = usePresence()
 
@@ -125,7 +126,10 @@ function pickWorkspace(id: string) {
         v-for="item in nav"
         :key="item.label"
         :to="item.to"
-        class="flex items-center gap-3 rounded-lg px-3 py-2 text-sm text-muted hover:text-highlighted hover:bg-elevated/60 transition-colors"
+        class="flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors"
+        :class="route.path === item.to
+          ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400 font-medium'
+          : 'text-muted hover:text-highlighted hover:bg-elevated/60'"
         @click="emit('navigate')"
       >
         <UIcon

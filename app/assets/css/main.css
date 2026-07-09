@@ -34,9 +34,12 @@
   box-shadow: inset 0 0 0 1px var(--ui-border);
 }
 
-/* High-contrast emphasis text (monochrome) */
+/* Brand emphasis text — amber/gold gradient */
 .text-accent {
-  color: var(--ui-text-highlighted);
+  background: linear-gradient(100deg, var(--color-amber-500), var(--color-amber-400) 55%, var(--color-amber-600));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -39,7 +39,7 @@ function onEvent(ev: ServerEvent) {
     title: 'New message',
     description: ev.payload.content.slice(0, 90),
     icon: 'i-lucide-message-circle',
-    color: 'info',
+    color: 'neutral',
     actions: [{ label: 'View', onClick: () => { navigateTo('/dashboard') } }]
   })
   play()

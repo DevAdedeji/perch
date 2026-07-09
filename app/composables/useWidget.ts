@@ -131,8 +131,16 @@ export function useWidget(siteId: string) {
       case 'message.new':
         // internal notes are filtered server-side; append anything not already present
         if (ev.payload.conversation_id === conversationId.value && !messages.value.some(m => m.id === ev.payload.id)) {
-          messages.value.push(ev.payload)
-          if (ev.payload.sender_type === 'agent') agentTyping.value = false
+          // WS echo of our own optimistic send — swap the temp bubble in place
+          const tempIdx = ev.payload.sender_type === 'visitor'
+            ? messages.value.findIndex(m => m.pending && m.content === ev.payload.content)
+            : -1
+          if (tempIdx !== -1) {
+            messages.value.splice(tempIdx, 1, ev.payload)
+          } else {
+            messages.value.push(ev.payload)
+            if (ev.payload.sender_type === 'agent') agentTyping.value = false
+          }
         }
         break
       case 'typing':
@@ -161,6 +169,10 @@ export function useWidget(siteId: string) {
     }
   }
 
+  // POSTs are serialized so rapid sends keep their order (and the first send
+  // finishes creating the conversation before the next one fires)
+  let sendChain: Promise<unknown> = Promise.resolve()
+
   async function sendMessage(content: string, identity?: { name?: string, email?: string }) {
     const text = content.trim()
     if (!text) return
@@ -180,23 +192,36 @@ export function useWidget(siteId: string) {
       pending: true
     })
 
-    try {
-      const res = await $fetch<{ conversation_id: string, message: MessageDTO }>('/api/widget/messages', {
-        method: 'POST',
-        body: { site_id: siteId, visitor_id: visitorId, content: text, page_url: document.referrer, ...identity }
-      })
-      if (!conversationId.value) {
-        conversationId.value = res.conversation_id
-        subscribeConversation()
+    const run = async () => {
+      try {
+        const res = await $fetch<{ conversation_id: string, message: MessageDTO }>('/api/widget/messages', {
+          method: 'POST',
+          body: { site_id: siteId, visitor_id: visitorId, content: text, page_url: document.referrer, ...identity }
+        })
+        if (!conversationId.value) {
+          conversationId.value = res.conversation_id
+          subscribeConversation()
+        }
+        if (identity?.name) visitorName.value = identity.name
+        if (identity?.email) visitorEmail.value = identity.email
+        // reconcile in place — replacing (not filter + push) keeps send order
+        const idx = messages.value.findIndex(m => m.id === tempId)
+        if (messages.value.some(m => m.id === res.message.id)) {
+          if (idx !== -1) messages.value.splice(idx, 1)
+        } else if (idx !== -1) {
+          messages.value.splice(idx, 1, res.message)
+        } else {
+          messages.value.push(res.message)
+        }
+      } catch (e) {
+        messages.value = messages.value.filter(m => m.id !== tempId)
+        throw e
       }
-      if (identity?.name) visitorName.value = identity.name
-      if (identity?.email) visitorEmail.value = identity.email
-      messages.value = messages.value.filter(m => m.id !== tempId)
-      if (!messages.value.some(m => m.id === res.message.id)) messages.value.push(res.message)
-    } catch (e) {
-      messages.value = messages.value.filter(m => m.id !== tempId)
-      throw e
     }
+
+    const p = sendChain.then(run, run)
+    sendChain = p.catch(() => {})
+    return p
   }
 
   function sendTyping(isTyping: boolean) {

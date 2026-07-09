@@ -4,4 +4,4 @@
 
 export * from './schema'
 export * from './client'
-export { sql, eq, and, or, desc, asc, gt, lt, inArray, isNull, count } from 'drizzle-orm'
+export { sql, eq, ne, and, or, desc, asc, gt, lt, inArray, isNull, count } from 'drizzle-orm'

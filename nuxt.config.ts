@@ -18,7 +18,11 @@ export default defineNuxtConfig({
     // server-only: Neon/Postgres connection string (read from .env)
     databaseUrl: process.env.NEON_CONNECTION_STRING,
     // HMAC secret for short-lived WebSocket auth tickets (reuse the session secret)
-    realtimeSecret: process.env.NUXT_SESSION_PASSWORD
+    realtimeSecret: process.env.NUXT_SESSION_PASSWORD,
+    public: {
+      // the workspace the landing page's live demo widget talks to (site_ids are public by design)
+      demoSiteId: process.env.NUXT_PUBLIC_DEMO_SITE_ID || 'ws_18c6715c14'
+    }
   },
 
   routeRules: {

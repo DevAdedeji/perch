@@ -1,6 +1,6 @@
-import { eq, users, workspaceMembers } from '@perch/db'
+import { and, conversations, eq, sql, users, workspaceMembers } from '@perch/db'
 
-/** Team roster for a workspace (for owner labels, reassignment, presence). */
+/** Team roster for a workspace (owner labels, reassignment, presence, workload). */
 export default defineEventHandler(async (event) => {
   const workspaceId = getRouterParam(event, 'id')!
   await requireMembership(event, workspaceId)
@@ -12,12 +12,17 @@ export default defineEventHandler(async (event) => {
       userId: workspaceMembers.userId,
       name: users.name,
       email: users.email,
-      role: workspaceMembers.role
+      role: workspaceMembers.role,
+      // §3.3 agent workload: open conversations currently owned by this member
+      openCount: sql<number>`(
+        select count(*) from ${conversations} c
+        where c.assigned_agent_id = ${workspaceMembers.id} and c.status = 'open'
+      )`
     })
     .from(workspaceMembers)
     .innerJoin(users, eq(users.id, workspaceMembers.userId))
-    .where(eq(workspaceMembers.workspaceId, workspaceId))
+    .where(and(eq(workspaceMembers.workspaceId, workspaceId)))
 
   // live presence from the in-process registry (§6.5)
-  return rows.map(m => ({ ...m, presence: memberPresence(workspaceId, m.id) }))
+  return rows.map(m => ({ ...m, openCount: Number(m.openCount), presence: memberPresence(workspaceId, m.id) }))
 })

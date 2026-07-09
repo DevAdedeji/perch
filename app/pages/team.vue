@@ -11,6 +11,7 @@ interface Member {
   email: string
   role: 'admin' | 'agent'
   presence: 'online' | 'away' | 'offline'
+  openCount: number
 }
 
 const { currentWorkspace, user } = useAuth()
@@ -184,6 +185,19 @@ function presenceDot(status: string) {
                 {{ m.email }}
               </p>
             </div>
+
+            <!-- §3.3 workload: open conversations this member currently owns -->
+            <span
+              class="hidden sm:flex items-center gap-1.5 text-xs mr-1"
+              :class="m.openCount > 0 ? 'text-highlighted' : 'text-dimmed'"
+              :title="`${m.openCount} open conversation${m.openCount === 1 ? '' : 's'}`"
+            >
+              <UIcon
+                name="i-lucide-message-square"
+                class="size-3.5"
+              />
+              <span class="tabular-nums font-medium">{{ m.openCount }}</span>
+            </span>
 
             <span class="hidden sm:block text-xs capitalize text-dimmed mr-1">{{ m.presence }}</span>
 

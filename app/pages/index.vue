@@ -1,4 +1,41 @@
 <script setup lang="ts">
+const config = useRuntimeConfig()
+const toast = useToast()
+
+// the landing page eats its own dog food — the real widget, live, bottom-right
+useHead({
+  script: [{
+    'src': '/widget.js',
+    'data-site-id': config.public.demoSiteId,
+    'async': true,
+    'tagPosition': 'bodyClose'
+  }]
+})
+
+// closing tag split so it doesn't terminate this SFC <script> block
+const closeScript = '</' + 'script>'
+const snippetText = computed(() => `<script src="https://perch.adedeji.xyz/widget.js" data-site-id="ws_abc123" async>${closeScript}`)
+async function copySnippet() {
+  try {
+    await navigator.clipboard.writeText(snippetText.value)
+    toast.add({ title: 'Snippet copied', icon: 'i-lucide-check', color: 'success' })
+  } catch {
+    toast.add({ title: 'Copy failed', color: 'error' })
+  }
+}
+
+// the real §6 event contract, streaming by — not decoration, the actual event names
+const wireEvents = [
+  'message.new · 41ms',
+  'presence → online',
+  'conversation.claim.ok',
+  'typing.start · visitor',
+  'conversation.new',
+  'business.presence → online',
+  'conversation.updated',
+  'typing.stop · agent'
+]
+
 const pillars = [
   {
     icon: 'i-lucide-mouse-pointer-click',
@@ -42,10 +79,16 @@ const stats = [
   { value: '0', label: 'Double-owned chats' }
 ]
 
-const brands = [
-  'i-simple-icons-vercel', 'i-simple-icons-linear', 'i-simple-icons-notion',
-  'i-simple-icons-figma', 'i-simple-icons-slack', 'i-simple-icons-framer',
-  'i-simple-icons-stripe', 'i-simple-icons-github'
+// honest marquee: the stack this thing is actually built with, end to end
+const stack = [
+  { icon: 'i-simple-icons-nuxtdotjs', label: 'Nuxt 4' },
+  { icon: 'i-simple-icons-vuedotjs', label: 'Vue 3' },
+  { icon: 'i-simple-icons-typescript', label: 'TypeScript' },
+  { icon: 'i-simple-icons-postgresql', label: 'Postgres' },
+  { icon: 'i-simple-icons-drizzle', label: 'Drizzle' },
+  { icon: 'i-simple-icons-tailwindcss', label: 'Tailwind' },
+  { icon: 'i-simple-icons-docker', label: 'Docker' },
+  { icon: 'i-simple-icons-pnpm', label: 'pnpm' }
 ]
 
 const plans = [
@@ -83,21 +126,28 @@ const plans = [
   <main class="relative">
     <!-- ═══════════════ HERO ═══════════════ -->
     <section class="relative pt-36 pb-20 sm:pt-44 sm:pb-28 overflow-hidden">
-      <!-- backdrop: just a faint grid, faded out -->
+      <!-- backdrop: faint grid + a warm amber bloom -->
       <div class="pointer-events-none absolute inset-0 -z-10">
         <div class="absolute inset-0 bg-grid [mask-image:radial-gradient(ellipse_70%_55%_at_50%_0%,#000_30%,transparent_85%)]" />
+        <div
+          class="absolute -top-40 left-1/2 -translate-x-1/2 h-130 w-208 max-w-full rounded-full opacity-25 dark:opacity-20 blur-3xl"
+          style="background: radial-gradient(closest-side, var(--color-amber-500), transparent 70%)"
+        />
       </div>
 
       <UContainer>
         <div class="grid lg:grid-cols-[1.05fr_0.95fr] gap-14 lg:gap-10 items-center">
           <!-- copy -->
           <div>
-            <div class="inline-flex items-center gap-2 rounded-full glass ring-1 ring-default pl-1.5 pr-3 py-1.5 text-xs">
-              <span class="rounded-full bg-inverted/15 px-2 py-0.5 font-medium text-highlighted">New</span>
-              <span class="text-muted">Real-time support, owned end to end</span>
+            <div class="inline-flex items-center gap-2 rounded-full glass ring-1 ring-amber-500/30 pl-3 pr-3 py-1.5 text-xs">
+              <span class="relative flex size-2">
+                <span class="absolute inline-flex size-full rounded-full bg-amber-500 opacity-60 animate-ping" />
+                <span class="relative inline-flex size-2 rounded-full bg-amber-500" />
+              </span>
+              <span class="text-muted">Live demo — this page runs Perch. <span class="text-highlighted font-medium">Say hi</span></span>
               <UIcon
-                name="i-lucide-arrow-right"
-                class="size-3.5 text-dimmed"
+                name="i-lucide-arrow-down-right"
+                class="size-3.5 text-amber-600 dark:text-amber-400"
               />
             </div>
 
@@ -116,9 +166,9 @@ const plans = [
               <UButton
                 to="/signup"
                 size="xl"
-                color="neutral"
+                color="primary"
                 trailing-icon="i-lucide-arrow-right"
-                class="font-semibold shadow-lg shadow-black/20"
+                class="font-semibold shadow-lg shadow-amber-500/25"
               >
                 Get started free
               </UButton>
@@ -150,24 +200,48 @@ const plans = [
           </div>
 
           <!-- visual -->
-          <div class="relative">
+          <div class="relative min-w-0">
             <HeroChat />
+
+            <!-- the real event contract, streaming by -->
+            <div class="mt-6 rounded-xl glass ring-1 ring-default overflow-hidden">
+              <div class="flex items-center gap-2 px-3 pt-2">
+                <span class="size-1.5 rounded-full bg-green-500 animate-pulse" />
+                <span class="text-[10px] font-medium uppercase tracking-wider text-dimmed">On the wire</span>
+              </div>
+              <div class="relative overflow-hidden py-2 mask-[linear-gradient(to_right,transparent,#000_10%,#000_90%,transparent)]">
+                <div class="flex w-max gap-8 animate-marquee">
+                  <span
+                    v-for="(e, i) in [...wireEvents, ...wireEvents]"
+                    :key="i"
+                    class="shrink-0 font-mono text-[11px] text-muted"
+                  >
+                    <span class="text-amber-600 dark:text-amber-400">▸</span> {{ e }}
+                  </span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
-        <!-- brand marquee -->
+        <!-- stack marquee — no fake customer logos, just what it's really built with -->
         <div class="mt-20">
           <p class="text-center text-xs uppercase tracking-[0.2em] text-dimmed">
-            Built for teams who live in the inbox
+            No black boxes — built end to end with
           </p>
           <div class="relative mt-6 overflow-hidden [mask-image:linear-gradient(to_right,transparent,#000_12%,#000_88%,transparent)]">
-            <div class="flex w-max gap-16 animate-marquee">
-              <UIcon
-                v-for="(b, i) in [...brands, ...brands]"
+            <div class="flex w-max gap-14 animate-marquee">
+              <span
+                v-for="(s, i) in [...stack, ...stack]"
                 :key="i"
-                :name="b"
-                class="size-8 text-dimmed/70 hover:text-muted transition-colors shrink-0"
-              />
+                class="flex items-center gap-2.5 shrink-0 text-dimmed/80 hover:text-muted transition-colors"
+              >
+                <UIcon
+                  :name="s.icon"
+                  class="size-6"
+                />
+                <span class="text-sm font-medium">{{ s.label }}</span>
+              </span>
             </div>
           </div>
         </div>
@@ -183,8 +257,8 @@ const plans = [
         <div
           class="max-w-2xl"
         >
-          <p class="flex items-center gap-2 text-sm font-medium text-highlighted">
-            <span class="h-px w-8 bg-inverted" /> Three pillars
+          <p class="flex items-center gap-2 text-sm font-medium text-amber-600 dark:text-amber-400">
+            <span class="h-px w-8 bg-amber-500" /> Three pillars
           </p>
           <h2 class="mt-4 font-display text-4xl sm:text-5xl font-bold tracking-tight text-highlighted">
             Depth where it counts.
@@ -251,8 +325,8 @@ const plans = [
         <!-- header + feature bullets -->
         <div class="grid lg:grid-cols-[1fr_1.1fr] gap-10 lg:gap-16 items-end">
           <div>
-            <p class="flex items-center gap-2 text-sm font-medium text-highlighted">
-              <span class="h-px w-8 bg-inverted" /> The Control Room
+            <p class="flex items-center gap-2 text-sm font-medium text-amber-600 dark:text-amber-400">
+              <span class="h-px w-8 bg-amber-500" /> The Control Room
             </p>
             <h2 class="mt-4 font-display text-4xl sm:text-5xl font-bold tracking-tight text-highlighted">
               Where your team perches.
@@ -334,8 +408,8 @@ const plans = [
         <div
           class="text-center max-w-2xl mx-auto"
         >
-          <p class="flex items-center justify-center gap-2 text-sm font-medium text-highlighted">
-            <span class="h-px w-8 bg-inverted" /> How it works <span class="h-px w-8 bg-inverted" />
+          <p class="flex items-center justify-center gap-2 text-sm font-medium text-amber-600 dark:text-amber-400">
+            <span class="h-px w-8 bg-amber-500" /> How it works <span class="h-px w-8 bg-amber-500" />
           </p>
           <h2 class="mt-4 font-display text-4xl sm:text-5xl font-bold tracking-tight text-highlighted">
             Live in three steps.
@@ -355,7 +429,7 @@ const plans = [
                 :name="s.icon"
                 class="size-7 text-highlighted"
               />
-              <span class="absolute -top-2 -right-2 grid place-items-center size-6 rounded-full bg-inverted text-[11px] font-bold text-inverted font-mono">{{ i + 1 }}</span>
+              <span class="absolute -top-2 -right-2 grid place-items-center size-6 rounded-full bg-amber-500 text-[11px] font-bold text-slate-950 font-mono">{{ i + 1 }}</span>
             </div>
             <h3 class="mt-5 font-display text-lg font-semibold text-highlighted">
               {{ s.title }}
@@ -384,6 +458,7 @@ const plans = [
                 variant="ghost"
                 icon="i-lucide-copy"
                 label="Copy"
+                @click="copySnippet"
               />
             </div>
             <pre class="p-5 text-sm font-mono leading-relaxed overflow-x-auto"><code><span class="text-dimmed">&lt;</span><span class="text-highlighted">script</span> <span class="text-highlighted">src</span>=<span class="text-muted">"https://perch.app/widget.js"</span> <span class="text-highlighted">data-site-id</span>=<span class="text-muted">"ws_abc123"</span> <span class="text-highlighted">async</span><span class="text-dimmed">&gt;&lt;/</span><span class="text-highlighted">script</span><span class="text-dimmed">&gt;</span></code></pre>
@@ -415,12 +490,12 @@ const plans = [
             :key="plan.name"
             class="relative rounded-2xl p-7 transition-transform duration-300 hover:-translate-y-1"
             :class="plan.featured
-              ? 'border-glow bg-elevated/50 glass shadow-2xl shadow-black/10 lg:-mt-4 lg:mb-4'
+              ? 'ring-1 ring-amber-500/40 bg-elevated/50 glass shadow-2xl shadow-amber-500/5 lg:-mt-4 lg:mb-4'
               : 'ring-1 ring-default bg-elevated/20'"
           >
             <span
               v-if="plan.featured"
-              class="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-inverted px-3 py-1 text-xs font-semibold text-inverted shadow-lg shadow-black/30"
+              class="absolute -top-3 left-1/2 -translate-x-1/2 rounded-full bg-amber-500 px-3 py-1 text-xs font-semibold text-slate-950 shadow-lg shadow-amber-500/30"
             >Most popular</span>
 
             <p class="font-display text-lg font-semibold text-highlighted">
@@ -435,7 +510,8 @@ const plans = [
             </p>
 
             <UButton
-              :color="plan.featured ? 'neutral' : 'neutral'"
+              to="/signup"
+              :color="plan.featured ? 'primary' : 'neutral'"
               :variant="plan.featured ? 'solid' : 'subtle'"
               block
               size="lg"
@@ -471,10 +547,10 @@ const plans = [
         >
           <div class="pointer-events-none absolute inset-0 -z-10 bg-grid [mask-image:radial-gradient(ellipse_60%_80%_at_50%_50%,#000,transparent)]" />
 
-          <div class="mx-auto mb-6 grid place-items-center size-16 rounded-2xl bg-inverted/10 ring-1 ring-inverted/20">
+          <div class="mx-auto mb-6 grid place-items-center size-16 rounded-2xl bg-amber-500/10 ring-1 ring-amber-500/25">
             <UIcon
               name="i-lucide-bird"
-              class="size-8 text-highlighted"
+              class="size-8 text-amber-600 dark:text-amber-400"
             />
           </div>
           <h2 class="font-display text-4xl sm:text-5xl font-bold tracking-tight text-highlighted">
@@ -487,20 +563,21 @@ const plans = [
             <UButton
               to="/signup"
               size="xl"
-              color="neutral"
+              color="primary"
               trailing-icon="i-lucide-arrow-right"
-              class="font-semibold shadow-lg shadow-black/20"
+              class="font-semibold shadow-lg shadow-amber-500/25"
             >
               Get started free
             </UButton>
             <UButton
-              to="#control-room"
+              to="https://github.com/DevAdedeji/perch"
+              target="_blank"
               size="xl"
               color="neutral"
               variant="subtle"
-              icon="i-lucide-book-open"
+              icon="i-simple-icons-github"
             >
-              Read the docs
+              Star on GitHub
             </UButton>
           </div>
         </div>

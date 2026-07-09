@@ -18,8 +18,9 @@ export function createDb(connectionString: string) {
   }
   const sql = postgres(connectionString, {
     prepare: false,
-    // recycle connections before Neon closes idle ones (avoids ECONNRESET churn)
-    idle_timeout: 20,
+    // keep pooled connections warm between requests — reconnecting to Neon costs
+    // several TLS round trips. Neon's proxy drops idles at ~5 min; recycle just under.
+    idle_timeout: 280,
     max_lifetime: 60 * 30,
     connect_timeout: 10
   })
