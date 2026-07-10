@@ -11,7 +11,9 @@ interface Member {
   email: string
   role: 'admin' | 'agent'
   presence: 'online' | 'away' | 'offline'
+  assignedCount: number
   openCount: number
+  resolvedCount: number
 }
 
 const { currentWorkspace, user } = useAuth()
@@ -121,6 +123,21 @@ function initials(n: string) {
 function presenceDot(status: string) {
   return status === 'online' ? 'bg-green-500' : status === 'away' ? 'bg-amber-400' : 'bg-zinc-500'
 }
+
+function presenceText(p: string) {
+  return p === 'online'
+    ? 'text-green-600 dark:text-green-500'
+    : p === 'away' ? 'text-amber-600 dark:text-amber-400' : 'text-dimmed'
+}
+
+// online first, then away, then offline — alphabetical within each group
+const presenceRank = (p: string) => (p === 'online' ? 0 : p === 'away' ? 1 : 2)
+const sortedMembers = computed(() =>
+  [...members.value].sort((a, b) => presenceRank(a.presence) - presenceRank(b.presence) || a.name.localeCompare(b.name))
+)
+
+// §3.3 workload view: totals for the at-a-glance strip
+const totalOpen = computed(() => members.value.reduce((n, m) => n + m.openCount, 0))
 </script>
 
 <template>
@@ -132,13 +149,14 @@ function presenceDot(status: string) {
             Team
           </h1>
           <p class="text-sm text-muted mt-0.5">
-            {{ members.length }} member{{ members.length === 1 ? '' : 's' }} · {{ onlineCount }} online
+            Who's on support, who's online, and who's carrying the load.
           </p>
         </div>
         <UButton
           v-if="isAdmin"
-          color="neutral"
+          color="primary"
           icon="i-lucide-user-plus"
+          class="font-medium"
           @click="openInvite"
         >
           Invite
@@ -156,81 +174,151 @@ function presenceDot(status: string) {
         />
       </div>
 
-      <div
-        v-else
-        class="mt-6 rounded-2xl border-glow bg-elevated/30 overflow-hidden"
-      >
-        <ul class="divide-y divide-default/60">
-          <li
-            v-for="m in members"
-            :key="m.id"
-            class="flex items-center gap-3 px-4 sm:px-5 py-3.5"
-          >
-            <span class="relative grid place-items-center size-10 shrink-0 rounded-full bg-elevated ring-1 ring-default text-sm font-semibold text-highlighted">
-              {{ initials(m.name) }}
-              <span
-                class="absolute -bottom-0.5 -right-0.5 size-3 rounded-full ring-2 ring-elevated"
-                :class="presenceDot(m.presence)"
-              />
-            </span>
-            <div class="min-w-0 flex-1">
-              <p class="truncate text-sm font-medium text-highlighted">
-                {{ m.name }}
-                <span
-                  v-if="m.userId === user?.id"
-                  class="text-xs text-dimmed font-normal"
-                >(you)</span>
-              </p>
-              <p class="truncate text-xs text-muted">
-                {{ m.email }}
-              </p>
-            </div>
+      <template v-else>
+        <!-- at-a-glance -->
+        <div class="mt-6 grid grid-cols-3 divide-x divide-default rounded-2xl border-glow bg-elevated/30 overflow-hidden">
+          <div class="px-5 py-4">
+            <p class="font-display text-2xl font-bold text-highlighted tabular-nums">
+              {{ members.length }}
+            </p>
+            <p class="mt-0.5 text-xs text-muted">
+              Member{{ members.length === 1 ? '' : 's' }}
+            </p>
+          </div>
+          <div class="px-5 py-4">
+            <p class="font-display text-2xl font-bold tabular-nums text-green-600 dark:text-green-500">
+              {{ onlineCount }}
+            </p>
+            <p class="mt-0.5 text-xs text-muted">
+              Online now
+            </p>
+          </div>
+          <div class="px-5 py-4">
+            <p class="font-display text-2xl font-bold text-highlighted tabular-nums">
+              {{ totalOpen }}
+            </p>
+            <p class="mt-0.5 text-xs text-muted">
+              Open conversations
+            </p>
+          </div>
+        </div>
 
-            <!-- §3.3 workload: open conversations this member currently owns -->
-            <span
-              class="hidden sm:flex items-center gap-1.5 text-xs mr-1"
-              :class="m.openCount > 0 ? 'text-highlighted' : 'text-dimmed'"
-              :title="`${m.openCount} open conversation${m.openCount === 1 ? '' : 's'}`"
-            >
-              <UIcon
-                name="i-lucide-message-square"
-                class="size-3.5"
-              />
-              <span class="tabular-nums font-medium">{{ m.openCount }}</span>
-            </span>
-
-            <span class="hidden sm:block text-xs capitalize text-dimmed mr-1">{{ m.presence }}</span>
-
-            <template v-if="isAdmin && m.userId !== user?.id">
-              <USelect
-                :model-value="m.role"
-                :items="['agent', 'admin']"
-                size="sm"
-                class="w-24"
-                @update:model-value="(r: string) => changeRole(m, r as 'admin' | 'agent')"
-              />
-              <UButton
-                color="error"
-                variant="ghost"
-                size="sm"
-                icon="i-lucide-user-minus"
-                square
-                aria-label="Remove"
-                @click="removeMember(m)"
-              />
-            </template>
-            <UBadge
-              v-else
-              color="neutral"
-              variant="subtle"
-              size="sm"
-              class="capitalize"
-            >
-              {{ m.role }}
-            </UBadge>
-          </li>
-        </ul>
-      </div>
+        <!-- roster -->
+        <div class="mt-4 rounded-2xl border-glow bg-elevated/30 overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="bg-elevated/50 text-[11px] uppercase tracking-wider text-dimmed">
+                  <th class="px-4 sm:px-5 py-2.5 text-left font-medium">
+                    Member
+                  </th>
+                  <th class="px-3 py-2.5 text-left font-medium">
+                    Status
+                  </th>
+                  <th class="px-3 py-2.5 text-center font-medium">
+                    Assigned
+                  </th>
+                  <th class="px-3 py-2.5 text-center font-medium">
+                    Open
+                  </th>
+                  <th class="px-3 py-2.5 text-center font-medium">
+                    Resolved
+                  </th>
+                  <th class="px-3 py-2.5 text-left font-medium">
+                    Role
+                  </th>
+                  <th
+                    v-if="isAdmin"
+                    class="px-3 py-2.5"
+                  />
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-default/60">
+                <tr
+                  v-for="m in sortedMembers"
+                  :key="m.id"
+                  class="hover:bg-elevated/40 transition-colors"
+                >
+                  <td class="px-4 sm:px-5 py-3">
+                    <div class="flex items-center gap-3 min-w-44">
+                      <span class="grid place-items-center size-9 shrink-0 rounded-xl avatar-amber text-xs font-bold">
+                        {{ initials(m.name) }}
+                      </span>
+                      <div class="min-w-0">
+                        <p class="flex items-center gap-1.5 text-sm font-semibold text-highlighted">
+                          <span class="truncate">{{ m.name }}</span>
+                          <span
+                            v-if="m.userId === user?.id"
+                            class="shrink-0 text-[10px] font-normal text-dimmed"
+                          >(you)</span>
+                        </p>
+                        <p class="truncate text-xs text-muted">
+                          {{ m.email }}
+                        </p>
+                      </div>
+                    </div>
+                  </td>
+                  <td class="px-3 py-3 whitespace-nowrap">
+                    <span class="flex items-center gap-1.5 text-xs capitalize">
+                      <span
+                        class="size-1.5 rounded-full"
+                        :class="presenceDot(m.presence)"
+                      />
+                      <span :class="presenceText(m.presence)">{{ m.presence }}</span>
+                    </span>
+                  </td>
+                  <td class="px-3 py-3 text-center tabular-nums text-highlighted">
+                    {{ m.assignedCount }}
+                  </td>
+                  <td
+                    class="px-3 py-3 text-center tabular-nums"
+                    :class="m.openCount > 0 ? 'font-semibold text-amber-600 dark:text-amber-400' : 'text-dimmed'"
+                  >
+                    {{ m.openCount }}
+                  </td>
+                  <td class="px-3 py-3 text-center tabular-nums text-muted">
+                    {{ m.resolvedCount }}
+                  </td>
+                  <td class="px-3 py-3 whitespace-nowrap">
+                    <USelect
+                      v-if="isAdmin && m.userId !== user?.id"
+                      :model-value="m.role"
+                      :items="['agent', 'admin']"
+                      size="sm"
+                      class="w-24"
+                      @update:model-value="(r: string) => changeRole(m, r as 'admin' | 'agent')"
+                    />
+                    <UBadge
+                      v-else
+                      color="neutral"
+                      :variant="m.role === 'admin' ? 'subtle' : 'outline'"
+                      size="sm"
+                      class="capitalize"
+                    >
+                      {{ m.role }}
+                    </UBadge>
+                  </td>
+                  <td
+                    v-if="isAdmin"
+                    class="px-3 py-3 text-right"
+                  >
+                    <UButton
+                      v-if="m.userId !== user?.id"
+                      color="error"
+                      variant="ghost"
+                      size="sm"
+                      icon="i-lucide-user-minus"
+                      square
+                      aria-label="Remove"
+                      @click="removeMember(m)"
+                    />
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </template>
     </div>
 
     <!-- invite modal -->
@@ -302,7 +390,8 @@ function presenceDot(status: string) {
               Cancel
             </UButton>
             <UButton
-              color="neutral"
+              color="primary"
+              class="font-medium"
               :loading="inviting"
               :disabled="!inviteEmail.trim()"
               @click="createInvite"

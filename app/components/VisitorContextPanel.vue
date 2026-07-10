@@ -43,7 +43,7 @@ async function copy(text: string) {
   <div class="flex flex-col h-full overflow-y-auto">
     <!-- identity -->
     <div class="p-5 border-b border-default text-center">
-      <span class="mx-auto grid place-items-center size-14 rounded-2xl bg-amber-500/10 ring-1 ring-amber-500/25 text-lg font-bold text-amber-600 dark:text-amber-400">
+      <span class="mx-auto grid place-items-center size-14 rounded-2xl avatar-amber text-lg font-bold">
         {{ initials(displayName) }}
       </span>
       <p class="mt-3 text-sm font-semibold text-highlighted truncate">

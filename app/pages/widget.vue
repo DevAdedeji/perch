@@ -37,13 +37,6 @@ const onAccent = computed(() => {
   return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.62 ? '#0f172a' : '#ffffff'
 })
 
-function shade(hex: string, f: number) {
-  const c = hex.replace('#', '')
-  const ch = (i: number) => Math.max(0, Math.min(255, Math.round(parseInt(c.slice(i, i + 2), 16) * f)))
-  return `#${[ch(0), ch(2), ch(4)].map(v => v.toString(16).padStart(2, '0')).join('')}`
-}
-const headerBg = computed(() => `linear-gradient(135deg, ${accent.value} 0%, ${shade(accent.value, 0.75)} 100%)`)
-
 function initial(name: string | null | undefined) {
   return (name || 'A').charAt(0).toUpperCase()
 }
@@ -225,19 +218,11 @@ onBeforeUnmount(() => {
 <template>
   <div class="h-screen flex flex-col bg-default text-default overflow-hidden">
     <!-- header -->
-    <header
-      class="relative shrink-0 flex items-center gap-3 px-4 h-16 overflow-hidden"
-      :style="{ background: headerBg, color: onAccent }"
-    >
-      <!-- soft top-right sheen -->
-      <span
-        class="pointer-events-none absolute inset-0"
-        style="background: radial-gradient(140px 70px at 88% -10%, rgba(255,255,255,0.22), transparent)"
-      />
+    <header class="shrink-0 flex items-center gap-3 px-4 py-3 border-b border-default bg-elevated/50">
       <span class="relative shrink-0">
         <span
-          class="grid place-items-center size-9 rounded-full overflow-hidden text-sm font-bold"
-          :style="{ background: 'rgba(255,255,255,0.16)' }"
+          class="grid place-items-center size-9 rounded-xl overflow-hidden text-sm font-bold"
+          :style="{ background: `${accent}1f`, color: accent, boxShadow: `inset 0 0 0 1px ${accent}4d` }"
         >
           <img
             v-if="workspace?.logo_url"
@@ -250,24 +235,24 @@ onBeforeUnmount(() => {
         <span
           class="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full"
           :class="businessOnline && 'pulse-dot'"
-          :style="{ background: businessOnline ? '#22c55e' : '#94a3b8', border: `2px solid ${accent}` }"
+          :style="{ background: businessOnline ? '#22c55e' : '#94a3b8', border: '2px solid var(--ui-bg-elevated)' }"
         />
       </span>
-      <div class="relative min-w-0 flex-1">
-        <p class="text-sm font-semibold truncate">
+      <div class="min-w-0 flex-1">
+        <p class="text-sm font-semibold text-highlighted leading-tight truncate">
           {{ agentName || workspace?.name || 'Chat' }}
         </p>
-        <p class="text-xs opacity-85 truncate">
+        <p class="text-xs text-muted truncate">
           <template v-if="agentName">
             from {{ workspace?.name }}
           </template>
           <template v-else>
-            {{ businessOnline ? 'Online — typically replies in minutes' : 'Away — we’ll reply as soon as we’re back' }}
+            {{ businessOnline ? 'Online · replies in seconds' : 'Away — we’ll reply as soon as we’re back' }}
           </template>
         </p>
       </div>
       <button
-        class="relative grid place-items-center size-8 rounded-full hover:bg-black/10 active:scale-95 transition"
+        class="grid place-items-center size-8 rounded-full text-dimmed hover:text-highlighted hover:bg-elevated active:scale-95 transition"
         aria-label="Close"
         @click="close"
       >
@@ -370,7 +355,7 @@ onBeforeUnmount(() => {
     <template v-else>
       <div
         ref="threadEl"
-        class="flex-1 overflow-y-auto px-4 py-4 overscroll-contain"
+        class="flex-1 overflow-y-auto px-4 py-4 overscroll-contain bg-grid"
       >
         <!-- greeting / empty state -->
         <div
@@ -487,29 +472,31 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- composer -->
-      <div class="shrink-0 border-t border-default p-3 pt-2.5">
+      <div class="shrink-0 border-t border-default bg-elevated/50 p-3">
         <p
           v-if="!businessOnline && messages.length"
           class="pb-2 text-[11px] text-dimmed text-center"
         >
           We’re away right now — we’ll reply as soon as we’re back.
         </p>
-        <div
-          class="flex items-end gap-1.5 rounded-2xl bg-elevated px-1.5 py-1.5 transition-shadow"
-          :class="composerFocused ? 'ring-2' : 'ring-1 ring-default'"
-          :style="composerFocused ? { '--tw-ring-color': accent } : {}"
-        >
-          <textarea
-            ref="composerEl"
-            v-model="draft"
-            rows="1"
-            placeholder="Type a message…"
-            class="flex-1 max-h-30 bg-transparent px-2.5 py-1.5 text-sm outline-none resize-none"
-            @input="onInput"
-            @keydown.enter.exact.prevent="onSend"
-            @focus="composerFocused = true"
-            @blur="onComposerBlur"
-          />
+        <div class="flex items-end gap-2">
+          <div
+            class="flex-1 flex items-end rounded-xl bg-default px-3 py-1 transition-shadow min-w-0"
+            :class="composerFocused ? 'ring-2' : 'ring-1 ring-default'"
+            :style="composerFocused ? { '--tw-ring-color': accent } : {}"
+          >
+            <textarea
+              ref="composerEl"
+              v-model="draft"
+              rows="1"
+              placeholder="Type a message…"
+              class="flex-1 max-h-30 bg-transparent py-1.5 text-sm outline-none resize-none"
+              @input="onInput"
+              @keydown.enter.exact.prevent="onSend"
+              @focus="composerFocused = true"
+              @blur="onComposerBlur"
+            />
+          </div>
           <button
             class="grid place-items-center size-9 shrink-0 rounded-xl transition enabled:hover:brightness-110 enabled:active:scale-90 disabled:opacity-40"
             :style="{ background: accent, color: onAccent }"
@@ -519,7 +506,7 @@ onBeforeUnmount(() => {
           >
             <UIcon
               name="i-lucide-arrow-up"
-              class="size-4.5"
+              class="size-4"
             />
           </button>
         </div>

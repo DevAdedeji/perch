@@ -224,11 +224,11 @@ async function onAssign(memberId: string, memberName: string) {
   }
 }
 
-// one accent discipline: amber only where action is needed; the rest are just labels
+// one accent discipline: amber = needs action; open/resolved differ by shape, not hue
 const statusBadge = {
-  unassigned: { color: 'warning' as const, label: 'Unassigned' },
-  open: { color: 'neutral' as const, label: 'Open' },
-  resolved: { color: 'neutral' as const, label: 'Resolved' }
+  unassigned: { color: 'warning' as const, variant: 'subtle' as const, icon: 'i-lucide-hand', label: 'Unassigned' },
+  open: { color: 'neutral' as const, variant: 'subtle' as const, icon: 'i-lucide-message-circle', label: 'Open' },
+  resolved: { color: 'neutral' as const, variant: 'outline' as const, icon: 'i-lucide-check', label: 'Resolved' }
 }
 </script>
 
@@ -245,16 +245,6 @@ const statusBadge = {
             Inbox
           </h1>
           <div class="flex items-center gap-1.5">
-            <span
-              class="flex items-center gap-1.5 text-[11px]"
-              :class="cr.status.value === 'open' ? 'text-green-600 dark:text-green-500' : 'text-dimmed'"
-            >
-              <span
-                class="size-1.5 rounded-full"
-                :class="cr.status.value === 'open' ? 'bg-green-500 animate-pulse' : 'bg-zinc-400'"
-              />
-              {{ cr.status.value === 'open' ? 'live' : 'connecting…' }}
-            </span>
             <UButton
               :icon="soundEnabled ? 'i-lucide-bell' : 'i-lucide-bell-off'"
               color="neutral"
@@ -267,7 +257,7 @@ const statusBadge = {
           </div>
         </div>
 
-        <div class="mt-3 flex items-center gap-1 overflow-x-auto">
+        <div class="mt-3 flex items-center gap-1 overflow-x-auto scrollbar-none">
           <button
             v-for="f in filters"
             :key="f.value"
@@ -336,7 +326,7 @@ const statusBadge = {
                 v-if="cr.activeId.value === c.id"
                 class="absolute inset-y-0 left-0 w-0.5 bg-amber-500"
               />
-              <span class="grid place-items-center size-9 shrink-0 rounded-lg bg-elevated ring-1 ring-default text-xs font-semibold text-muted">
+              <span class="grid place-items-center size-9 shrink-0 rounded-xl avatar-amber text-xs font-bold">
                 {{ initials(c.visitor.name) }}
               </span>
               <div class="min-w-0 flex-1">
@@ -356,15 +346,23 @@ const statusBadge = {
                 <div class="mt-1.5 flex items-center gap-1.5">
                   <UBadge
                     :color="statusBadge[c.status].color"
-                    variant="subtle"
+                    :variant="statusBadge[c.status].variant"
+                    :icon="statusBadge[c.status].icon"
                     size="sm"
                   >
                     {{ statusBadge[c.status].label }}
                   </UBadge>
                   <span
                     v-if="c.assignedAgentId"
-                    class="truncate text-[10px] text-dimmed"
-                  >· {{ cr.memberName(c.assignedAgentId) }}</span>
+                    class="ml-auto flex items-center gap-1.5 shrink-0 rounded-full bg-elevated/70 ring-1 ring-default pl-2 pr-2.5 py-0.5"
+                    :title="cr.memberName(c.assignedAgentId) ?? ''"
+                  >
+                    <span
+                      class="size-1.5 rounded-full"
+                      :class="presenceDot(cr.memberPresence(c.assignedAgentId))"
+                    />
+                    <span class="text-[10px] font-medium text-muted truncate max-w-20">{{ (cr.memberName(c.assignedAgentId) ?? 'Agent').split(' ')[0] }}</span>
+                  </span>
                 </div>
               </div>
               <span
@@ -375,7 +373,7 @@ const statusBadge = {
             <!-- quick claim straight from the list -->
             <UButton
               v-if="c.status === 'unassigned'"
-              class="absolute right-3 bottom-2.5 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
+              class="absolute right-3 bottom-2.5"
               size="xs"
               color="primary"
               icon="i-lucide-hand"
@@ -423,7 +421,7 @@ const statusBadge = {
             aria-label="Back to inbox"
             @click="cr.deselect()"
           />
-          <span class="grid place-items-center size-9 rounded-lg bg-amber-500/10 ring-1 ring-amber-500/25 text-sm font-semibold text-amber-600 dark:text-amber-400">
+          <span class="grid place-items-center size-9 rounded-xl avatar-amber text-sm font-bold">
             {{ initials(cr.activeConversation.value.visitor.name) }}
           </span>
           <div class="min-w-0">
@@ -587,7 +585,7 @@ const statusBadge = {
                     <template v-if="row.m.sender_type === 'agent'">
                       <span
                         v-if="row.last"
-                        class="grid place-items-center size-6 shrink-0 rounded-lg bg-amber-500/15 ring-1 ring-amber-500/30 text-[10px] font-semibold text-amber-700 dark:text-amber-400"
+                        class="grid place-items-center size-6 shrink-0 rounded-lg avatar-amber text-[10px] font-semibold"
                       >{{ initials(cr.memberName(row.m.sender_id), 'A') }}</span>
                       <span
                         v-else
@@ -688,15 +686,15 @@ const statusBadge = {
                       <span class="font-mono">↵</span> send · <span class="font-mono">⇧↵</span> newline · <span class="font-mono">/</span> canned reply
                     </span>
                     <UButton
-                      class="ml-auto font-medium"
+                      class="ml-auto"
                       size="sm"
                       color="primary"
                       icon="i-lucide-send-horizontal"
+                      square
+                      :aria-label="internalNote ? 'Add note' : 'Send'"
                       :disabled="!reply.trim()"
                       @click="onSend"
-                    >
-                      {{ internalNote ? 'Add note' : 'Send' }}
-                    </UButton>
+                    />
                   </div>
                 </div>
               </div>

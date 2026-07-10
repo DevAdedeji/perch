@@ -40,11 +40,7 @@ function pickWorkspace(id: string) {
 
 <template>
   <div class="flex h-full w-full min-w-0 flex-col bg-default">
-    <div class="h-16 flex items-center px-5 border-b border-default">
-      <PerchLogo />
-    </div>
-
-    <!-- workspace switcher -->
+    <!-- workspace switcher (the logo lives in the window chrome) -->
     <div class="px-3 py-3 border-b border-default">
       <UPopover
         v-if="canSwitch"

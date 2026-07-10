@@ -211,7 +211,7 @@ async function removeCanned(c: Canned) {
                   :key="c"
                   type="button"
                   :disabled="!isAdmin"
-                  class="size-8 rounded-full ring-2 ring-offset-2 ring-offset-(--ui-bg) transition-transform hover:scale-110 disabled:opacity-60"
+                  class="size-8 rounded-full ring-2 ring-offset-2 ring-offset-bg transition-transform hover:scale-110 disabled:opacity-60"
                   :class="workspace?.widgetPrimaryColor === c ? 'ring-highlighted' : 'ring-transparent'"
                   :style="{ background: c }"
                   :aria-label="c"
