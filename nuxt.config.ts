@@ -19,6 +19,9 @@ export default defineNuxtConfig({
     databaseUrl: process.env.NEON_CONNECTION_STRING,
     // HMAC secret for short-lived WebSocket auth tickets (reuse the session secret)
     realtimeSecret: process.env.NUXT_SESSION_PASSWORD,
+    // transactional email (password reset, invites) — optional; logs in dev without it
+    resendApiKey: process.env.RESEND_API_KEY,
+    emailFrom: process.env.RESEND_FROM,
     public: {
       // the workspace the landing page's live demo widget talks to (site_ids are public by design)
       demoSiteId: process.env.NUXT_PUBLIC_DEMO_SITE_ID || 'ws_18c6715c14'

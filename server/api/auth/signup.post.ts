@@ -1,6 +1,8 @@
 import { eq, users } from '@perch/db'
 
 export default defineEventHandler(async (event) => {
+  assertRateLimit('signup:ip', requestIp(event), { max: 5, windowMs: 60 * 60 * 1000 })
+
   const result = await readValidatedBody(event, body => signupSchema.safeParse(body))
   if (!result.success) {
     throw createError({ statusCode: 400, statusMessage: 'Invalid input', data: result.error.flatten() })

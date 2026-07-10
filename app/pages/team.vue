@@ -31,6 +31,7 @@ const inviteEmail = ref('')
 const inviteRole = ref<'agent' | 'admin'>('agent')
 const inviting = ref(false)
 const inviteLink = ref('')
+const inviteEmailed = ref(false)
 const inviteModalOpen = ref(false)
 
 function openInvite() {
@@ -48,11 +49,12 @@ async function createInvite() {
   if (!emailAddr || inviting.value) return
   inviting.value = true
   try {
-    const res = await $fetch<{ invites: { url: string }[] }>(`/api/workspaces/${wid.value}/invites`, {
+    const res = await $fetch<{ invites: { url: string, emailed: boolean }[] }>(`/api/workspaces/${wid.value}/invites`, {
       method: 'POST',
       body: { invites: [{ email: emailAddr, role: inviteRole.value }] }
     })
     inviteLink.value = res.invites[0]!.url
+    inviteEmailed.value = res.invites[0]!.emailed
     inviteEmail.value = ''
   } catch (e) {
     toast.add({ title: getErrorMessage(e, 'Could not create invite'), color: 'error' })
@@ -367,7 +369,12 @@ const totalOpen = computed(() => members.value.reduce((n, m) => n + m.openCount,
             </UButton>
           </div>
           <p class="text-xs text-muted">
-            Share this link — it expires in 7 days.
+            <template v-if="inviteEmailed">
+              We’ve emailed the invite too. The link expires in 7 days.
+            </template>
+            <template v-else>
+              Share this link — it expires in 7 days.
+            </template>
           </p>
         </div>
       </template>

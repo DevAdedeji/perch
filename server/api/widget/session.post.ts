@@ -15,6 +15,8 @@ const schema = z.object({
  * scoped visitor WS ticket. No conversation is created until the visitor speaks.
  */
 export default defineEventHandler(async (event) => {
+  assertRateLimit('widget-session:ip', requestIp(event), { max: 30, windowMs: 60 * 1000 })
+
   const result = await readValidatedBody(event, body => schema.safeParse(body))
   if (!result.success) {
     throw createError({ statusCode: 400, statusMessage: 'Invalid input' })

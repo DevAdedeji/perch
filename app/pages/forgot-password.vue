@@ -3,31 +3,26 @@ import { z } from 'zod'
 import type { FormSubmitEvent } from '@nuxt/ui'
 
 definePageMeta({ layout: 'auth' })
-useHead({ title: 'Sign in · Perch' })
+useHead({ title: 'Reset your password · Perch' })
 
 const schema = z.object({
-  email: z.string().email('Enter a valid email'),
-  password: z.string().min(1, 'Enter your password')
+  email: z.string().email('Enter a valid email')
 })
 type Schema = z.output<typeof schema>
 
-const state = reactive({ email: '', password: '' })
+const state = reactive({ email: '' })
 const loading = ref(false)
 const error = ref('')
-
-const route = useRoute()
-const { refresh, hasWorkspace } = useAuth()
+const sent = ref(false)
 
 async function onSubmit(event: FormSubmitEvent<Schema>) {
   loading.value = true
   error.value = ''
   try {
-    await $fetch('/api/auth/login', { method: 'POST', body: event.data })
-    await refresh()
-    const redirect = route.query.redirect as string | undefined
-    await navigateTo(redirect || (hasWorkspace.value ? '/dashboard' : '/onboarding'))
+    await $fetch('/api/auth/forgot-password', { method: 'POST', body: event.data })
+    sent.value = true
   } catch (e) {
-    error.value = getErrorMessage(e, 'Could not sign in')
+    error.value = getErrorMessage(e, 'Could not start the reset')
   } finally {
     loading.value = false
   }
@@ -39,20 +34,42 @@ async function onSubmit(event: FormSubmitEvent<Schema>) {
     <div class="text-center mb-7">
       <div class="mx-auto mb-4 grid place-items-center size-12 rounded-2xl avatar-amber">
         <UIcon
-          name="i-lucide-bird"
+          name="i-lucide-key-round"
           class="size-6"
         />
       </div>
       <h1 class="font-display text-2xl font-bold text-highlighted">
-        Welcome back
+        Forgot your password?
       </h1>
       <p class="mt-1.5 text-sm text-muted">
-        Sign in to your Control Room.
+        We’ll email you a link to choose a new one.
       </p>
     </div>
 
     <div class="rounded-2xl border-glow bg-elevated/40 glass p-6 sm:p-7 shadow-xl shadow-black/10">
+      <!-- sent -->
+      <div
+        v-if="sent"
+        class="text-center py-2"
+      >
+        <div class="mx-auto grid place-items-center size-12 rounded-xl bg-green-500/10 ring-1 ring-green-500/25">
+          <UIcon
+            name="i-lucide-mail-check"
+            class="size-6 text-green-600 dark:text-green-500"
+          />
+        </div>
+        <p class="mt-4 text-sm font-medium text-highlighted">
+          Check your inbox
+        </p>
+        <p class="mt-1.5 text-sm text-muted">
+          If an account exists for <span class="font-medium text-highlighted">{{ state.email }}</span>,
+          a reset link is on its way. It expires in 30 minutes.
+        </p>
+      </div>
+
+      <!-- form -->
       <UForm
+        v-else
         :schema="schema"
         :state="state"
         class="space-y-4"
@@ -80,25 +97,6 @@ async function onSubmit(event: FormSubmitEvent<Schema>) {
           />
         </UFormField>
 
-        <UFormField
-          label="Password"
-          name="password"
-        >
-          <PasswordInput
-            v-model="state.password"
-            autocomplete="current-password"
-          />
-        </UFormField>
-
-        <div class="flex justify-end -mt-1">
-          <NuxtLink
-            to="/forgot-password"
-            class="text-xs font-medium text-muted hover:text-amber-600 dark:hover:text-amber-400 transition-colors"
-          >
-            Forgot password?
-          </NuxtLink>
-        </div>
-
         <UButton
           type="submit"
           color="primary"
@@ -107,17 +105,17 @@ async function onSubmit(event: FormSubmitEvent<Schema>) {
           :loading="loading"
           class="font-semibold"
         >
-          Sign in
+          Send reset link
         </UButton>
       </UForm>
     </div>
 
     <p class="mt-6 text-center text-sm text-muted">
-      New to Perch?
+      Remembered it?
       <NuxtLink
-        to="/signup"
+        to="/login"
         class="font-medium text-amber-600 dark:text-amber-400 hover:underline"
-      >Create an account</NuxtLink>
+      >Sign in</NuxtLink>
     </p>
   </div>
 </template>

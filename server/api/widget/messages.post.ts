@@ -12,11 +12,14 @@ const schema = z.object({
 
 /** Public: a visitor sends a message (creates/resumes their conversation). */
 export default defineEventHandler(async (event) => {
+  assertRateLimit('widget-msg:ip', requestIp(event), { max: 60, windowMs: 60 * 1000 })
+
   const result = await readValidatedBody(event, body => schema.safeParse(body))
   if (!result.success) {
     throw createError({ statusCode: 400, statusMessage: 'Invalid input', data: result.error.flatten() })
   }
   const { site_id, visitor_id, content, name, email, page_url } = result.data
+  assertRateLimit('widget-msg:visitor', visitor_id, { max: 20, windowMs: 60 * 1000 })
 
   const db = useDb()
   const workspace = await db.query.workspaces.findFirst({ where: eq(workspaces.siteId, site_id) })

@@ -87,6 +87,9 @@ Verified visitors get a green **Verified** badge in the agent's context panel.
   per-workspace secret, optional enforcement).
 - **Multi-tenancy with auth scoping.** Every query is scoped by workspace membership and role;
   internal notes are filtered **server-side** before they ever reach a visitor socket.
+- **Production hardening.** Rate limiting on every public and auth endpoint (per-IP and per-account
+  brute-force throttles, per-visitor message caps), a full password-reset flow with single-use
+  hashed tokens, and transactional email (Resend) for resets and team invites.
 - **A deliberate, documented scaling path** (`publish()` → Redis pub/sub) that is intentionally *not*
   built for v1 — see [Scaling](#scaling-the-real-time-layer).
 
@@ -186,6 +189,8 @@ Useful scripts: `pnpm build` (production Nitro bundle), `pnpm preview`, `pnpm li
 |---|---|
 | `NEON_CONNECTION_STRING` | Postgres connection string (Neon or any Postgres) |
 | `NUXT_SESSION_PASSWORD` | 32+ char secret — seals auth cookies **and** signs the HMAC WS tickets |
+| `RESEND_API_KEY` | *(optional)* transactional email — password resets + invite emails. Without it, emails are logged to the server console |
+| `RESEND_FROM` | *(optional)* from address, e.g. `Perch <no-reply@yourdomain.com>` |
 
 > Nuxt only auto-maps `NUXT_`-prefixed env at runtime, so the server also reads these two names
 > directly from `process.env` — set them as plain environment variables in production.

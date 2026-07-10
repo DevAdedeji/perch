@@ -133,6 +133,16 @@ export const conversationReads = pgTable('conversation_reads', {
   uniqueIndex('conversation_reads_conversation_member_uq').on(t.conversationId, t.memberId)
 ])
 
+export const passwordResetTokens = pgTable('password_reset_tokens', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  // sha256 of the emailed token — the raw token is never stored
+  tokenHash: text('token_hash').notNull().unique(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  usedAt: timestamp('used_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull()
+})
+
 export const cannedResponses = pgTable('canned_responses', {
   id: uuid('id').defaultRandom().primaryKey(),
   workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
@@ -162,3 +172,5 @@ export type ConversationRead = typeof conversationReads.$inferSelect
 export type NewConversationRead = typeof conversationReads.$inferInsert
 export type CannedResponse = typeof cannedResponses.$inferSelect
 export type NewCannedResponse = typeof cannedResponses.$inferInsert
+export type PasswordResetToken = typeof passwordResetTokens.$inferSelect
+export type NewPasswordResetToken = typeof passwordResetTokens.$inferInsert

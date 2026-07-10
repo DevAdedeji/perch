@@ -31,6 +31,8 @@ function validSignature(secret: string, subject: string, hash: string): boolean 
  * self-reported (same trust level as the pre-chat form).
  */
 export default defineEventHandler(async (event) => {
+  assertRateLimit('widget-identify:ip', requestIp(event), { max: 15, windowMs: 60 * 1000 })
+
   const result = await readValidatedBody(event, body => schema.safeParse(body))
   if (!result.success) {
     throw createError({ statusCode: 400, statusMessage: 'Invalid input' })
