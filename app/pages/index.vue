@@ -149,16 +149,19 @@ const claimSql = 'UPDATE conversations\nSET assigned_agent_id = $me, status = \'
         </div>
 
         <!-- numbers, anchored to the demo they describe -->
-        <div class="mt-12 flex flex-wrap justify-center divide-x divide-default">
+        <div
+          class="mt-12 max-w-3xl mx-auto grid grid-cols-2 sm:grid-cols-4 gap-px rounded-2xl overflow-hidden ring-1 ring-default"
+          style="background: var(--ui-border)"
+        >
           <div
             v-for="s in stats"
             :key="s.label"
-            class="px-8 sm:px-10 py-2 text-center"
+            class="bg-default px-4 py-5 text-center"
           >
-            <p class="font-display text-3xl sm:text-4xl font-bold text-accent">
+            <p class="font-display text-2xl sm:text-3xl font-bold text-accent">
               {{ s.value }}
             </p>
-            <p class="mt-1 text-sm text-muted">
+            <p class="mt-1 text-xs sm:text-sm text-muted">
               {{ s.label }}
             </p>
           </div>

@@ -37,6 +37,12 @@ async function onSubmit(event: FormSubmitEvent<Schema>) {
 <template>
   <div class="w-full max-w-sm">
     <div class="text-center mb-7">
+      <div class="mx-auto mb-4 grid place-items-center size-12 rounded-2xl avatar-amber">
+        <UIcon
+          name="i-lucide-bird"
+          class="size-6"
+        />
+      </div>
       <h1 class="font-display text-2xl font-bold text-highlighted">
         Welcome back
       </h1>
@@ -86,11 +92,11 @@ async function onSubmit(event: FormSubmitEvent<Schema>) {
 
         <UButton
           type="submit"
-          color="neutral"
+          color="primary"
           size="lg"
           block
           :loading="loading"
-          class="font-medium"
+          class="font-semibold"
         >
           Sign in
         </UButton>
@@ -101,7 +107,7 @@ async function onSubmit(event: FormSubmitEvent<Schema>) {
       New to Perch?
       <NuxtLink
         to="/signup"
-        class="font-medium text-highlighted hover:text-highlighted"
+        class="font-medium text-amber-600 dark:text-amber-400 hover:underline"
       >Create an account</NuxtLink>
     </p>
   </div>

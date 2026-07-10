@@ -224,11 +224,11 @@ async function onAssign(memberId: string, memberName: string) {
   }
 }
 
-// one accent discipline: amber = needs action; open/resolved differ by shape, not hue
+// each status wears its own tint: amber = act, blue = in progress, green = done
 const statusBadge = {
-  unassigned: { color: 'warning' as const, variant: 'subtle' as const, icon: 'i-lucide-hand', label: 'Unassigned' },
-  open: { color: 'neutral' as const, variant: 'subtle' as const, icon: 'i-lucide-message-circle', label: 'Open' },
-  resolved: { color: 'neutral' as const, variant: 'outline' as const, icon: 'i-lucide-check', label: 'Resolved' }
+  unassigned: { color: 'warning' as const, icon: 'i-lucide-hand', label: 'Unassigned' },
+  open: { color: 'info' as const, icon: 'i-lucide-message-circle', label: 'Open' },
+  resolved: { color: 'success' as const, icon: 'i-lucide-check', label: 'Resolved' }
 }
 </script>
 
@@ -261,7 +261,7 @@ const statusBadge = {
           <button
             v-for="f in filters"
             :key="f.value"
-            class="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-sm font-medium whitespace-nowrap transition-colors"
+            class="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium whitespace-nowrap transition-colors"
             :class="cr.filter.value === f.value
               ? 'bg-amber-500/12 text-amber-700 dark:text-amber-400'
               : 'text-muted hover:text-highlighted'"
@@ -346,7 +346,7 @@ const statusBadge = {
                 <div class="mt-1.5 flex items-center gap-1.5">
                   <UBadge
                     :color="statusBadge[c.status].color"
-                    :variant="statusBadge[c.status].variant"
+                    variant="subtle"
                     :icon="statusBadge[c.status].icon"
                     size="sm"
                   >

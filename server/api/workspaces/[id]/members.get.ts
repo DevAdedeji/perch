@@ -13,11 +13,7 @@ export default defineEventHandler(async (event) => {
       name: users.name,
       email: users.email,
       role: workspaceMembers.role,
-      // §3.3 agent workload: conversations owned by this member, by status
-      assignedCount: sql<number>`(
-        select count(*) from ${conversations} c
-        where c.assigned_agent_id = ${workspaceMembers.id}
-      )`,
+      // §3.3 agent workload: what they're handling now vs. what they've closed
       openCount: sql<number>`(
         select count(*) from ${conversations} c
         where c.assigned_agent_id = ${workspaceMembers.id} and c.status = 'open'
@@ -34,7 +30,6 @@ export default defineEventHandler(async (event) => {
   // live presence from the in-process registry (§6.5)
   return rows.map(m => ({
     ...m,
-    assignedCount: Number(m.assignedCount),
     openCount: Number(m.openCount),
     resolvedCount: Number(m.resolvedCount),
     presence: memberPresence(workspaceId, m.id)

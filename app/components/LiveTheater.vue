@@ -225,108 +225,118 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <!-- inbox rows -->
-        <div class="border-b border-default shrink-0">
-          <div
-            v-if="rowVisible"
-            class="relative flex items-center gap-3 px-4 py-2.5 row-in"
-            :class="claimed ? 'bg-amber-500/6' : ''"
-          >
-            <span
-              v-if="claimed"
-              class="absolute inset-y-0 left-0 w-0.5 bg-amber-500"
-            />
-            <span class="grid place-items-center size-8 shrink-0 rounded-lg bg-elevated ring-1 ring-default text-xs font-semibold text-muted">A</span>
-            <div class="min-w-0 flex-1">
+        <!-- inbox beside the thread — same two-pane shape as the real dashboard -->
+        <div class="flex-1 flex min-h-0">
+          <div class="w-[44%] min-w-40 max-w-60 shrink-0 border-r border-default flex flex-col">
+            <p class="px-3 py-2 border-b border-default text-[10px] font-semibold uppercase tracking-wider text-dimmed shrink-0">
+              Inbox
+            </p>
+
+            <div
+              v-if="rowVisible"
+              class="relative px-3 py-2.5 row-in"
+              :class="claimed ? 'bg-amber-500/6' : ''"
+            >
+              <span
+                v-if="claimed"
+                class="absolute inset-y-0 left-0 w-0.5 bg-amber-500"
+              />
               <div class="flex items-center gap-2">
-                <span class="truncate text-[13px] font-semibold text-highlighted">Ava Thompson</span>
-                <span class="ml-auto shrink-0 text-[11px] text-dimmed">now</span>
+                <span class="grid place-items-center size-7 shrink-0 rounded-lg avatar-amber text-[10px] font-bold">A</span>
+                <span class="truncate text-xs font-semibold text-highlighted">Ava Thompson</span>
+                <span
+                  v-if="!claimed"
+                  class="ml-auto size-2 shrink-0 rounded-full bg-amber-500"
+                />
+                <span
+                  v-else
+                  class="ml-auto grid place-items-center size-4.5 shrink-0 rounded-full bg-amber-500/15 text-[8px] font-bold text-amber-700 dark:text-amber-400"
+                >M</span>
               </div>
-              <p class="truncate text-xs text-muted mt-0.5">
+              <p class="truncate text-[11px] text-muted mt-1">
                 {{ VISITOR_MSG }}
               </p>
+              <span
+                v-if="!claimed"
+                class="mt-1.5 inline-flex items-center gap-1 rounded-lg bg-amber-500 px-2 py-0.5 text-[10px] font-semibold text-slate-950 transition-transform"
+                :class="claimFlash ? 'scale-110 ring-2 ring-amber-500/50' : ''"
+              >
+                <UIcon
+                  name="i-lucide-hand"
+                  class="size-2.5"
+                /> Claim
+              </span>
             </div>
-            <span
-              v-if="!claimed"
-              class="flex items-center gap-1 rounded-lg bg-amber-500 px-2 py-1 text-[11px] font-semibold text-slate-950 transition-transform"
-              :class="claimFlash ? 'scale-110 ring-2 ring-amber-500/50' : ''"
-            >
-              <UIcon
-                name="i-lucide-hand"
-                class="size-3"
-              /> Claim
-            </span>
-            <span
-              v-else
-              class="grid place-items-center size-5 shrink-0 rounded-full bg-amber-500/15 text-[9px] font-bold text-amber-700 dark:text-amber-400"
-            >M</span>
-            <span
-              v-if="!claimed"
-              class="size-2 shrink-0 rounded-full bg-amber-500"
-            />
-          </div>
 
-          <div class="flex items-center gap-3 px-4 py-2.5 border-t border-default/60 opacity-70">
-            <span class="grid place-items-center size-8 shrink-0 rounded-lg bg-elevated ring-1 ring-default text-xs font-semibold text-muted">N</span>
-            <div class="min-w-0 flex-1">
+            <div class="px-3 py-2.5 border-t border-default/60 opacity-70">
               <div class="flex items-center gap-2">
-                <span class="truncate text-[13px] font-medium text-highlighted">Noah Bennett</span>
-                <span class="ml-auto shrink-0 text-[11px] text-dimmed">11m</span>
+                <span class="grid place-items-center size-7 shrink-0 rounded-lg avatar-amber text-[10px] font-bold">N</span>
+                <span class="truncate text-xs font-medium text-highlighted">Noah Bennett</span>
+                <span class="ml-auto grid place-items-center size-4.5 shrink-0 rounded-full bg-elevated ring-1 ring-default text-[8px] font-bold text-muted">J</span>
               </div>
-              <p class="truncate text-xs text-muted mt-0.5">
+              <p class="truncate text-[11px] text-muted mt-1">
                 Thanks, that worked!
               </p>
             </div>
-            <span class="grid place-items-center size-5 shrink-0 rounded-full bg-elevated ring-1 ring-default text-[9px] font-bold text-muted">J</span>
-          </div>
-        </div>
 
-        <!-- thread -->
-        <div class="flex-1 flex flex-col bg-grid min-h-0">
-          <div
-            v-if="!claimed"
-            class="flex-1 grid place-items-center px-4"
-          >
-            <p class="text-xs text-dimmed">
-              {{ rowVisible ? 'New conversation — claim it before Jide does.' : 'Waiting for conversations…' }}
-            </p>
-          </div>
-          <div
-            v-else
-            class="flex-1 flex flex-col justify-end gap-2 px-4 py-3 overflow-hidden"
-          >
-            <div class="flex msg-in">
-              <div class="bubble-agent max-w-[80%]!">
-                {{ VISITOR_MSG }}
+            <div class="px-3 py-2.5 border-t border-default/60 opacity-50">
+              <div class="flex items-center gap-2">
+                <span class="grid place-items-center size-7 shrink-0 rounded-lg avatar-amber text-[10px] font-bold">L</span>
+                <span class="truncate text-xs font-medium text-highlighted">Liam Carter</span>
               </div>
+              <p class="truncate text-[11px] text-muted mt-1">
+                Can you reassign this?
+              </p>
+            </div>
+          </div>
+
+          <!-- thread -->
+          <div class="flex-1 flex flex-col bg-grid min-h-0 min-w-0">
+            <div
+              v-if="!claimed"
+              class="flex-1 grid place-items-center px-4"
+            >
+              <p class="text-xs text-dimmed">
+                {{ rowVisible ? 'New conversation — claim it before Jide does.' : 'Waiting for conversations…' }}
+              </p>
             </div>
             <div
-              v-if="showAgentBubble"
-              class="flex flex-row-reverse msg-in"
+              v-else
+              class="flex-1 flex flex-col justify-end gap-2 px-4 py-3 overflow-hidden"
             >
-              <div class="bubble-visitor max-w-[80%]!">
-                {{ AGENT_MSG }}
+              <div class="flex msg-in">
+                <div class="bubble-agent max-w-[80%]!">
+                  {{ VISITOR_MSG }}
+                </div>
+              </div>
+              <div
+                v-if="showAgentBubble"
+                class="flex flex-row-reverse msg-in"
+              >
+                <div class="bubble-visitor max-w-[80%]!">
+                  {{ AGENT_MSG }}
+                </div>
               </div>
             </div>
-          </div>
 
-          <div class="flex items-center gap-2 px-3 py-2.5 border-t border-default bg-elevated/40 shrink-0">
-            <div class="flex-1 flex items-center rounded-lg bg-default ring-1 ring-default px-3 py-2 min-w-0">
-              <span
-                class="text-xs truncate"
-                :class="typedAgent ? 'text-highlighted' : 'text-dimmed'"
-              >{{ typedAgent || 'Reply to Ava… ( / for canned replies )' }}</span>
-              <span
-                v-if="typedAgent"
-                class="ml-0.5 inline-block w-0.5 h-3 bg-amber-500 animate-pulse shrink-0"
-              />
+            <div class="flex items-center gap-2 px-3 py-2.5 border-t border-default bg-elevated/40 shrink-0">
+              <div class="flex-1 flex items-center rounded-lg bg-default ring-1 ring-default px-3 py-2 min-w-0">
+                <span
+                  class="text-xs truncate"
+                  :class="typedAgent ? 'text-highlighted' : 'text-dimmed'"
+                >{{ typedAgent || 'Reply to Ava… ( / for canned replies )' }}</span>
+                <span
+                  v-if="typedAgent"
+                  class="ml-0.5 inline-block w-0.5 h-3 bg-amber-500 animate-pulse shrink-0"
+                />
+              </div>
+              <span class="grid place-items-center size-8 rounded-lg bg-amber-500 text-slate-950 shrink-0">
+                <UIcon
+                  name="i-lucide-send-horizontal"
+                  class="size-3.5"
+                />
+              </span>
             </div>
-            <span class="grid place-items-center size-8 rounded-lg bg-amber-500 text-slate-950 shrink-0">
-              <UIcon
-                name="i-lucide-send-horizontal"
-                class="size-3.5"
-              />
-            </span>
           </div>
         </div>
       </div>

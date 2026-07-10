@@ -11,7 +11,6 @@ interface Member {
   email: string
   role: 'admin' | 'agent'
   presence: 'online' | 'away' | 'offline'
-  assignedCount: number
   openCount: number
   resolvedCount: number
 }
@@ -216,10 +215,7 @@ const totalOpen = computed(() => members.value.reduce((n, m) => n + m.openCount,
                     Status
                   </th>
                   <th class="px-3 py-2.5 text-center font-medium">
-                    Assigned
-                  </th>
-                  <th class="px-3 py-2.5 text-center font-medium">
-                    Open
+                    Handling now
                   </th>
                   <th class="px-3 py-2.5 text-center font-medium">
                     Resolved
@@ -266,9 +262,6 @@ const totalOpen = computed(() => members.value.reduce((n, m) => n + m.openCount,
                       />
                       <span :class="presenceText(m.presence)">{{ m.presence }}</span>
                     </span>
-                  </td>
-                  <td class="px-3 py-3 text-center tabular-nums text-highlighted">
-                    {{ m.assignedCount }}
                   </td>
                   <td
                     class="px-3 py-3 text-center tabular-nums"
