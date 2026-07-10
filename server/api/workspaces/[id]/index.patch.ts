@@ -4,6 +4,7 @@ import { z } from 'zod'
 const schema = z.object({
   name: z.string().trim().min(1).max(80).optional(),
   prechatFormEnabled: z.boolean().optional(),
+  identityVerificationEnabled: z.boolean().optional(),
   widgetPrimaryColor: hexColor.optional()
 })
 
@@ -23,5 +24,10 @@ export default defineEventHandler(async (event) => {
     ? await db.update(workspaces).set(patch).where(eq(workspaces.id, workspaceId)).returning()
     : [await db.query.workspaces.findFirst({ where: eq(workspaces.id, workspaceId) })]
 
-  return { workspace: serializeWorkspace(workspace!) }
+  return {
+    workspace: {
+      ...serializeWorkspace(workspace!),
+      identityVerificationEnabled: workspace!.identityVerificationEnabled
+    }
+  }
 })

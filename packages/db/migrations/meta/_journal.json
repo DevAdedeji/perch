@@ -15,6 +15,13 @@
       "when": 1783342569006,
       "tag": "0001_past_pretty_boy",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1783703942712,
+      "tag": "0002_zippy_elektra",
+      "breakpoints": true
     }
   ]
 }

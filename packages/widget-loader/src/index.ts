@@ -5,7 +5,26 @@
  * so opening is instant and the bubble adopts the workspace's brand color
  * before first open. Bridges unread + open/close + theming via postMessage.
  */
-type WinFlag = Window & { __perchLoaded?: boolean }
+interface Identity {
+  user_id?: string
+  name?: string
+  email?: string
+  // HMAC-SHA256 of user_id (or email), computed on the business's server
+  hash?: string
+}
+
+interface PerchApi {
+  identify: (traits: Identity) => void
+  open: () => void
+  close: () => void
+}
+
+type WinFlag = Window & {
+  __perchLoaded?: boolean
+  Perch?: PerchApi
+  // set this before the loader runs to identify without waiting for it
+  perchIdentity?: Identity
+}
 
 const CHAT_ICON
   = '<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22z"/></svg>'
@@ -104,6 +123,35 @@ function init() {
 
   bubble.addEventListener('click', () => setOpen(!open))
 
+  // ── public API: window.Perch.identify({ name, email }) ──
+  // Lets the host site pass its signed-in user so the widget can skip the
+  // pre-chat form. Resent on frame (re)mount so call order doesn't matter.
+  let identity: Identity | null = null
+
+  function sendIdentity() {
+    if (identity) {
+      iframe?.contentWindow?.postMessage({ source: 'perch-host', perch: 'identify', ...identity }, '*')
+    }
+  }
+
+  const api: PerchApi = {
+    identify(traits) {
+      if (!traits || typeof traits !== 'object') return
+      const str = (v: unknown, max: number) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : undefined)
+      const userId = str(traits.user_id, 128)
+      const name = str(traits.name, 100)
+      const email = str(traits.email, 200)
+      const hash = str(traits.hash, 64)
+      if (!userId && !name && !email) return
+      identity = { user_id: userId, name, email, hash }
+      sendIdentity()
+    },
+    open: () => setOpen(true),
+    close: () => setOpen(false)
+  }
+  w.Perch = api
+  if (w.perchIdentity) api.identify(w.perchIdentity)
+
   window.addEventListener('message', (e: MessageEvent) => {
     const d = e.data
     if (!d || d.source !== 'perch-widget') return
@@ -122,8 +170,9 @@ function init() {
     } else if (d.perch === 'close') {
       setOpen(false)
     } else if (d.perch === 'ready') {
-      // frame (re)mounted — resync open state in case a message was missed
+      // frame (re)mounted — resync open state + identity in case a message was missed
       iframe?.contentWindow?.postMessage({ source: 'perch-host', perch: open ? 'open' : 'close' }, '*')
+      sendIdentity()
     } else if (d.perch === 'config') {
       // adopt the workspace's brand color on the launcher
       if (typeof d.color === 'string' && HEX.test(d.color)) {

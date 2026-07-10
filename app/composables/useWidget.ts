@@ -158,12 +158,63 @@ export function useWidget(siteId: string) {
     }
   }
 
+  /* ── host-site identity (Perch.identify) ─────────────── */
+  interface IdentityTraits {
+    user_id?: string
+    name?: string
+    email?: string
+    hash?: string
+  }
+
+  // traits arriving before the handshake are queued; traits always win over
+  // whatever the handshake loaded (the host site is the fresher source)
+  let sessionReady = false
+  let queuedIdentity: IdentityTraits | null = null
+
+  async function pushIdentity(traits: IdentityTraits) {
+    try {
+      await $fetch('/api/widget/identify', {
+        method: 'POST',
+        body: { site_id: siteId, visitor_id: visitorId, ...traits }
+      })
+    } catch {
+      // identity is best-effort from the widget's side; the session still works
+    }
+  }
+
+  function identify(traits: IdentityTraits) {
+    const str = (v: unknown, max: number) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : undefined)
+    const clean: IdentityTraits = {
+      user_id: str(traits.user_id, 128),
+      name: str(traits.name, 100),
+      email: str(traits.email, 200),
+      hash: str(traits.hash, 64)
+    }
+    if (!clean.user_id && !clean.name && !clean.email) return
+    if (clean.name) visitorName.value = clean.name
+    if (clean.email) visitorEmail.value = clean.email
+    if (!sessionReady) {
+      queuedIdentity = clean
+      return
+    }
+    pushIdentity(clean)
+  }
+
   async function start() {
     ensureVisitorId()
     try {
       await handshake()
       connectWs()
       status.value = 'ready'
+      sessionReady = true
+      if (queuedIdentity) {
+        const traits = queuedIdentity
+        queuedIdentity = null
+        // re-apply — the handshake may have overwritten the refs with stale values
+        if (traits.name) visitorName.value = traits.name
+        if (traits.email) visitorEmail.value = traits.email
+        pushIdentity(traits)
+      }
     } catch {
       status.value = 'error'
     }
@@ -247,6 +298,7 @@ export function useWidget(siteId: string) {
     visitorEmail,
     start,
     stop,
+    identify,
     sendMessage,
     sendTyping
   }

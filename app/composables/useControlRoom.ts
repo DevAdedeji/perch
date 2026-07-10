@@ -32,6 +32,8 @@ export interface VisitorContext {
     name: string | null
     email: string | null
     visitor_id: string
+    external_id: string | null
+    identity_verified: boolean
     first_seen_at: string
     last_seen_at: string
     page_url: string | null

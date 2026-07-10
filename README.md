@@ -36,6 +36,39 @@ indicators, unread state, and race-safe conversation claiming.
 - Anonymous identity via a `localStorage` `visitor_id` — closing/refreshing resumes the same conversation.
 - Live thread, agent typing indicator, and a "business online/offline" status.
 - Optional pre-chat form (name / email), toggleable per workspace.
+- **`Perch.identify()`** — sites with signed-in users pass `{ user_id, name, email }` so pre-chat is
+  skipped and agents see who they're talking to, with optional **HMAC identity verification** so
+  visitors can't impersonate each other (see below).
+
+### Identify your users
+
+```html
+<script>
+  // if your user is signed in when the page renders (safe in any script order —
+  // the loader picks this up when it initializes):
+  window.perchIdentity = {
+    user_id: 'user_42',
+    name: 'Ada Lovelace',
+    email: 'ada@example.com',
+    hash: '<hmac from your server>' // required if verification is enforced
+  }
+
+  // or, for logins that happen after page load (SPA):
+  Perch.identify({ user_id, name, email, hash })
+</script>
+```
+
+With **identity verification** enabled (Settings → Identity verification), Perch rejects any
+identify call whose `hash` isn't a valid HMAC-SHA256 of the `user_id` (or email), keyed with the
+workspace's secret — computed on the business's server, never in the browser:
+
+```js
+// Node.js — on YOUR server
+import { createHmac } from 'node:crypto'
+const hash = createHmac('sha256', PERCH_IDENTITY_SECRET).update(user.id).digest('hex')
+```
+
+Verified visitors get a green **Verified** badge in the agent's context panel.
 
 ---
 
@@ -50,6 +83,8 @@ indicators, unread state, and race-safe conversation claiming.
 - **Secure third-party embedding.** The widget runs on arbitrary sites in a sandboxed iframe, authed
   with short-lived HMAC-signed tickets scoped to one `workspace + visitor`. A visitor connection can
   only ever subscribe to its own conversation — never `workspace:*` or another visitor's thread.
+  Host-site identities are verifiable with Intercom-style HMAC signatures (timing-safe comparison,
+  per-workspace secret, optional enforcement).
 - **Multi-tenancy with auth scoping.** Every query is scoped by workspace membership and role;
   internal notes are filtered **server-side** before they ever reach a visitor socket.
 - **A deliberate, documented scaling path** (`publish()` → Redis pub/sub) that is intentionally *not*

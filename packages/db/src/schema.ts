@@ -46,6 +46,10 @@ export const workspaces = pgTable('workspaces', {
   widgetPrimaryColor: text('widget_primary_color').default('#f59e0b').notNull(),
   autoAssignEnabled: boolean('auto_assign_enabled').default(false).notNull(),
   prechatFormEnabled: boolean('prechat_form_enabled').default(true).notNull(),
+  // HMAC secret the business signs Perch.identify() payloads with (lazily generated)
+  identitySecret: text('identity_secret'),
+  // when on, unsigned identify() calls are rejected (Intercom-style enforcement)
+  identityVerificationEnabled: boolean('identity_verification_enabled').default(false).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull()
 })
 
@@ -77,6 +81,10 @@ export const visitors = pgTable('visitors', {
   visitorId: text('visitor_id').notNull(),
   name: text('name'),
   email: text('email'),
+  // the host platform's own user id (via Perch.identify)
+  externalId: text('external_id'),
+  // true when the identify payload carried a valid HMAC signature
+  identityVerified: boolean('identity_verified').default(false).notNull(),
   firstSeenAt: timestamp('first_seen_at', { withTimezone: true }).defaultNow().notNull(),
   lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).defaultNow().notNull(),
   metadata: jsonb('metadata').$type<VisitorMetadata>().default({}).notNull()

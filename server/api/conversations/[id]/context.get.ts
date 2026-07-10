@@ -48,6 +48,8 @@ export default defineEventHandler(async (event) => {
       name: visitor.name,
       email: visitor.email,
       visitor_id: visitor.visitorId,
+      external_id: visitor.externalId,
+      identity_verified: visitor.identityVerified,
       first_seen_at: visitor.firstSeenAt.toISOString(),
       last_seen_at: visitor.lastSeenAt.toISOString(),
       page_url: visitor.metadata.page_url ?? null,

@@ -46,8 +46,19 @@ async function copy(text: string) {
       <span class="mx-auto grid place-items-center size-14 rounded-2xl avatar-amber text-lg font-bold">
         {{ initials(displayName) }}
       </span>
-      <p class="mt-3 text-sm font-semibold text-highlighted truncate">
-        {{ displayName }}
+      <p class="mt-3 flex items-center justify-center gap-1.5 text-sm font-semibold text-highlighted">
+        <span class="truncate">{{ displayName }}</span>
+        <span
+          v-if="context?.visitor.identity_verified"
+          class="inline-flex items-center gap-1 shrink-0 rounded-full bg-green-500/10 ring-1 ring-green-500/25 px-1.5 py-0.5 text-[10px] font-medium text-green-700 dark:text-green-400"
+          title="Identity signed by the business's server via Perch.identify"
+        >
+          <UIcon
+            name="i-lucide-badge-check"
+            class="size-3"
+          />
+          Verified
+        </span>
       </p>
       <button
         v-if="context?.visitor.email"
@@ -171,18 +182,32 @@ async function copy(text: string) {
         </dl>
       </div>
 
-      <!-- anonymous id -->
-      <div class="p-5">
-        <p class="text-[10px] font-semibold uppercase tracking-wider text-dimmed">
-          Visitor ID
-        </p>
-        <button
-          class="mt-2 w-full truncate rounded-lg bg-elevated/60 ring-1 ring-default px-2.5 py-1.5 text-left font-mono text-[11px] text-muted hover:text-highlighted transition-colors"
-          title="Copy visitor id"
-          @click="copy(context.visitor.visitor_id)"
-        >
-          {{ context.visitor.visitor_id }}
-        </button>
+      <!-- ids -->
+      <div class="p-5 space-y-4">
+        <div v-if="context.visitor.external_id">
+          <p class="text-[10px] font-semibold uppercase tracking-wider text-dimmed">
+            User ID <span class="normal-case font-normal">· from their platform</span>
+          </p>
+          <button
+            class="mt-2 w-full truncate rounded-lg bg-elevated/60 ring-1 ring-default px-2.5 py-1.5 text-left font-mono text-[11px] text-muted hover:text-highlighted transition-colors"
+            title="Copy user id"
+            @click="copy(context.visitor.external_id!)"
+          >
+            {{ context.visitor.external_id }}
+          </button>
+        </div>
+        <div>
+          <p class="text-[10px] font-semibold uppercase tracking-wider text-dimmed">
+            Visitor ID
+          </p>
+          <button
+            class="mt-2 w-full truncate rounded-lg bg-elevated/60 ring-1 ring-default px-2.5 py-1.5 text-left font-mono text-[11px] text-muted hover:text-highlighted transition-colors"
+            title="Copy visitor id"
+            @click="copy(context.visitor.visitor_id)"
+          >
+            {{ context.visitor.visitor_id }}
+          </button>
+        </div>
       </div>
     </template>
   </div>

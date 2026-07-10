@@ -8,6 +8,8 @@ interface WorkspaceDetail {
   siteId: string
   widgetPrimaryColor: string
   prechatFormEnabled: boolean
+  identityVerificationEnabled: boolean
+  identitySecret: string | null
   role: 'admin' | 'agent'
 }
 
@@ -28,6 +30,29 @@ const closeScript = '</' + 'script>'
 const snippet = computed(() =>
   `<script src="${origin}/widget.js" data-site-id="${workspace.value?.siteId ?? ''}" async>${closeScript}`
 )
+// optional: tell Perch who the signed-in user is, so pre-chat is skipped.
+// window.perchIdentity is safe regardless of script order (the loader is async);
+// Perch.identify() is for logins that happen after page load.
+const identifySnippet = `<script>
+  // if your user is signed in when the page renders:
+  window.perchIdentity = {
+    user_id: 'user_42',              // your platform's id for them
+    name: 'Ada Lovelace',
+    email: 'ada@example.com',
+    hash: '<generated on your server>' // required if verification is enforced
+  }
+
+  // or, after a login that happens without a page reload:
+  // Perch.identify({ user_id, name, email, hash })
+${closeScript}`
+
+// how the business's backend signs the identity (never expose the secret client-side)
+const signSnippet = `// Node.js — on YOUR server, never in the browser
+import { createHmac } from 'node:crypto'
+
+const hash = createHmac('sha256', PERCH_IDENTITY_SECRET)
+  .update(user.id) // or user.email if you don't pass user_id
+  .digest('hex')`
 
 async function load() {
   if (!wid.value) return
@@ -68,6 +93,16 @@ async function togglePrechat(value: boolean) {
 async function setColor(color: string) {
   try {
     await patchWorkspace({ widgetPrimaryColor: color })
+  } catch {
+    toast.add({ title: 'Could not update', color: 'error' })
+  }
+}
+async function toggleIdentityVerification(value: boolean) {
+  try {
+    await patchWorkspace(
+      { identityVerificationEnabled: value },
+      value ? 'Unsigned identities will now be rejected' : 'Identity verification disabled'
+    )
   } catch {
     toast.add({ title: 'Could not update', color: 'error' })
   }
@@ -301,6 +336,74 @@ async function removeCanned(c: Canned) {
           </form>
         </section>
 
+        <!-- Identity verification -->
+        <section class="rounded-2xl border-glow bg-elevated/30 p-5 sm:p-6">
+          <h2 class="font-display font-semibold text-highlighted">
+            Identity verification
+          </h2>
+          <p class="text-sm text-muted mt-0.5">
+            Prove that identities passed via <span class="font-mono text-xs text-highlighted">Perch.identify()</span>
+            really come from your server — visitors can’t impersonate each other.
+          </p>
+
+          <div class="mt-5 space-y-5">
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <p class="text-sm font-medium text-highlighted">
+                  Require verified identities
+                </p>
+                <p class="text-xs text-muted">
+                  When on, identify() calls without a valid signature are rejected.
+                </p>
+              </div>
+              <USwitch
+                :model-value="workspace?.identityVerificationEnabled"
+                :disabled="!isAdmin"
+                @update:model-value="toggleIdentityVerification"
+              />
+            </div>
+
+            <template v-if="isAdmin && workspace?.identitySecret">
+              <div>
+                <p class="text-sm font-medium text-highlighted">
+                  Your identity secret
+                </p>
+                <p class="text-xs text-muted mb-2">
+                  Keep this on your server — treat it like a password.
+                </p>
+                <button
+                  class="w-full truncate rounded-lg bg-default ring-1 ring-default px-3 py-2 text-left font-mono text-xs text-muted hover:text-highlighted transition-colors"
+                  title="Copy identity secret"
+                  @click="copy(workspace.identitySecret, 'Secret copied')"
+                >
+                  {{ workspace.identitySecret }}
+                </button>
+              </div>
+
+              <div class="rounded-xl bg-default ring-1 ring-default overflow-hidden">
+                <div class="flex items-center gap-2 px-4 py-2 border-b border-default bg-elevated/50">
+                  <UIcon
+                    name="i-lucide-shield-check"
+                    class="size-4 text-dimmed"
+                  />
+                  <span class="text-xs font-mono text-dimmed">sign the identity on your server</span>
+                  <UButton
+                    class="ml-auto"
+                    size="xs"
+                    color="neutral"
+                    variant="ghost"
+                    icon="i-lucide-copy"
+                    @click="copy(signSnippet, 'Snippet copied')"
+                  >
+                    Copy
+                  </UButton>
+                </div>
+                <pre class="p-4 text-xs font-mono text-highlighted overflow-x-auto whitespace-pre-wrap break-all">{{ signSnippet }}</pre>
+              </div>
+            </template>
+          </div>
+        </section>
+
         <!-- Embed -->
         <section class="rounded-2xl border-glow bg-elevated/30 p-5 sm:p-6">
           <h2 class="font-display font-semibold text-highlighted">
@@ -328,6 +431,36 @@ async function removeCanned(c: Canned) {
               </UButton>
             </div>
             <pre class="p-4 text-xs font-mono text-highlighted overflow-x-auto whitespace-pre-wrap break-all">{{ snippet }}</pre>
+          </div>
+
+          <div class="mt-5">
+            <p class="text-sm font-medium text-highlighted">
+              Know who you’re talking to <span class="ml-1 rounded-md bg-amber-500/10 ring-1 ring-amber-500/25 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-400">optional</span>
+            </p>
+            <p class="text-xs text-muted mt-0.5">
+              If your visitors sign in on your site, pass their details and Perch skips the
+              pre-chat form — agents see their real name and email.
+            </p>
+            <div class="mt-3 rounded-xl bg-default ring-1 ring-default overflow-hidden">
+              <div class="flex items-center gap-2 px-4 py-2 border-b border-default bg-elevated/50">
+                <UIcon
+                  name="i-lucide-user-check"
+                  class="size-4 text-dimmed"
+                />
+                <span class="text-xs font-mono text-dimmed">identify your user</span>
+                <UButton
+                  class="ml-auto"
+                  size="xs"
+                  color="neutral"
+                  variant="ghost"
+                  icon="i-lucide-copy"
+                  @click="copy(identifySnippet, 'Snippet copied')"
+                >
+                  Copy
+                </UButton>
+              </div>
+              <pre class="p-4 text-xs font-mono text-highlighted overflow-x-auto whitespace-pre-wrap break-all">{{ identifySnippet }}</pre>
+            </div>
           </div>
         </section>
       </template>

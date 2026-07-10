@@ -200,6 +200,9 @@ function onParentMessage(e: MessageEvent) {
     if (window.matchMedia('(pointer: fine)').matches) nextTick(() => composerEl.value?.focus())
   } else if (data.perch === 'close') {
     isOpen.value = false
+  } else if (data.perch === 'identify') {
+    // the host site told us who its signed-in user is — skip pre-chat
+    widget.identify({ user_id: data.user_id, name: data.name, email: data.email, hash: data.hash })
   }
 }
 
