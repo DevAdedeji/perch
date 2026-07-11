@@ -159,6 +159,20 @@ export const emailVerificationTokens = pgTable('email_verification_tokens', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull()
 })
 
+/**
+ * Server-side session registry. The sealed cookie alone can't be revoked, so
+ * every sign-in also creates a row here and `requireUser` checks the row still
+ * exists — deleting it signs that device out (within the cache window).
+ */
+export const sessions = pgTable('sessions', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  userAgent: text('user_agent'),
+  ip: text('ip'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).defaultNow().notNull()
+})
+
 export const cannedResponses = pgTable('canned_responses', {
   id: uuid('id').defaultRandom().primaryKey(),
   workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),

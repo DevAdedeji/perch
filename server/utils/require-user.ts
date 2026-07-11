@@ -14,6 +14,10 @@ export interface SessionUser {
  * concrete `{ id, email, name }` without repeating the assertion.
  */
 export async function requireUser(event: H3Event): Promise<SessionUser> {
-  const { user } = await requireUserSession(event)
-  return user as SessionUser
+  const session = await requireUserSession(event)
+  const user = session.user as SessionUser
+  // the sealed cookie is necessary but not sufficient — the server-side
+  // session row must still exist (this is what makes sign-out-everywhere real)
+  await assertSessionAlive(event, (session as { sessionId?: string }).sessionId, user.id)
+  return user
 }

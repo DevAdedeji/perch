@@ -22,9 +22,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 500, statusMessage: 'Failed to create account' })
   }
 
-  await setUserSession(event, {
-    user: { id: user.id, email: user.email, name: user.name }
-  })
+  await createDbSession(event, { id: user.id, email: user.email, name: user.name })
 
   // best-effort — signup never fails because an email didn't send
   sendVerificationEmail(event, { userId: user.id, name: user.name, email: user.email }).catch(() => {})

@@ -1,4 +1,4 @@
-import { eq, passwordResetTokens, users } from '@perch/db'
+import { and, eq, ne, passwordResetTokens, sessions, users } from '@perch/db'
 import { z } from 'zod'
 
 const schema = z.object({
@@ -24,8 +24,16 @@ export default defineEventHandler(async (event) => {
 
   const passwordHash = await hashPassword(result.data.new_password)
   await db.update(users).set({ passwordHash }).where(eq(users.id, user.id))
-  // a password change invalidates any outstanding reset links
+  // a password change invalidates any outstanding reset links…
   await db.delete(passwordResetTokens).where(eq(passwordResetTokens.userId, user.id))
+  // …and signs out every other device (the classic stolen-laptop move)
+  const sessionId = await currentSessionId(event)
+  const revoked = await db.delete(sessions)
+    .where(sessionId
+      ? and(eq(sessions.userId, user.id), ne(sessions.id, sessionId))
+      : eq(sessions.userId, user.id))
+    .returning()
+  forgetSessions(revoked.map(r => r.id))
 
-  return { ok: true }
+  return { ok: true, revoked_sessions: revoked.length }
 })

@@ -7,16 +7,24 @@ creates a workspace, and drops a single `<script>` tag on their site. Visitors c
 widget; support agents answer from a real-time **Control Room** dashboard — with presence, typing
 indicators, unread state, and race-safe conversation claiming.
 
-> Built as a portfolio + learning project to demonstrate end-to-end engineering: real-time systems,
-> presence, multi-tenancy with auth scoping, secure third-party embedding, and concurrency correctness.
+> Built from scratch and run as a real product: real-time systems, presence, multi-tenancy with
+> auth scoping, secure third-party embedding, and concurrency correctness — all open source.
 > Every dependency is free or on a genuine free tier.
 
 **Live:** https://perch.adedeji.xyz &nbsp;·&nbsp; **Stack:** Nuxt 4 · Nitro WebSockets · Drizzle · Neon Postgres
 
-<!-- Drop screenshots here for the portfolio view:
-![Control Room inbox](docs/control-room.png)
-![Embedded widget](docs/widget.png)
--->
+![Landing page](docs/screenshots/landing.png)
+
+**The Control Room** — shared inbox with claim-race-safe assignment, internal notes, and a live
+visitor context panel:
+
+![Control Room inbox](docs/screenshots/dashboard.png)
+
+**The widget** your visitors see — presence, read receipts, image attachments:
+
+<p align="center">
+  <img src="docs/screenshots/widget.png" alt="Embedded chat widget" width="400">
+</p>
 
 ---
 
@@ -242,7 +250,8 @@ reset & invite emails (Resend) · rate limiting · per-workspace domain allowlis
 `/api/health` · cursor pagination · workspace & account deletion · Vitest security suite ·
 image attachments (signed direct-to-Cloudinary uploads, images only, ≤ 1 MB) · email verification ·
 account management (name, email change with confirm-on-new-address, password change) · security
-headers · migrations-on-deploy · privacy & terms pages · nightly backup script.
+headers · migrations-on-deploy · privacy & terms pages · nightly backup script · revocable
+sessions (server-side registry, per-device sign-out, "sign out everywhere else").
 
 
 ---

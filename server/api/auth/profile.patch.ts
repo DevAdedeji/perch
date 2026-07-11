@@ -19,8 +19,10 @@ export default defineEventHandler(async (event) => {
     .where(eq(users.id, user.id))
     .returning()
 
+  // re-seal with the SAME registry session id — this is a rename, not a new sign-in
   await setUserSession(event, {
-    user: { id: updated!.id, email: updated!.email, name: updated!.name }
+    user: { id: updated!.id, email: updated!.email, name: updated!.name },
+    sessionId: await currentSessionId(event)
   })
   return { user: { id: updated!.id, email: updated!.email, name: updated!.name } }
 })

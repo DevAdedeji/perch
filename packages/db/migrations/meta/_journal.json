@@ -43,6 +43,13 @@
       "when": 1783784176091,
       "tag": "0005_fine_chameleon",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1783790018251,
+      "tag": "0006_cuddly_psylocke",
+      "breakpoints": true
     }
   ]
 }

@@ -70,6 +70,95 @@ async function changeEmail() {
   }
 }
 
+/* ── active sessions ── */
+interface SessionRow {
+  id: string
+  user_agent: string | null
+  ip: string | null
+  created_at: string
+  last_seen_at: string
+  current: boolean
+}
+
+const sessionRows = ref<SessionRow[]>([])
+const sessionsLoading = ref(true)
+const revokingId = ref<string | null>(null)
+const revokingOthers = ref(false)
+
+async function loadSessions() {
+  try {
+    sessionRows.value = await $fetch<SessionRow[]>('/api/auth/sessions')
+  } catch {
+    // the list is informational — never block the page on it
+  } finally {
+    sessionsLoading.value = false
+  }
+}
+onMounted(loadSessions)
+
+function deviceLabel(ua: string | null) {
+  if (!ua) return 'Unknown device'
+  const browser = /edg\//i.test(ua)
+    ? 'Edge'
+    : /firefox/i.test(ua)
+      ? 'Firefox'
+      : /chrome|crios/i.test(ua)
+        ? 'Chrome'
+        : /safari/i.test(ua) ? 'Safari' : 'Browser'
+  const os = /iphone|ipad/i.test(ua)
+    ? 'iOS'
+    : /android/i.test(ua)
+      ? 'Android'
+      : /mac os/i.test(ua)
+        ? 'macOS'
+        : /windows/i.test(ua) ? 'Windows' : /linux/i.test(ua) ? 'Linux' : ''
+  return os ? `${browser} · ${os}` : browser
+}
+
+function lastSeenLabel(iso: string) {
+  const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000))
+  if (mins < 2) return 'Active now'
+  if (mins < 60) return `${mins}m ago`
+  const hours = Math.round(mins / 60)
+  if (hours < 24) return `${hours}h ago`
+  return `${Math.round(hours / 24)}d ago`
+}
+
+async function revokeSession(row: SessionRow) {
+  revokingId.value = row.id
+  try {
+    const res = await $fetch<{ ok: boolean, signed_out: boolean }>(`/api/auth/sessions/${row.id}`, { method: 'DELETE' })
+    if (res.signed_out) {
+      await refresh()
+      await navigateTo('/login')
+      return
+    }
+    sessionRows.value = sessionRows.value.filter(s => s.id !== row.id)
+    toast.add({ title: 'Device signed out', icon: 'i-lucide-check', color: 'success' })
+  } catch (e) {
+    toast.add({ title: getErrorMessage(e, 'Could not sign out that device'), color: 'error' })
+  } finally {
+    revokingId.value = null
+  }
+}
+
+async function revokeOthers() {
+  revokingOthers.value = true
+  try {
+    const res = await $fetch<{ ok: boolean, revoked: number }>('/api/auth/sessions', { method: 'DELETE' })
+    sessionRows.value = sessionRows.value.filter(s => s.current)
+    toast.add({
+      title: res.revoked ? `Signed out ${res.revoked} other ${res.revoked === 1 ? 'device' : 'devices'}` : 'No other devices were signed in',
+      icon: 'i-lucide-check',
+      color: 'success'
+    })
+  } catch (e) {
+    toast.add({ title: getErrorMessage(e, 'Could not sign out other devices'), color: 'error' })
+  } finally {
+    revokingOthers.value = false
+  }
+}
+
 /* ── password change ── */
 const passwordForm = reactive({ current: '', next: '', confirm: '' })
 const changingPassword = ref(false)
@@ -93,7 +182,8 @@ async function changePassword() {
     passwordForm.current = ''
     passwordForm.next = ''
     passwordForm.confirm = ''
-    toast.add({ title: 'Password updated', icon: 'i-lucide-check', color: 'success' })
+    toast.add({ title: 'Password updated', description: 'Other devices have been signed out.', icon: 'i-lucide-check', color: 'success' })
+    loadSessions()
   } catch (e) {
     toast.add({ title: getErrorMessage(e, 'Could not change your password'), color: 'error' })
   } finally {
@@ -223,6 +313,85 @@ async function changePassword() {
             Send confirmation
           </UButton>
         </div>
+      </section>
+
+      <!-- Sessions -->
+      <section class="rounded-2xl border-glow bg-elevated/30 p-5 sm:p-6">
+        <div class="flex items-start justify-between gap-3">
+          <div>
+            <h2 class="font-display font-semibold text-highlighted">
+              Devices
+            </h2>
+            <p class="text-sm text-muted mt-0.5">
+              Everywhere your account is signed in right now.
+            </p>
+          </div>
+          <UButton
+            v-if="sessionRows.length > 1"
+            color="neutral"
+            variant="outline"
+            size="sm"
+            :loading="revokingOthers"
+            @click="revokeOthers"
+          >
+            Sign out others
+          </UButton>
+        </div>
+
+        <div
+          v-if="sessionsLoading"
+          class="mt-5 space-y-2"
+        >
+          <USkeleton
+            v-for="n in 2"
+            :key="n"
+            class="h-14 w-full rounded-xl"
+          />
+        </div>
+
+        <ul
+          v-else
+          class="mt-5 space-y-2"
+        >
+          <li
+            v-for="s in sessionRows"
+            :key="s.id"
+            class="flex items-center gap-3 rounded-xl bg-elevated/50 ring-1 ring-default px-4 py-3"
+          >
+            <UIcon
+              :name="/iphone|ipad|android/i.test(s.user_agent ?? '') ? 'i-lucide-smartphone' : 'i-lucide-monitor'"
+              class="size-4.5 shrink-0 text-dimmed"
+            />
+            <div class="min-w-0 flex-1">
+              <p class="text-sm font-medium text-highlighted truncate">
+                {{ deviceLabel(s.user_agent) }}
+                <UBadge
+                  v-if="s.current"
+                  color="success"
+                  variant="subtle"
+                  size="sm"
+                  class="ml-1.5"
+                >
+                  This device
+                </UBadge>
+              </p>
+              <p class="text-xs text-dimmed">
+                {{ lastSeenLabel(s.last_seen_at) }}<template v-if="s.ip">
+                  · {{ s.ip }}
+                </template>
+              </p>
+            </div>
+            <UButton
+              color="neutral"
+              variant="ghost"
+              size="xs"
+              :loading="revokingId === s.id"
+              @click="revokeSession(s)"
+            >
+              Sign out
+            </UButton>
+          </li>
+        </ul>
       </section>
 
       <!-- Password -->
