@@ -23,3 +23,7 @@ logs
 .env.*
 !.env.example
 PRD.md
+
+# local database dumps (scripts/backup.sh)
+backups/
+backup.log
