@@ -163,6 +163,28 @@ async function revokeOthers() {
 const passwordForm = reactive({ current: '', next: '', confirm: '' })
 const changingPassword = ref(false)
 
+/* ── danger zone: delete account ── */
+const deleteAccountOpen = ref(false)
+const deleteAccountPassword = ref('')
+const deletingAccount = ref(false)
+
+async function deleteAccount() {
+  if (!deleteAccountPassword.value || deletingAccount.value) return
+  deletingAccount.value = true
+  try {
+    await $fetch('/api/auth/account', {
+      method: 'DELETE',
+      body: { password: deleteAccountPassword.value }
+    })
+    await refresh()
+    await navigateTo('/')
+  } catch (e) {
+    toast.add({ title: getErrorMessage(e, 'Could not delete account'), color: 'error' })
+  } finally {
+    deletingAccount.value = false
+  }
+}
+
 async function changePassword() {
   if (changingPassword.value) return
   if (passwordForm.next.length < 8) {
@@ -436,6 +458,67 @@ async function changePassword() {
           </UButton>
         </div>
       </section>
+
+      <!-- Danger zone -->
+      <section class="rounded-2xl ring-1 ring-red-500/25 bg-red-500/4 p-5 sm:p-6">
+        <h2 class="font-display font-semibold text-red-600 dark:text-red-400">
+          Danger zone
+        </h2>
+        <div class="mt-4 flex items-center justify-between gap-4">
+          <div>
+            <p class="text-sm font-medium text-highlighted">
+              Delete my account
+            </p>
+            <p class="text-xs text-muted">
+              Deletes your login and any workspace where you're the only member.
+              Your assigned chats return to the pool for the rest of the team.
+            </p>
+          </div>
+          <UButton
+            class="whitespace-nowrap!"
+            color="error"
+            variant="subtle"
+            @click="deleteAccountOpen = true"
+          >
+            Delete account
+          </UButton>
+        </div>
+      </section>
     </div>
+
+    <!-- delete account confirm -->
+    <UModal
+      v-model:open="deleteAccountOpen"
+      title="Delete your account?"
+      description="Your login and any workspace where you're the only member will be permanently deleted."
+    >
+      <template #body>
+        <UFormField label="Confirm with your password">
+          <PasswordInput
+            v-model="deleteAccountPassword"
+            autocomplete="current-password"
+          />
+        </UFormField>
+      </template>
+      <template #footer>
+        <div class="flex justify-end gap-2 w-full">
+          <UButton
+            color="neutral"
+            variant="ghost"
+            @click="deleteAccountOpen = false"
+          >
+            Cancel
+          </UButton>
+          <UButton
+            color="error"
+            :loading="deletingAccount"
+            :disabled="!deleteAccountPassword"
+            @click="deleteAccount"
+          >
+            Delete my account
+          </UButton>
+        </div>
+      </template>
+    </UModal>
   </div>
 </template>

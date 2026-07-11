@@ -4,7 +4,7 @@ const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 
 export default defineEventHandler(async (event) => {
   const workspaceId = getRouterParam(event, 'id')!
-  await requireMembership(event, workspaceId, { admin: true })
+  const { user } = await requireMembership(event, workspaceId, { admin: true })
 
   const result = await readValidatedBody(event, body => invitesSchema.safeParse(body))
   if (!result.success) {
@@ -22,6 +22,9 @@ export default defineEventHandler(async (event) => {
   }))
 
   const created = await db.insert(invites).values(rows).returning()
+  logAudit(workspaceId, user, 'invite.sent', {
+    invites: created.map(i => ({ email: i.email, role: i.role }))
+  })
 
   const origin = getRequestURL(event, { xForwardedHost: true, xForwardedProto: true }).origin
   const workspace = await db.query.workspaces.findFirst({ where: eq(workspaces.id, workspaceId) })

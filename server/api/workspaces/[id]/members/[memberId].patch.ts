@@ -1,4 +1,4 @@
-import { and, count, eq, workspaceMembers } from '@perch/db'
+import { and, count, eq, users, workspaceMembers } from '@perch/db'
 import { z } from 'zod'
 
 const schema = z.object({ role: z.enum(['admin', 'agent']) })
@@ -7,7 +7,7 @@ const schema = z.object({ role: z.enum(['admin', 'agent']) })
 export default defineEventHandler(async (event) => {
   const workspaceId = getRouterParam(event, 'id')!
   const memberId = getRouterParam(event, 'memberId')!
-  await requireMembership(event, workspaceId, { admin: true })
+  const { user } = await requireMembership(event, workspaceId, { admin: true })
 
   const result = await readValidatedBody(event, body => schema.safeParse(body))
   if (!result.success) {
@@ -36,6 +36,15 @@ export default defineEventHandler(async (event) => {
     .set({ role: result.data.role })
     .where(eq(workspaceMembers.id, memberId))
     .returning()
+
+  if (target.role !== result.data.role) {
+    const targetUser = await db.query.users.findFirst({ where: eq(users.id, target.userId) })
+    logAudit(workspaceId, user, 'member.role_changed', {
+      member: targetUser?.name ?? target.userId,
+      from: target.role,
+      to: result.data.role
+    })
+  }
 
   return { member: { id: updated!.id, role: updated!.role } }
 })

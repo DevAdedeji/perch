@@ -5,12 +5,16 @@ const route = useRoute()
 const { user, workspaces, currentWorkspace, setWorkspace, logout } = useAuth()
 const { status: myPresence, away, setAway } = usePresence()
 
-const nav = [
-  { label: 'Inbox', icon: 'i-lucide-inbox', to: '/dashboard', soon: false },
-  { label: 'Team', icon: 'i-lucide-users', to: '/team', soon: false },
-  { label: 'Settings', icon: 'i-lucide-settings', to: '/settings', soon: false },
-  { label: 'Account', icon: 'i-lucide-user-cog', to: '/account', soon: false }
-]
+const nav = computed(() => [
+  { label: 'Inbox', icon: 'i-lucide-inbox', to: '/dashboard' },
+  { label: 'Team', icon: 'i-lucide-users', to: '/team' },
+  { label: 'Settings', icon: 'i-lucide-settings', to: '/settings' },
+  { label: 'Account', icon: 'i-lucide-user-cog', to: '/account' },
+  // workspace administration — admins only
+  ...(currentWorkspace.value?.role === 'admin'
+    ? [{ label: 'Admin', icon: 'i-lucide-shield', to: '/admin' }]
+    : [])
+])
 
 const canSwitch = computed(() => workspaces.value.length > 1)
 const switcherOpen = ref(false)
@@ -134,13 +138,6 @@ function pickWorkspace(id: string) {
           class="size-4.5"
         />
         {{ item.label }}
-        <UBadge
-          v-if="item.soon"
-          color="neutral"
-          variant="subtle"
-          size="sm"
-          class="ml-auto"
-        >Soon</UBadge>
       </NuxtLink>
     </nav>
 

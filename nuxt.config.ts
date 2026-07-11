@@ -27,6 +27,8 @@ export default defineNuxtConfig({
     cloudinaryCloudName: process.env.CLOUDINARY_CLOUD_NAME,
     cloudinaryApiKey: process.env.CLOUDINARY_API_KEY,
     cloudinaryApiSecret: process.env.CLOUDINARY_API_SECRET,
+    // comma-separated emails allowed to view instance metrics at /admin
+    adminEmails: process.env.PERCH_ADMIN_EMAILS,
     public: {
       // the workspace the landing page's live demo widget talks to (site_ids are public by design)
       demoSiteId: process.env.NUXT_PUBLIC_DEMO_SITE_ID || 'ws_18c6715c14'

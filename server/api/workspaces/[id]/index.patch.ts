@@ -13,7 +13,7 @@ const schema = z.object({
 /** Update workspace settings (admin only). */
 export default defineEventHandler(async (event) => {
   const workspaceId = getRouterParam(event, 'id')!
-  await requireMembership(event, workspaceId, { admin: true })
+  const { user } = await requireMembership(event, workspaceId, { admin: true })
 
   const result = await readValidatedBody(event, body => schema.safeParse(body))
   if (!result.success) {
@@ -41,6 +41,10 @@ export default defineEventHandler(async (event) => {
   const [workspace] = Object.keys(patch).length
     ? await db.update(workspaces).set(patch).where(eq(workspaces.id, workspaceId)).returning()
     : [await db.query.workspaces.findFirst({ where: eq(workspaces.id, workspaceId) })]
+
+  if (Object.keys(patch).length) {
+    logAudit(workspaceId, user, 'settings.updated', { changed: Object.keys(patch) })
+  }
 
   return {
     workspace: {

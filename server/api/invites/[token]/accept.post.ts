@@ -29,6 +29,7 @@ export default defineEventHandler(async (event) => {
       userId: user.id,
       role: invite.role
     })
+    logAudit(invite.workspaceId, user, 'member.joined', { role: invite.role })
   }
 
   await db.update(invites).set({ status: 'accepted' }).where(eq(invites.id, invite.id))

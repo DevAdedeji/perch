@@ -1,10 +1,10 @@
-import { and, count, eq, workspaceMembers } from '@perch/db'
+import { and, count, eq, users, workspaceMembers } from '@perch/db'
 
 /** Remove a member (admin only; not yourself, and never the last admin). */
 export default defineEventHandler(async (event) => {
   const workspaceId = getRouterParam(event, 'id')!
   const memberId = getRouterParam(event, 'memberId')!
-  const { member: caller } = await requireMembership(event, workspaceId, { admin: true })
+  const { user, member: caller } = await requireMembership(event, workspaceId, { admin: true })
 
   const db = useDb()
   const target = await db.query.workspaceMembers.findFirst({
@@ -26,6 +26,11 @@ export default defineEventHandler(async (event) => {
     }
   }
 
+  const targetUser = await db.query.users.findFirst({ where: eq(users.id, target.userId) })
   await db.delete(workspaceMembers).where(eq(workspaceMembers.id, memberId))
+  logAudit(workspaceId, user, 'member.removed', {
+    member: targetUser?.name ?? target.userId,
+    role: target.role
+  })
   return { ok: true }
 })

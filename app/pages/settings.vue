@@ -15,7 +15,7 @@ interface WorkspaceDetail {
   role: 'admin' | 'agent'
 }
 
-const { currentWorkspace, refresh } = useAuth()
+const { currentWorkspace } = useAuth()
 const toast = useToast()
 const origin = useRequestURL().origin
 
@@ -47,14 +47,6 @@ const identifySnippet = `<script>
   // or, after a login that happens without a page reload:
   // Perch.identify({ user_id, name, email, hash })
 ${closeScript}`
-
-// how the business's backend signs the identity (never expose the secret client-side)
-const signSnippet = `// Node.js — on YOUR server, never in the browser
-import { createHmac } from 'node:crypto'
-
-const hash = createHmac('sha256', PERCH_IDENTITY_SECRET)
-  .update(user.id) // or user.email if you don't pass user_id
-  .digest('hex')`
 
 async function load() {
   if (!wid.value) return
@@ -95,43 +87,6 @@ async function togglePrechat(value: boolean) {
 async function setColor(color: string) {
   try {
     await patchWorkspace({ widgetPrimaryColor: color })
-  } catch {
-    toast.add({ title: 'Could not update', color: 'error' })
-  }
-}
-/* -- allowed domains ---------------------------- */
-const domainInput = ref('')
-const domainSaving = ref(false)
-
-async function addDomain() {
-  const entry = domainInput.value.trim()
-  if (!entry || !workspace.value || domainSaving.value) return
-  domainSaving.value = true
-  try {
-    await patchWorkspace({ allowedDomains: [...workspace.value.allowedDomains, entry] })
-    domainInput.value = ''
-  } catch (e) {
-    toast.add({ title: getErrorMessage(e, 'Could not add domain'), color: 'error' })
-  } finally {
-    domainSaving.value = false
-  }
-}
-
-async function removeDomain(domain: string) {
-  if (!workspace.value) return
-  try {
-    await patchWorkspace({ allowedDomains: workspace.value.allowedDomains.filter(d => d !== domain) })
-  } catch (e) {
-    toast.add({ title: getErrorMessage(e, 'Could not remove domain'), color: 'error' })
-  }
-}
-
-async function toggleIdentityVerification(value: boolean) {
-  try {
-    await patchWorkspace(
-      { identityVerificationEnabled: value },
-      value ? 'Unsigned identities will now be rejected' : 'Identity verification disabled'
-    )
   } catch {
     toast.add({ title: 'Could not update', color: 'error' })
   }
@@ -186,6 +141,15 @@ async function addCanned() {
   }
 }
 
+async function removeCanned(c: Canned) {
+  try {
+    await $fetch(`/api/workspaces/${wid.value}/canned/${c.id}`, { method: 'DELETE' })
+    canned.value = canned.value.filter(x => x.id !== c.id)
+  } catch (e) {
+    toast.add({ title: getErrorMessage(e, 'Could not delete'), color: 'error' })
+  }
+}
+
 /* -- logo --------------------------------------- */
 const { uploading: logoUploading, uploadImage } = useImageUpload()
 const logoEl = ref<HTMLInputElement | null>(null)
@@ -212,57 +176,6 @@ async function removeLogo() {
     await patchWorkspace({ logoUrl: null }, 'Logo removed')
   } catch {
     toast.add({ title: 'Could not remove the logo', color: 'error' })
-  }
-}
-
-/* -- danger zone -------------------------------- */
-const deleteWsOpen = ref(false)
-const deleteWsConfirm = ref('')
-const deletingWs = ref(false)
-
-async function deleteWorkspace() {
-  if (deleteWsConfirm.value.trim() !== workspace.value?.name || deletingWs.value) return
-  deletingWs.value = true
-  try {
-    await $fetch(`/api/workspaces/${wid.value}`, { method: 'DELETE' })
-    deleteWsOpen.value = false
-    toast.add({ title: 'Workspace deleted', color: 'neutral' })
-    await refresh()
-    await navigateTo('/dashboard')
-  } catch (e) {
-    toast.add({ title: getErrorMessage(e, 'Could not delete workspace'), color: 'error' })
-  } finally {
-    deletingWs.value = false
-  }
-}
-
-const deleteAccountOpen = ref(false)
-const deleteAccountPassword = ref('')
-const deletingAccount = ref(false)
-
-async function deleteAccount() {
-  if (!deleteAccountPassword.value || deletingAccount.value) return
-  deletingAccount.value = true
-  try {
-    await $fetch('/api/auth/account', {
-      method: 'DELETE',
-      body: { password: deleteAccountPassword.value }
-    })
-    await refresh()
-    await navigateTo('/')
-  } catch (e) {
-    toast.add({ title: getErrorMessage(e, 'Could not delete account'), color: 'error' })
-  } finally {
-    deletingAccount.value = false
-  }
-}
-
-async function removeCanned(c: Canned) {
-  try {
-    await $fetch(`/api/workspaces/${wid.value}/canned/${c.id}`, { method: 'DELETE' })
-    canned.value = canned.value.filter(x => x.id !== c.id)
-  } catch (e) {
-    toast.add({ title: getErrorMessage(e, 'Could not delete'), color: 'error' })
   }
 }
 </script>
@@ -484,147 +397,6 @@ async function removeCanned(c: Canned) {
           </form>
         </section>
 
-        <!-- Allowed domains -->
-        <section class="rounded-2xl border-glow bg-elevated/30 p-5 sm:p-6">
-          <h2 class="font-display font-semibold text-highlighted">
-            Allowed domains
-          </h2>
-          <p class="text-sm text-muted mt-0.5">
-            Restrict which websites can embed your chat. Anyone can read your
-            <span class="font-mono text-xs text-highlighted">site_id</span> from your page source —
-            this stops strangers using it. Leave empty to allow any site.
-          </p>
-
-          <div class="mt-4 space-y-3">
-            <div
-              v-if="workspace?.allowedDomains.length"
-              class="flex flex-wrap gap-2"
-            >
-              <span
-                v-for="d in workspace.allowedDomains"
-                :key="d"
-                class="inline-flex items-center gap-1.5 rounded-lg bg-default ring-1 ring-default pl-2.5 pr-1 py-1 font-mono text-xs text-highlighted"
-              >
-                {{ d }}
-                <UButton
-                  v-if="isAdmin"
-                  size="xs"
-                  color="neutral"
-                  variant="ghost"
-                  icon="i-lucide-x"
-                  square
-                  :aria-label="`Remove ${d}`"
-                  @click="removeDomain(d)"
-                />
-              </span>
-            </div>
-            <p
-              v-else
-              class="rounded-xl ring-1 ring-default bg-default px-4 py-3 text-xs text-dimmed"
-            >
-              No restrictions — the widget works on any site that has your snippet.
-            </p>
-
-            <form
-              v-if="isAdmin"
-              class="flex gap-2"
-              @submit.prevent="addDomain"
-            >
-              <UInput
-                v-model="domainInput"
-                placeholder="yourdomain.com"
-                size="lg"
-                class="flex-1"
-              />
-              <UButton
-                type="submit"
-                color="primary"
-                size="lg"
-                icon="i-lucide-plus"
-                :loading="domainSaving"
-                :disabled="!domainInput.trim()"
-              >
-                Add
-              </UButton>
-            </form>
-            <p
-              v-if="workspace?.allowedDomains.length"
-              class="text-xs text-dimmed"
-            >
-              Subdomains are included automatically (adding <span class="font-mono">example.com</span>
-              also allows <span class="font-mono">app.example.com</span>). Make sure your own site is on the list.
-            </p>
-          </div>
-        </section>
-
-        <!-- Identity verification -->
-        <section class="rounded-2xl border-glow bg-elevated/30 p-5 sm:p-6">
-          <h2 class="font-display font-semibold text-highlighted">
-            Identity verification
-          </h2>
-          <p class="text-sm text-muted mt-0.5">
-            Prove that identities passed via <span class="font-mono text-xs text-highlighted">Perch.identify()</span>
-            really come from your server — visitors can’t impersonate each other.
-          </p>
-
-          <div class="mt-5 space-y-5">
-            <div class="flex items-center justify-between gap-4">
-              <div>
-                <p class="text-sm font-medium text-highlighted">
-                  Require verified identities
-                </p>
-                <p class="text-xs text-muted">
-                  When on, identify() calls without a valid signature are rejected.
-                </p>
-              </div>
-              <USwitch
-                :model-value="workspace?.identityVerificationEnabled"
-                :disabled="!isAdmin"
-                @update:model-value="toggleIdentityVerification"
-              />
-            </div>
-
-            <template v-if="isAdmin && workspace?.identitySecret">
-              <div>
-                <p class="text-sm font-medium text-highlighted">
-                  Your identity secret
-                </p>
-                <p class="text-xs text-muted mb-2">
-                  Keep this on your server — treat it like a password.
-                </p>
-                <button
-                  class="w-full truncate rounded-lg bg-default ring-1 ring-default px-3 py-2 text-left font-mono text-xs text-muted hover:text-highlighted transition-colors"
-                  title="Copy identity secret"
-                  @click="copy(workspace.identitySecret, 'Secret copied')"
-                >
-                  {{ workspace.identitySecret }}
-                </button>
-              </div>
-
-              <div class="rounded-xl bg-default ring-1 ring-default overflow-hidden">
-                <div class="flex items-center gap-2 px-4 py-2 border-b border-default bg-elevated/50">
-                  <UIcon
-                    name="i-lucide-shield-check"
-                    class="size-4 text-dimmed"
-                  />
-                  <span class="text-xs font-mono text-dimmed">sign the identity on your server</span>
-                  <UButton
-                    class="ml-auto"
-                    size="xs"
-                    color="neutral"
-                    variant="ghost"
-                    icon="i-lucide-copy"
-                    @click="copy(signSnippet, 'Snippet copied')"
-                  >
-                    Copy
-                  </UButton>
-                </div>
-                <pre class="p-4 text-xs font-mono text-highlighted overflow-x-auto whitespace-pre-wrap break-all">{{ signSnippet }}</pre>
-              </div>
-            </template>
-          </div>
-        </section>
-
         <!-- Embed -->
         <section class="rounded-2xl border-glow bg-elevated/30 p-5 sm:p-6">
           <h2 class="font-display font-semibold text-highlighted">
@@ -683,134 +455,19 @@ async function removeCanned(c: Canned) {
               <pre class="p-4 text-xs font-mono text-highlighted overflow-x-auto whitespace-pre-wrap break-all">{{ identifySnippet }}</pre>
             </div>
           </div>
-        </section>
 
-        <!-- Danger zone -->
-        <section class="rounded-2xl ring-1 ring-red-500/25 bg-red-500/4 p-5 sm:p-6">
-          <h2 class="font-display font-semibold text-red-600 dark:text-red-400">
-            Danger zone
-          </h2>
-          <p class="text-sm text-muted mt-0.5">
-            These are permanent. There is no undo and no soft delete.
+          <p
+            v-if="isAdmin"
+            class="mt-5 text-xs text-dimmed"
+          >
+            Looking for allowed domains, identity verification, the audit log, or workspace deletion?
+            They live on the <NuxtLink
+              to="/admin"
+              class="text-amber-600 dark:text-amber-400 hover:underline"
+            >Admin page</NuxtLink>.
           </p>
-
-          <div class="mt-5 space-y-4">
-            <div
-              v-if="isAdmin"
-              class="flex items-center justify-between gap-4"
-            >
-              <div>
-                <p class="text-sm font-medium text-highlighted">
-                  Delete this workspace
-                </p>
-                <p class="text-xs text-muted">
-                  Removes every conversation, message, visitor, and teammate in
-                  <span class="font-medium text-highlighted">{{ workspace?.name }}</span>.
-                </p>
-              </div>
-              <UButton
-                color="error"
-                variant="subtle"
-                @click="deleteWsOpen = true"
-              >
-                Delete workspace
-              </UButton>
-            </div>
-
-            <div class="flex items-center justify-between gap-4">
-              <div>
-                <p class="text-sm font-medium text-highlighted">
-                  Delete my account
-                </p>
-                <p class="text-xs text-muted">
-                  Deletes your login and any workspace where you're the only member.
-                  Your assigned chats return to the pool for the rest of the team.
-                </p>
-              </div>
-              <UButton
-                class="whitespace-nowrap!"
-                color="error"
-                variant="subtle"
-                @click="deleteAccountOpen = true"
-              >
-                Delete account
-              </UButton>
-            </div>
-          </div>
         </section>
       </template>
     </div>
-
-    <!-- delete workspace confirm -->
-    <UModal
-      v-model:open="deleteWsOpen"
-      title="Delete this workspace?"
-      :description="`Every conversation, visitor, and teammate in ${workspace?.name ?? 'this workspace'} will be permanently deleted.`"
-    >
-      <template #body>
-        <UFormField :label="`Type “${workspace?.name}” to confirm`">
-          <UInput
-            v-model="deleteWsConfirm"
-            size="lg"
-            class="w-full"
-            :placeholder="workspace?.name"
-          />
-        </UFormField>
-      </template>
-      <template #footer>
-        <div class="flex justify-end gap-2 w-full">
-          <UButton
-            color="neutral"
-            variant="ghost"
-            @click="deleteWsOpen = false"
-          >
-            Cancel
-          </UButton>
-          <UButton
-            color="error"
-            :loading="deletingWs"
-            :disabled="deleteWsConfirm.trim() !== workspace?.name"
-            @click="deleteWorkspace"
-          >
-            Delete forever
-          </UButton>
-        </div>
-      </template>
-    </UModal>
-
-    <!-- delete account confirm -->
-    <UModal
-      v-model:open="deleteAccountOpen"
-      title="Delete your account?"
-      description="Your login and any workspace where you're the only member will be permanently deleted."
-    >
-      <template #body>
-        <UFormField label="Confirm with your password">
-          <PasswordInput
-            v-model="deleteAccountPassword"
-            autocomplete="current-password"
-          />
-        </UFormField>
-      </template>
-      <template #footer>
-        <div class="flex justify-end gap-2 w-full">
-          <UButton
-            color="neutral"
-            variant="ghost"
-            @click="deleteAccountOpen = false"
-          >
-            Cancel
-          </UButton>
-          <UButton
-            color="error"
-            :loading="deletingAccount"
-            :disabled="!deleteAccountPassword"
-            @click="deleteAccount"
-          >
-            Delete my account
-          </UButton>
-        </div>
-      </template>
-    </UModal>
   </div>
 </template>
