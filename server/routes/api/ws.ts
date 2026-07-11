@@ -105,6 +105,10 @@ export default defineWebSocketHandler({
     }
 
     switch (msg.type) {
+      case 'ping':
+        // client heartbeat — lets both ends notice dead sockets in seconds
+        peer.send('{"type":"pong"}')
+        break
       case 'subscribe':
         await handleSubscribe(peer, msg.channel)
         break

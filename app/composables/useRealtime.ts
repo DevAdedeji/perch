@@ -14,8 +14,17 @@ let connecting = false
 let backoff = 500
 let reconnectTimer: ReturnType<typeof setTimeout> | undefined
 const handlers = new Set<Handler>()
+const reconnectHandlers = new Set<() => void>()
 const desired = new Set<string>()
-const CONTROL = new Set(['connected', 'subscribed', 'subscribe.error'])
+const CONTROL = new Set(['connected', 'subscribed', 'subscribe.error', 'pong'])
+
+// heartbeat: dead sockets (NAT timeouts, sleeping laptops) otherwise linger
+// for minutes while events silently vanish — ping every 25s, kill after 60s idle
+const PING_INTERVAL = 25_000
+const STALE_AFTER = 60_000
+let pingTimer: ReturnType<typeof setInterval> | undefined
+let lastActivity = 0
+let hadConnected = false
 
 export function useRealtime() {
   const status = useState<Status>('rt:status', () => 'idle')
@@ -48,8 +57,25 @@ export function useRealtime() {
         backoff = 500
         status.value = 'open'
         for (const channel of desired) sendRaw({ type: 'subscribe', channel })
+
+        // catch up on anything missed while the socket was down
+        if (hadConnected) {
+          for (const cb of reconnectHandlers) cb()
+        }
+        hadConnected = true
+
+        lastActivity = Date.now()
+        clearInterval(pingTimer)
+        pingTimer = setInterval(() => {
+          if (Date.now() - lastActivity > STALE_AFTER) {
+            ws.close() // stale — onclose reconnects and refetches
+            return
+          }
+          sendRaw({ type: 'ping' })
+        }, PING_INTERVAL)
       }
       ws.onmessage = (ev) => {
+        lastActivity = Date.now()
         let msg: { type?: string }
         try {
           msg = JSON.parse(ev.data)
@@ -60,6 +86,7 @@ export function useRealtime() {
         for (const h of handlers) h(msg as ServerEvent)
       }
       ws.onclose = () => {
+        clearInterval(pingTimer)
         status.value = 'closed'
         socket = null
         scheduleReconnect()
@@ -89,6 +116,12 @@ export function useRealtime() {
     return () => handlers.delete(handler)
   }
 
+  /** Fires after the socket comes BACK (not on first connect) — refetch state here. */
+  function onReconnect(handler: () => void): () => void {
+    reconnectHandlers.add(handler)
+    return () => reconnectHandlers.delete(handler)
+  }
+
   function sendTyping(conversationId: string, isTyping: boolean) {
     sendRaw({ type: isTyping ? 'typing.start' : 'typing.stop', payload: { conversation_id: conversationId } })
   }
@@ -97,5 +130,5 @@ export function useRealtime() {
     sendRaw({ type: 'presence.update', payload: { presence } })
   }
 
-  return { status, connect, subscribe, unsubscribe, on, sendTyping, sendPresence }
+  return { status, connect, subscribe, unsubscribe, on, onReconnect, sendTyping, sendPresence }
 }

@@ -6,7 +6,8 @@ const schema = z.object({
   prechatFormEnabled: z.boolean().optional(),
   identityVerificationEnabled: z.boolean().optional(),
   widgetPrimaryColor: hexColor.optional(),
-  allowedDomains: z.array(z.string().trim().min(1).max(253)).max(20).optional()
+  allowedDomains: z.array(z.string().trim().min(1).max(253)).max(20).optional(),
+  logoUrl: z.string().url().max(500).nullable().optional()
 })
 
 /** Update workspace settings (admin only). */
@@ -21,6 +22,10 @@ export default defineEventHandler(async (event) => {
 
   const db = useDb()
   const patch = { ...result.data }
+  // logos ride the same signed-upload pipeline as attachments — own cloud only
+  if (patch.logoUrl && !isOwnCloudinaryImageUrl(patch.logoUrl, cloudinaryConfig().cloudName)) {
+    throw createError({ statusCode: 400, statusMessage: 'Invalid logo upload' })
+  }
   if (patch.allowedDomains) {
     // normalize + validate each entry ("https://App.Example.com/x" -> "app.example.com")
     const normalized: string[] = []

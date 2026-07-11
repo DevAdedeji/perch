@@ -1,4 +1,4 @@
-import { and, conversations, desc, eq, messages, visitors, workspaces } from '@perch/db'
+import { and, conversationReads, conversations, desc, eq, messages, sql, visitors, workspaces } from '@perch/db'
 import type { MessageDTO } from '@perch/shared'
 import { z } from 'zod'
 
@@ -53,21 +53,29 @@ export default defineEventHandler(async (event) => {
   })
 
   let thread: MessageDTO[] = []
+  let agentName: string | null = null
+  let agentLastReadAt: string | null = null
   if (conversation) {
-    // last 100 is plenty for a resumed visitor thread — unbounded loads are
-    // the kind of thing that degrades invisibly as usage accumulates
-    const rows = await db.query.messages.findMany({
-      where: and(eq(messages.conversationId, conversation.id), eq(messages.isInternalNote, false)),
-      orderBy: desc(messages.createdAt),
-      limit: 100
-    })
+    // three independent reads — one round trip instead of three.
+    // (thread capped at the last 100: unbounded loads degrade invisibly)
+    const [rows, name, [read]] = await Promise.all([
+      db.query.messages.findMany({
+        where: and(eq(messages.conversationId, conversation.id), eq(messages.isInternalNote, false)),
+        orderBy: desc(messages.createdAt),
+        limit: 100
+      }),
+      conversation.assignedAgentId ? getMemberName(conversation.assignedAgentId) : Promise.resolve(null),
+      db.select({ last: sql<string | null>`max(${conversationReads.lastReadAt})` })
+        .from(conversationReads)
+        .where(eq(conversationReads.conversationId, conversation.id))
+    ])
     thread = rows.reverse().map(serializeMessage)
+    agentName = name
+    agentLastReadAt = read?.last ? new Date(read.last).toISOString() : null
   }
 
   const secret = (useRuntimeConfig(event).realtimeSecret || process.env.NUXT_SESSION_PASSWORD)!
   const wsTicket = signTicket({ role: 'visitor', wid: workspace.id, vid: visitor!.id }, secret)
-
-  const agentName = conversation?.assignedAgentId ? await getMemberName(conversation.assignedAgentId) : null
 
   return {
     workspace: {
@@ -80,6 +88,7 @@ export default defineEventHandler(async (event) => {
     visitor: { name: visitor!.name, email: visitor!.email },
     business_online: isBusinessOnline(workspace.id),
     conversation_id: conversation?.id ?? null,
+    agent_last_read_at: agentLastReadAt,
     messages: thread,
     ws_ticket: wsTicket,
     presence_channel: presenceChannel(workspace.id)

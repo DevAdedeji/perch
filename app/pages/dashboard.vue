@@ -31,12 +31,16 @@ async function onAttachmentPicked(e: Event) {
   const file = input.files?.[0]
   input.value = ''
   if (!file) return
-  try {
-    const img = await uploadImage(file)
-    await cr.sendReply('', internalNote.value, img)
-  } catch (err) {
-    toast.add({ title: (err as Error).message || 'Could not upload the image', color: 'error' })
+  // validate before showing a bubble; network failures become retryable bubbles
+  if (!file.type.startsWith('image/')) {
+    toast.add({ title: 'Only images can be attached', color: 'error' })
+    return
   }
+  if (file.size > 1024 * 1024) {
+    toast.add({ title: 'Images must be smaller than 1 MB', color: 'error' })
+    return
+  }
+  await cr.sendAttachment(file, () => uploadImage(file), internalNote.value)
 }
 const contextOpen = ref(false) // slideover on < xl
 function openContext() {
@@ -53,7 +57,7 @@ function initials(name: string | null, fallback = 'V') {
 }
 
 /* ── thread rows: grouping + day dividers (mirrors the widget) ── */
-type ThreadMsg = MessageDTO & { pending?: boolean }
+type ThreadMsg = MessageDTO & { pending?: boolean, failed?: boolean }
 interface MsgRow { kind: 'msg', m: ThreadMsg, first: boolean, last: boolean }
 interface NoteRow { kind: 'note', m: ThreadMsg }
 interface SystemRow { kind: 'system', m: ThreadMsg }
@@ -204,16 +208,11 @@ async function onSend() {
   const text = reply.value.trim()
   if (!text) return
   const note = internalNote.value
-  // clear instantly — the message appears optimistically (see useControlRoom.sendReply)
+  // clear instantly — the message appears optimistically; failures become
+  // retryable bubbles (see useControlRoom.performSend)
   reply.value = ''
   internalNote.value = false
-  try {
-    await cr.sendReply(text, note)
-  } catch {
-    toast.add({ title: 'Could not send message', color: 'error' })
-    reply.value = text
-    internalNote.value = note
-  }
+  await cr.sendReply(text, note)
 }
 
 async function onClaim(id: string) {
@@ -679,7 +678,7 @@ const statusBadge = {
                         row.m.sender_type === 'agent'
                           ? 'bg-amber-500 text-slate-950 shadow-sm'
                           : 'bg-default ring-1 ring-default text-highlighted',
-                        { 'opacity-60': row.m.pending }
+                        { 'opacity-60': row.m.pending, 'ring-2 ring-red-500/60': row.m.failed }
                       ]"
                     >
                       <a
@@ -702,11 +701,21 @@ const statusBadge = {
                     </div>
                   </div>
                   <p
-                    v-if="row.last"
-                    class="mt-1 text-[10px] text-dimmed"
+                    v-if="row.last || row.m.failed"
+                    class="mt-1 text-[10px]"
                     :class="row.m.sender_type === 'agent' ? 'text-right pr-9' : 'pl-1'"
                   >
-                    {{ row.m.pending ? 'Sending…' : formatTime(row.m.created_at) }}
+                    <button
+                      v-if="row.m.failed"
+                      class="font-medium text-red-500 hover:underline"
+                      @click="cr.retrySend(row.m.id)"
+                    >
+                      Not sent — retry
+                    </button>
+                    <span
+                      v-else
+                      class="text-dimmed"
+                    >{{ row.m.pending ? 'Sending…' : formatTime(row.m.created_at) }}</span>
                   </p>
                 </div>
               </template>

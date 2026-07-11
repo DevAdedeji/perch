@@ -6,6 +6,7 @@ interface WorkspaceDetail {
   id: string
   name: string
   siteId: string
+  logoUrl: string | null
   widgetPrimaryColor: string
   prechatFormEnabled: boolean
   identityVerificationEnabled: boolean
@@ -185,6 +186,35 @@ async function addCanned() {
   }
 }
 
+/* -- logo --------------------------------------- */
+const { uploading: logoUploading, uploadImage } = useImageUpload()
+const logoEl = ref<HTMLInputElement | null>(null)
+
+function pickLogo() {
+  logoEl.value?.click()
+}
+
+async function onLogoPicked(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  try {
+    const img = await uploadImage(file)
+    await patchWorkspace({ logoUrl: img.url }, 'Logo updated')
+  } catch (err) {
+    toast.add({ title: getErrorMessage(err, 'Could not upload the logo'), color: 'error' })
+  }
+}
+
+async function removeLogo() {
+  try {
+    await patchWorkspace({ logoUrl: null }, 'Logo removed')
+  } catch {
+    toast.add({ title: 'Could not remove the logo', color: 'error' })
+  }
+}
+
 /* -- danger zone -------------------------------- */
 const deleteWsOpen = ref(false)
 const deleteWsConfirm = ref('')
@@ -322,6 +352,54 @@ async function removeCanned(c: Canned) {
                   :aria-label="c"
                   @click="setColor(c)"
                 />
+              </div>
+            </div>
+
+            <div>
+              <p class="text-sm font-medium text-highlighted">
+                Logo
+              </p>
+              <p class="text-xs text-muted mb-3">
+                Shown in your widget's header and message bubbles instead of your initial.
+              </p>
+              <div class="flex items-center gap-3">
+                <span class="grid place-items-center size-12 shrink-0 rounded-xl overflow-hidden avatar-amber text-base font-bold">
+                  <img
+                    v-if="workspace?.logoUrl"
+                    :src="workspace.logoUrl"
+                    class="size-full object-cover"
+                    alt="Workspace logo"
+                  >
+                  <template v-else>{{ (workspace?.name ?? 'W').charAt(0).toUpperCase() }}</template>
+                </span>
+                <input
+                  ref="logoEl"
+                  type="file"
+                  accept="image/*"
+                  class="hidden"
+                  @change="onLogoPicked"
+                >
+                <UButton
+                  size="sm"
+                  color="neutral"
+                  variant="subtle"
+                  icon="i-lucide-upload"
+                  :loading="logoUploading"
+                  :disabled="!isAdmin"
+                  @click="pickLogo"
+                >
+                  Upload logo
+                </UButton>
+                <UButton
+                  v-if="workspace?.logoUrl"
+                  size="sm"
+                  color="neutral"
+                  variant="ghost"
+                  :disabled="!isAdmin"
+                  @click="removeLogo"
+                >
+                  Remove
+                </UButton>
               </div>
             </div>
           </div>

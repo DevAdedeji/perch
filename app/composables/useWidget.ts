@@ -14,6 +14,7 @@ interface SessionResponse {
   visitor: { name: string | null, email: string | null }
   business_online: boolean
   conversation_id: string | null
+  agent_last_read_at: string | null
   messages: MessageDTO[]
   ws_ticket: string
   presence_channel: string
@@ -29,11 +30,13 @@ export function useWidget(siteId: string) {
   const agentName = ref<string | null>(null)
   const businessOnline = ref(false)
   const conversationId = ref<string | null>(null)
-  const messages = ref<Array<MessageDTO & { pending?: boolean }>>([])
+  const messages = ref<Array<MessageDTO & { pending?: boolean, failed?: boolean }>>([])
   const status = ref<'loading' | 'ready' | 'error'>('loading')
   const agentTyping = ref(false)
   const visitorName = ref<string | null>(null)
   const visitorEmail = ref<string | null>(null)
+  // newest agent read — visitor messages at or before this show "Seen"
+  const agentReadAt = ref<string | null>(null)
 
   let visitorId = ''
   // exposed so the composer can sign attachment uploads for this visitor
@@ -43,6 +46,9 @@ export function useWidget(siteId: string) {
   let socket: WebSocket | null = null
   let alive = true
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined
+  // heartbeat — see useRealtime for the rationale
+  let pingTimer: ReturnType<typeof setInterval> | undefined
+  let lastActivity = 0
 
   function ensureVisitorId() {
     const key = `perch:visitor:${siteId}`
@@ -67,6 +73,7 @@ export function useWidget(siteId: string) {
     messages.value = res.messages
     visitorName.value = res.visitor.name
     visitorEmail.value = res.visitor.email
+    agentReadAt.value = res.agent_last_read_at
     ticket = res.ws_ticket
     presenceChan = res.presence_channel
   }
@@ -91,8 +98,19 @@ export function useWidget(siteId: string) {
     ws.onopen = () => {
       if (presenceChan) send({ type: 'subscribe', channel: presenceChan })
       if (conversationId.value) send({ type: 'subscribe', channel: channels.conversation(conversationId.value) })
+
+      lastActivity = Date.now()
+      clearInterval(pingTimer)
+      pingTimer = setInterval(() => {
+        if (Date.now() - lastActivity > 60_000) {
+          ws.close() // stale — the reconnect path re-handshakes (fresh thread)
+          return
+        }
+        send({ type: 'ping' })
+      }, 25_000)
     }
     ws.onmessage = (ev) => {
+      lastActivity = Date.now()
       let msg: { type?: string }
       try {
         msg = JSON.parse(ev.data)
@@ -103,6 +121,7 @@ export function useWidget(siteId: string) {
       apply(msg as ServerEvent)
     }
     ws.onclose = () => {
+      clearInterval(pingTimer)
       socket = null
       if (alive) scheduleReconnect()
     }
@@ -157,6 +176,11 @@ export function useWidget(siteId: string) {
         break
       case 'business.presence':
         businessOnline.value = ev.payload.online
+        break
+      case 'conversation.read':
+        if (ev.payload.conversation_id === conversationId.value) {
+          agentReadAt.value = ev.payload.last_read_at
+        }
         break
     }
   }
@@ -224,42 +248,59 @@ export function useWidget(siteId: string) {
   }
 
   // POSTs are serialized so rapid sends keep their order (and the first send
-  // finishes creating the conversation before the next one fires)
+  // finishes creating the conversation before the next one fires). Failed
+  // sends stay visible as retryable bubbles.
   let sendChain: Promise<unknown> = Promise.resolve()
+  const uploadFns = new Map<string, () => Promise<{ url: string, type: string }>>()
 
-  async function sendMessage(
-    content: string,
-    identity?: { name?: string, email?: string },
-    attachment?: { url: string, type: string }
-  ) {
-    const text = content.trim()
-    if (!text && !attachment) return
+  function queuePost(run: () => Promise<void>) {
+    const p = sendChain.then(run, run)
+    sendChain = p.catch(() => {})
+    return p
+  }
 
-    // optimistic: show the message instantly, reconcile with the server response
+  function pushTemp(content: string, attachment?: { url: string, type: string }) {
     const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`
     messages.value.push({
       id: tempId,
       conversation_id: conversationId.value ?? 'pending',
       sender_type: 'visitor',
       sender_id: null,
-      content: text,
+      content,
       attachment_url: attachment?.url ?? null,
       attachment_type: attachment?.type ?? null,
       is_internal_note: false,
       created_at: new Date().toISOString(),
       pending: true
     })
+    return tempId
+  }
 
-    const run = async () => {
-      try {
+  async function performSend(tempId: string, identity?: { name?: string, email?: string }) {
+    const temp = messages.value.find(m => m.id === tempId)
+    if (!temp) return
+    temp.pending = true
+    temp.failed = false
+    try {
+      // upload phase happens outside the queue so a slow image never blocks text
+      if (temp.attachment_url?.startsWith('blob:')) {
+        const upload = uploadFns.get(tempId)
+        if (!upload) throw new Error('upload lost')
+        const img = await upload()
+        URL.revokeObjectURL(temp.attachment_url)
+        temp.attachment_url = img.url
+        temp.attachment_type = img.type
+      }
+
+      await queuePost(async () => {
         const res = await $fetch<{ conversation_id: string, message: MessageDTO }>('/api/widget/messages', {
           method: 'POST',
           body: {
             site_id: siteId,
             visitor_id: visitorId,
-            content: text,
-            attachment_url: attachment?.url,
-            attachment_type: attachment?.type,
+            content: temp.content,
+            attachment_url: temp.attachment_url ?? undefined,
+            attachment_type: temp.attachment_type ?? undefined,
             page_url: document.referrer,
             ...identity
           }
@@ -279,15 +320,38 @@ export function useWidget(siteId: string) {
         } else {
           messages.value.push(res.message)
         }
-      } catch (e) {
-        messages.value = messages.value.filter(m => m.id !== tempId)
-        throw e
+        uploadFns.delete(tempId)
+      })
+    } catch (e) {
+      const failedMsg = messages.value.find(m => m.id === tempId)
+      if (failedMsg) {
+        failedMsg.pending = false
+        failedMsg.failed = true
       }
+      throw e
     }
+  }
 
-    const p = sendChain.then(run, run)
-    sendChain = p.catch(() => {})
-    return p
+  async function sendMessage(
+    content: string,
+    identity?: { name?: string, email?: string },
+    attachment?: { url: string, type: string }
+  ) {
+    const text = content.trim()
+    if (!text && !attachment) return
+    await performSend(pushTemp(text, attachment), identity)
+  }
+
+  /** Optimistic image send: the bubble shows a local preview while uploading. */
+  async function sendAttachment(file: File, upload: () => Promise<{ url: string, type: string }>) {
+    const preview = URL.createObjectURL(file)
+    const tempId = pushTemp('', { url: preview, type: file.type })
+    uploadFns.set(tempId, upload)
+    await performSend(tempId).catch(() => {})
+  }
+
+  function retrySend(tempId: string) {
+    return performSend(tempId).catch(() => {})
   }
 
   function sendTyping(isTyping: boolean) {
@@ -298,12 +362,14 @@ export function useWidget(siteId: string) {
   function stop() {
     alive = false
     clearTimeout(reconnectTimer)
+    clearInterval(pingTimer)
     socket?.close()
   }
 
   return {
     workspace,
     visitorId: visitorIdRef,
+    agentReadAt,
     agentName,
     businessOnline,
     conversationId,
@@ -316,6 +382,8 @@ export function useWidget(siteId: string) {
     stop,
     identify,
     sendMessage,
+    sendAttachment,
+    retrySend,
     sendTyping
   }
 }

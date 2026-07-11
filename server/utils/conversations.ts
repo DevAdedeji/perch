@@ -1,4 +1,4 @@
-import { and, conversations, eq, messages, visitors } from '@perch/db'
+import { and, conversations, eq, inArray, messages, sql, visitors } from '@perch/db'
 import type { Conversation, Message } from '@perch/db'
 import { channels } from '@perch/shared'
 import type { ConversationDTO, MessageDTO } from '@perch/shared'
@@ -72,27 +72,36 @@ export async function ingestVisitorMessage(input: IncomingVisitorMessage) {
     }
   }).returning()
 
-  // resume an existing non-resolved conversation, else open a new one
+  // resume an existing non-resolved conversation (open preferred), else open
+  // a new one — a single lookup instead of two sequential ones
   const existing = await db.query.conversations.findFirst({
     where: and(
       eq(conversations.visitorRef, visitor!.id),
-      eq(conversations.status, 'open')
-    )
-  }) ?? await db.query.conversations.findFirst({
-    where: and(
-      eq(conversations.visitorRef, visitor!.id),
-      eq(conversations.status, 'unassigned')
-    )
+      inArray(conversations.status, ['open', 'unassigned'])
+    ),
+    orderBy: sql`case when ${conversations.status} = 'open' then 0 else 1 end`
   })
 
   let conversation: Conversation
+  let message: Message
   let isNew = false
   if (existing) {
-    const [updated] = await db.update(conversations)
-      .set({ lastMessageAt: now, updatedAt: now })
-      .where(eq(conversations.id, existing.id))
-      .returning()
+    // the bump and the insert are independent — run them in one round trip
+    const [[updated], [inserted]] = await Promise.all([
+      db.update(conversations)
+        .set({ lastMessageAt: now, updatedAt: now })
+        .where(eq(conversations.id, existing.id))
+        .returning(),
+      db.insert(messages).values({
+        conversationId: existing.id,
+        senderType: 'visitor',
+        content: input.content,
+        attachmentUrl: input.attachmentUrl ?? null,
+        attachmentType: input.attachmentType ?? null
+      }).returning()
+    ])
     conversation = updated!
+    message = inserted!
   } else {
     const [created] = await db.insert(conversations).values({
       workspaceId: input.workspaceId,
@@ -102,15 +111,15 @@ export async function ingestVisitorMessage(input: IncomingVisitorMessage) {
     }).returning()
     conversation = created!
     isNew = true
+    const [inserted] = await db.insert(messages).values({
+      conversationId: conversation.id,
+      senderType: 'visitor',
+      content: input.content,
+      attachmentUrl: input.attachmentUrl ?? null,
+      attachmentType: input.attachmentType ?? null
+    }).returning()
+    message = inserted!
   }
-
-  const [message] = await db.insert(messages).values({
-    conversationId: conversation.id,
-    senderType: 'visitor',
-    content: input.content,
-    attachmentUrl: input.attachmentUrl ?? null,
-    attachmentType: input.attachmentType ?? null
-  }).returning()
 
   // broadcast
   const wsChannel = channels.workspace(input.workspaceId)
@@ -128,12 +137,12 @@ export async function ingestVisitorMessage(input: IncomingVisitorMessage) {
       }
     })
   }
-  const msgEvent = { type: 'message.new' as const, payload: serializeMessage(message!) }
+  const msgEvent = { type: 'message.new' as const, payload: serializeMessage(message) }
   // scope the inbox copy so agents don't receive chats assigned to someone else
   publishFiltered(wsChannel, msgEvent, inboxScope(conversation.assignedAgentId))
   publish(convChannel, msgEvent)
 
-  return { visitor: visitor!, conversation, message: message! }
+  return { visitor: visitor!, conversation, message }
 }
 
 /**
@@ -161,20 +170,21 @@ export async function addAgentMessage(input: AgentMessageInput) {
   const db = useDb()
   const now = new Date()
 
-  const [message] = await db.insert(messages).values({
-    conversationId: input.conversationId,
-    senderType: 'agent',
-    senderId: input.senderMemberId,
-    content: input.content,
-    attachmentUrl: input.attachmentUrl ?? null,
-    attachmentType: input.attachmentType ?? null,
-    isInternalNote: input.isInternalNote ?? false
-  }).returning()
-
-  const [conv] = await db.update(conversations)
-    .set({ lastMessageAt: now, updatedAt: now })
-    .where(eq(conversations.id, input.conversationId))
-    .returning()
+  const [[message], [conv]] = await Promise.all([
+    db.insert(messages).values({
+      conversationId: input.conversationId,
+      senderType: 'agent',
+      senderId: input.senderMemberId,
+      content: input.content,
+      attachmentUrl: input.attachmentUrl ?? null,
+      attachmentType: input.attachmentType ?? null,
+      isInternalNote: input.isInternalNote ?? false
+    }).returning(),
+    db.update(conversations)
+      .set({ lastMessageAt: now, updatedAt: now })
+      .where(eq(conversations.id, input.conversationId))
+      .returning()
+  ])
 
   const event = { type: 'message.new' as const, payload: serializeMessage(message!) }
   // inbox copy scoped to the assigned agent + admins

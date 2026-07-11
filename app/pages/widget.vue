@@ -8,8 +8,12 @@ const perchUrl = useRequestURL().origin
 
 const widget = useWidget(siteId.value)
 const {
-  workspace, agentName, businessOnline, conversationId, messages, status, agentTyping, visitorName
+  workspace, agentName, businessOnline, conversationId, messages, status, agentTyping, visitorName, agentReadAt
 } = widget
+
+function isSeen(m: { sender_type: string, created_at: string }) {
+  return m.sender_type === 'visitor' && !!agentReadAt.value && m.created_at <= agentReadAt.value
+}
 
 type ChatMessage = (typeof messages)['value'][number]
 
@@ -27,13 +31,16 @@ async function onFilePicked(e: Event) {
   input.value = ''
   if (!file) return
   uploadError.value = ''
-  try {
-    const img = await uploadImage(file, { site_id: siteId.value, visitor_id: widget.visitorId.value })
-    await widget.sendMessage('', undefined, img)
-  } catch (err) {
-    uploadError.value = (err as Error).message || 'Could not upload the image'
-    setTimeout(() => (uploadError.value = ''), 4000)
+  // validate before showing a bubble; network failures become retryable bubbles
+  if (!file.type.startsWith('image/')) {
+    uploadError.value = 'Only images can be attached'
+  } else if (file.size > 1024 * 1024) {
+    uploadError.value = 'Images must be smaller than 1 MB'
+  } else {
+    await widget.sendAttachment(file, () => uploadImage(file, { site_id: siteId.value, visitor_id: widget.visitorId.value }))
+    return
   }
+  setTimeout(() => (uploadError.value = ''), 4000)
 }
 
 const draft = ref('')
@@ -462,7 +469,7 @@ onBeforeUnmount(() => {
                 :class="[
                   ...bubbleShape(row),
                   row.m.sender_type === 'visitor' ? '' : 'bg-elevated ring-1 ring-default text-highlighted',
-                  { 'opacity-60': row.m.pending }
+                  { 'opacity-60': row.m.pending, 'ring-2 ring-red-500/60': row.m.failed }
                 ]"
                 :style="row.m.sender_type === 'visitor' ? { background: accent, color: onAccent } : {}"
               >
@@ -487,11 +494,29 @@ onBeforeUnmount(() => {
             </div>
             <!-- group meta: time / sending state -->
             <p
-              v-if="row.last"
-              class="mt-1 text-[10px] text-dimmed"
+              v-if="row.last || row.m.failed"
+              class="mt-1 text-[10px]"
               :class="row.m.sender_type === 'visitor' ? 'text-right pr-1' : 'pl-8'"
             >
-              {{ row.m.pending ? 'Sending…' : formatTime(row.m.created_at) }}
+              <button
+                v-if="row.m.failed"
+                class="font-medium text-red-500 hover:underline"
+                @click="widget.retrySend(row.m.id)"
+              >
+                Not sent — tap to retry
+              </button>
+              <span
+                v-else-if="row.m.pending"
+                class="text-dimmed"
+              >Sending…</span>
+              <span
+                v-else-if="isSeen(row.m)"
+                class="text-dimmed"
+              >Seen</span>
+              <span
+                v-else
+                class="text-dimmed"
+              >{{ formatTime(row.m.created_at) }}</span>
             </p>
           </div>
         </template>

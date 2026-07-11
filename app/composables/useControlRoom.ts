@@ -62,7 +62,7 @@ export function useControlRoom() {
   const members = ref<TeamMember[]>([])
   // shared so the dashboard layout can tell whether this conversation is being viewed
   const activeId = useState<string | null>('inbox:activeId', () => null)
-  const messages = ref<Array<MessageDTO & { pending?: boolean }>>([])
+  const messages = ref<Array<MessageDTO & { pending?: boolean, failed?: boolean }>>([])
   const filter = ref<InboxFilter>('all')
   const loadingList = ref(false)
   const loadingThread = ref(false)
@@ -222,43 +222,88 @@ export function useControlRoom() {
   }
 
   /* ── actions ─────────────────────────────────────────────── */
-  async function sendReply(content: string, isInternalNote = false, attachment?: { url: string, type: string }) {
-    const text = content.trim()
-    const conversationId = activeId.value
-    if (!conversationId || (!text && !attachment)) return
+  // failed sends stay visible as retryable bubbles; pending uploads keep their
+  // upload fn around so retry can re-upload after a network failure
+  const uploadFns = new Map<string, () => Promise<{ url: string, type: string }>>()
 
-    // optimistic: show the message instantly, reconcile with the server + WS echo
+  function pushTemp(conversationId: string, content: string, isInternalNote: boolean, attachment?: { url: string, type: string }) {
     const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`
     messages.value.push({
       id: tempId,
       conversation_id: conversationId,
       sender_type: 'agent',
       sender_id: myMemberId.value,
-      content: text,
+      content,
       attachment_url: attachment?.url ?? null,
       attachment_type: attachment?.type ?? null,
       is_internal_note: isInternalNote,
       created_at: new Date().toISOString(),
       pending: true
     })
+    return tempId
+  }
 
+  async function performSend(tempId: string) {
+    const temp = messages.value.find(m => m.id === tempId)
+    if (!temp) return
+    temp.pending = true
+    temp.failed = false
     try {
-      const { message } = await $fetch<{ message: MessageDTO }>(`/api/conversations/${conversationId}/messages`, {
+      // upload phase (only when the bubble still shows a local blob preview)
+      if (temp.attachment_url?.startsWith('blob:')) {
+        const upload = uploadFns.get(tempId)
+        if (!upload) throw new Error('upload lost')
+        const img = await upload()
+        URL.revokeObjectURL(temp.attachment_url)
+        temp.attachment_url = img.url
+        temp.attachment_type = img.type
+      }
+
+      const { message } = await $fetch<{ message: MessageDTO }>(`/api/conversations/${temp.conversation_id}/messages`, {
         method: 'POST',
         body: {
-          content: text,
-          attachment_url: attachment?.url,
-          attachment_type: attachment?.type,
-          is_internal_note: isInternalNote
+          content: temp.content,
+          attachment_url: temp.attachment_url ?? undefined,
+          attachment_type: temp.attachment_type ?? undefined,
+          is_internal_note: temp.is_internal_note
         }
       })
-      // swap the temp for the real one (the WS echo, if it arrives, dedups by id)
-      messages.value = messages.value.filter(m => m.id !== tempId)
-      if (!messages.value.some(m => m.id === message.id)) messages.value.push(message)
-    } catch (e) {
-      messages.value = messages.value.filter(m => m.id !== tempId)
-      throw e
+      // reconcile in place (the WS echo, if it arrives first, dedups by id)
+      const idx = messages.value.findIndex(m => m.id === tempId)
+      if (messages.value.some(m => m.id === message.id)) {
+        if (idx !== -1) messages.value.splice(idx, 1)
+      } else if (idx !== -1) {
+        messages.value.splice(idx, 1, message)
+      } else {
+        messages.value.push(message)
+      }
+      uploadFns.delete(tempId)
+    } catch {
+      const failedMsg = messages.value.find(m => m.id === tempId)
+      if (failedMsg) {
+        failedMsg.pending = false
+        failedMsg.failed = true
+      }
     }
+  }
+
+  async function sendReply(content: string, isInternalNote = false, attachment?: { url: string, type: string }) {
+    const text = content.trim()
+    if (!activeId.value || (!text && !attachment)) return
+    await performSend(pushTemp(activeId.value, text, isInternalNote, attachment))
+  }
+
+  /** Optimistic image send: the bubble shows a local preview while uploading. */
+  async function sendAttachment(file: File, upload: () => Promise<{ url: string, type: string }>, isInternalNote = false) {
+    if (!activeId.value) return
+    const preview = URL.createObjectURL(file)
+    const tempId = pushTemp(activeId.value, '', isInternalNote, { url: preview, type: file.type })
+    uploadFns.set(tempId, upload)
+    await performSend(tempId)
+  }
+
+  function retrySend(tempId: string) {
+    return performSend(tempId)
   }
 
   async function claim(id: string) {
@@ -352,14 +397,37 @@ export function useControlRoom() {
   // NB: the workspace channel is owned by the dashboard layout (so notifications
   // + presence persist across in-app navigation). Here we only manage the
   // conversation channel for the open thread + the event handler.
+  async function refreshActiveThread() {
+    const id = activeId.value
+    if (!id) return
+    const seq = ++threadSeq
+    try {
+      const data = await $fetch<{ items: MessageDTO[], has_more: boolean }>(`/api/conversations/${id}/messages`)
+      if (seq !== threadSeq || activeId.value !== id) return
+      // keep local unsent bubbles (pending/failed) on top of the fresh page
+      const unsent = messages.value.filter(m => m.pending || m.failed)
+      messages.value = [...data.items, ...unsent]
+      hasMoreMessages.value = data.has_more
+    } catch {
+      // next event or manual select will retry
+    }
+  }
+
+  let offReconnect: (() => void) | undefined
   onMounted(() => {
     rt.connect()
     off = rt.on(applyEvent)
+    // the socket was down — anything could have happened; refetch it all
+    offReconnect = rt.onReconnect(() => {
+      loadAll()
+      refreshActiveThread()
+    })
     if (workspaceId.value) loadAll()
   })
 
   onBeforeUnmount(() => {
     off?.()
+    offReconnect?.()
     if (activeId.value) rt.unsubscribe(channels.conversation(activeId.value))
   })
 
@@ -398,6 +466,8 @@ export function useControlRoom() {
     deselect,
     loadMoreConversations,
     loadOlderMessages,
+    sendAttachment,
+    retrySend,
     assign,
     sendReply,
     claim,

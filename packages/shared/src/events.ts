@@ -100,6 +100,12 @@ export interface BusinessPresencePayload {
   online: boolean
 }
 
+export interface ConversationReadReceiptPayload {
+  conversation_id: string
+  /** ISO timestamp of the agent's read — messages at or before this are "Seen". */
+  last_read_at: string
+}
+
 /** Discriminated union of everything the server may broadcast. */
 export type ServerEvent = | { type: 'message.new', payload: MessageDTO }
   | { type: 'conversation.new', payload: ConversationDTO }
@@ -109,6 +115,7 @@ export type ServerEvent = | { type: 'message.new', payload: MessageDTO }
   | { type: 'typing', payload: TypingPayload }
   | { type: 'presence', payload: PresencePayload }
   | { type: 'business.presence', payload: BusinessPresencePayload }
+  | { type: 'conversation.read', payload: ConversationReadReceiptPayload }
 
 export type ServerEventType = ServerEvent['type']
 
