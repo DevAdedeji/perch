@@ -21,8 +21,9 @@ const rt = useRealtime()
 
 const wid = computed(() => currentWorkspace.value?.workspaceId ?? null)
 const isAdmin = computed(() => currentWorkspace.value?.role === 'admin')
-const members = ref<Member[]>([])
-const loading = ref(true)
+// cached across navigation — skeletons only on the first visit of a session
+const members = useState<Member[]>('team:members', () => [])
+const loading = ref(false)
 
 const onlineCount = computed(() => members.value.filter(m => m.presence === 'online').length)
 
@@ -66,7 +67,8 @@ async function createInvite() {
 /* ── data + live presence ─────────────────────── */
 async function load() {
   if (!wid.value) return
-  loading.value = true
+  // stale-while-revalidate: render cached members instantly, refresh silently
+  if (!members.value.length) loading.value = true
   try {
     members.value = await $fetch<Member[]>(`/api/workspaces/${wid.value}/members`)
   } finally {

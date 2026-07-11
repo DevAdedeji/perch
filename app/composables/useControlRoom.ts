@@ -53,32 +53,44 @@ export type InboxFilter = 'all' | ConversationStatus
 /**
  * Drives the Control Room: loads the inbox + a selected thread over REST, wires
  * the workspace/conversation channels over the socket, and applies live events.
+ *
+ * State lives in shared `useState` (stale-while-revalidate): navigating
+ * Team → Inbox re-renders instantly from the cached state while a background
+ * refresh runs — skeletons only ever show when there's nothing cached yet.
  */
+
+// monotonic request tokens — module scope so a stale instance's in-flight
+// response can never overwrite state owned by a newer mount
+let listSeq = 0
+let threadSeq = 0
+// pending upload fns survive navigation so failed image sends stay retryable
+const uploadFns = new Map<string, () => Promise<{ url: string, type: string }>>()
+
 export function useControlRoom() {
   const { currentWorkspace } = useAuth()
   const rt = useRealtime()
 
-  const conversations = ref<InboxItem[]>([])
-  const members = ref<TeamMember[]>([])
+  const conversations = useState<InboxItem[]>('cr:conversations', () => [])
+  const members = useState<TeamMember[]>('cr:members', () => [])
   // shared so the dashboard layout can tell whether this conversation is being viewed
   const activeId = useState<string | null>('inbox:activeId', () => null)
-  const messages = ref<Array<MessageDTO & { pending?: boolean, failed?: boolean }>>([])
-  const filter = ref<InboxFilter>('all')
+  const messages = useState<Array<MessageDTO & { pending?: boolean, failed?: boolean }>>('cr:messages', () => [])
+  const filter = useState<InboxFilter>('cr:filter', () => 'all')
   const loadingList = ref(false)
   const loadingThread = ref(false)
   const visitorTyping = ref(false)
 
   // per-status counts for the tabs — fetched independently of the active filter
-  const counts = ref({ unassigned: 0, open: 0, resolved: 0 })
+  const counts = useState('cr:counts', () => ({ unassigned: 0, open: 0, resolved: 0 }))
 
   // composer `/shortcut` templates + the context panel for the open thread
-  const canned = ref<CannedResponse[]>([])
-  const context = ref<VisitorContext | null>(null)
+  const canned = useState<CannedResponse[]>('cr:canned', () => [])
+  const context = useState<VisitorContext | null>('cr:context', () => null)
 
   // cursor pagination state (inbox list + open thread)
-  const hasMoreConversations = ref(false)
+  const hasMoreConversations = useState('cr:hasMoreConversations', () => false)
   const loadingMore = ref(false)
-  const hasMoreMessages = ref(false)
+  const hasMoreMessages = useState('cr:hasMoreMessages', () => false)
   const loadingOlder = ref(false)
 
   const workspaceId = computed(() => currentWorkspace.value?.workspaceId ?? null)
@@ -90,10 +102,6 @@ export function useControlRoom() {
   function canSee(assignedAgentId: string | null): boolean {
     return myRole.value === 'admin' || assignedAgentId == null || assignedAgentId === myMemberId.value
   }
-
-  // monotonic request tokens so a slow response never overwrites a newer selection
-  let listSeq = 0
-  let threadSeq = 0
 
   function memberName(id: string | null): string | null {
     if (!id) return null
@@ -165,8 +173,8 @@ export function useControlRoom() {
     canned.value = await $fetch<CannedResponse[]>(`/api/workspaces/${workspaceId.value}/canned`)
   }
 
-  async function select(id: string) {
-    if (activeId.value === id) return
+  async function select(id: string, opts: { force?: boolean } = {}) {
+    if (activeId.value === id && !opts.force) return
     if (activeId.value) rt.unsubscribe(channels.conversation(activeId.value))
     activeId.value = id
     rt.subscribe(channels.conversation(id))
@@ -222,10 +230,6 @@ export function useControlRoom() {
   }
 
   /* ── actions ─────────────────────────────────────────────── */
-  // failed sends stay visible as retryable bubbles; pending uploads keep their
-  // upload fn around so retry can re-upload after a network failure
-  const uploadFns = new Map<string, () => Promise<{ url: string, type: string }>>()
-
   function pushTemp(conversationId: string, content: string, isInternalNote: boolean, attachment?: { url: string, type: string }) {
     const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`
     messages.value.push({
@@ -422,7 +426,29 @@ export function useControlRoom() {
       loadAll()
       refreshActiveThread()
     })
-    if (workspaceId.value) loadAll()
+    if (workspaceId.value) {
+      // stale-while-revalidate: skeletons only when nothing is cached
+      loadConversations({ showLoader: conversations.value.length === 0 })
+      loadCounts()
+      loadMembers()
+      loadCanned()
+    }
+    // restore the open thread after navigating away and back
+    if (activeId.value) {
+      if (messages.value.length) {
+        rt.subscribe(channels.conversation(activeId.value))
+        refreshActiveThread()
+        if (!context.value) {
+          $fetch<VisitorContext>(`/api/conversations/${activeId.value}/context`)
+            .then((ctx) => {
+              context.value = ctx
+            })
+            .catch(() => {})
+        }
+      } else {
+        select(activeId.value, { force: true })
+      }
+    }
   })
 
   onBeforeUnmount(() => {
