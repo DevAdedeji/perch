@@ -12,6 +12,14 @@ useHead({
   }]
 })
 
+// The loader injects its launcher + iframe into <body>, which survives
+// client-side navigation — without this, the demo bubble floats over the
+// dashboard. Tear it down on leave; resetting the guard lets "/" re-init.
+onBeforeUnmount(() => {
+  document.querySelectorAll('.perch-bubble, .perch-frame').forEach(el => el.remove())
+  ;(window as Window & { __perchLoaded?: boolean }).__perchLoaded = false
+})
+
 // closing tag split so it doesn't terminate this SFC <script> block
 const closeScript = '</' + 'script>'
 const snippetText = computed(() => `<script src="https://perch.adedeji.xyz/widget.js" data-site-id="ws_abc123" async>${closeScript}`)

@@ -6,6 +6,8 @@ const links = [
   { label: 'Pricing', to: '#pricing' }
 ]
 
+const { loggedIn, ensureLoaded } = useAuth()
+
 const scrolled = ref(false)
 const mobileOpen = ref(false)
 
@@ -16,6 +18,8 @@ function onScroll() {
 onMounted(() => {
   onScroll()
   window.addEventListener('scroll', onScroll, { passive: true })
+  // swap the auth buttons for "Dashboard" once the session is known
+  ensureLoaded()
 })
 onBeforeUnmount(() => window.removeEventListener('scroll', onScroll))
 </script>
@@ -55,24 +59,37 @@ onBeforeUnmount(() => window.removeEventListener('scroll', onScroll))
 
         <div class="flex items-center gap-1.5">
           <UColorModeButton />
-          <UButton
-            to="/login"
-            variant="ghost"
-            color="neutral"
-            size="md"
-            class="hidden sm:inline-flex"
-          >
-            Sign in
-          </UButton>
-          <UButton
-            to="/signup"
-            color="neutral"
-            size="md"
-            trailing-icon="i-lucide-arrow-right"
-            class="hidden sm:inline-flex font-medium"
-          >
-            Get started
-          </UButton>
+          <template v-if="loggedIn">
+            <UButton
+              to="/dashboard"
+              color="neutral"
+              size="md"
+              trailing-icon="i-lucide-arrow-right"
+              class="hidden sm:inline-flex font-medium"
+            >
+              Open dashboard
+            </UButton>
+          </template>
+          <template v-else>
+            <UButton
+              to="/login"
+              variant="ghost"
+              color="neutral"
+              size="md"
+              class="hidden sm:inline-flex"
+            >
+              Sign in
+            </UButton>
+            <UButton
+              to="/signup"
+              color="neutral"
+              size="md"
+              trailing-icon="i-lucide-arrow-right"
+              class="hidden sm:inline-flex font-medium"
+            >
+              Get started
+            </UButton>
+          </template>
           <UButton
             class="md:hidden"
             color="neutral"
@@ -107,7 +124,23 @@ onBeforeUnmount(() => window.removeEventListener('scroll', onScroll))
           >
             {{ link.label }}
           </UButton>
-          <div class="grid grid-cols-2 gap-2 p-1 pt-2">
+          <div
+            v-if="loggedIn"
+            class="p-1 pt-2"
+          >
+            <UButton
+              to="/dashboard"
+              color="neutral"
+              block
+              trailing-icon="i-lucide-arrow-right"
+            >
+              Open dashboard
+            </UButton>
+          </div>
+          <div
+            v-else
+            class="grid grid-cols-2 gap-2 p-1 pt-2"
+          >
             <UButton
               to="/login"
               variant="soft"

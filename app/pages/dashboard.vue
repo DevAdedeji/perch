@@ -462,7 +462,7 @@ const statusBadge = {
 
       <template v-else>
         <!-- header -->
-        <div class="h-16 shrink-0 flex items-center gap-3 px-4 sm:px-5 border-b border-default bg-default">
+        <div class="h-16 shrink-0 flex items-center gap-2 sm:gap-3 px-3 sm:px-5 border-b border-default bg-default">
           <UButton
             class="md:hidden -ml-1"
             color="neutral"
@@ -471,10 +471,10 @@ const statusBadge = {
             aria-label="Back to inbox"
             @click="cr.deselect()"
           />
-          <span class="grid place-items-center size-9 rounded-xl avatar-amber text-sm font-bold">
+          <span class="hidden sm:grid place-items-center size-9 shrink-0 rounded-xl avatar-amber text-sm font-bold">
             {{ initials(cr.activeConversation.value.visitor.name) }}
           </span>
-          <div class="min-w-0">
+          <div class="min-w-0 flex-1">
             <p class="text-sm font-semibold text-highlighted leading-tight truncate">
               {{ cr.activeConversation.value.visitor.name ?? 'Visitor' }}
             </p>
@@ -483,7 +483,7 @@ const statusBadge = {
             </p>
           </div>
 
-          <div class="ml-auto flex items-center gap-2">
+          <div class="flex items-center gap-1 sm:gap-2 shrink-0">
             <!-- assignee / transfer -->
             <UDropdownMenu
               :items="assignMenuItems"
@@ -503,12 +503,18 @@ const statusBadge = {
                     class="size-1.5 rounded-full"
                     :class="presenceDot(cr.memberPresence(cr.activeConversation.value.assignedAgentId))"
                   />
-                  {{ cr.memberName(cr.activeConversation.value.assignedAgentId) }}
+                  <span class="hidden sm:inline truncate max-w-28">{{ cr.memberName(cr.activeConversation.value.assignedAgentId) }}</span>
                 </span>
                 <span
                   v-else
                   class="text-muted"
-                >Assign</span>
+                >
+                  <span class="hidden sm:inline">Assign</span>
+                  <UIcon
+                    name="i-lucide-user-round-plus"
+                    class="size-4 sm:hidden"
+                  />
+                </span>
               </UButton>
 
               <template #item-label="{ item }">
@@ -530,7 +536,7 @@ const statusBadge = {
               class="font-medium"
               @click="onClaim(cr.activeConversation.value.id)"
             >
-              Claim
+              <span class="hidden sm:inline">Claim</span>
             </UButton>
 
             <UButton
@@ -541,7 +547,7 @@ const statusBadge = {
               icon="i-lucide-rotate-ccw"
               @click="cr.reopen(cr.activeConversation.value.id)"
             >
-              Reopen
+              <span class="hidden sm:inline">Reopen</span>
             </UButton>
             <UButton
               v-else
@@ -551,7 +557,7 @@ const statusBadge = {
               icon="i-lucide-check-check"
               @click="cr.resolve(cr.activeConversation.value.id)"
             >
-              Resolve
+              <span class="hidden sm:inline">Resolve</span>
             </UButton>
 
             <!-- visitor context (slideover below xl; static panel on xl+) -->
