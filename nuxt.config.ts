@@ -23,6 +23,10 @@ export default defineNuxtConfig({
     // transactional email (password reset, invites) — optional; logs in dev without it
     resendApiKey: process.env.RESEND_API_KEY,
     emailFrom: process.env.RESEND_FROM,
+    // signed image uploads (attachments) — optional; endpoint 503s without them
+    cloudinaryCloudName: process.env.CLOUDINARY_CLOUD_NAME,
+    cloudinaryApiKey: process.env.CLOUDINARY_API_KEY,
+    cloudinaryApiSecret: process.env.CLOUDINARY_API_SECRET,
     public: {
       // the workspace the landing page's live demo widget talks to (site_ids are public by design)
       demoSiteId: process.env.NUXT_PUBLIC_DEMO_SITE_ID || 'ws_18c6715c14'

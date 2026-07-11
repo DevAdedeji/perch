@@ -198,6 +198,7 @@ Useful scripts: `pnpm build` (production Nitro bundle), `pnpm preview`, `pnpm li
 | `RESEND_API_KEY` | *(optional)* transactional email — password resets + invite emails. Without it, emails are logged to the server console |
 | `RESEND_FROM` | *(optional)* from address, e.g. `Perch <no-reply@yourdomain.com>` |
 | `SENTRY_DSN` | *(optional)* server-side error tracking; the client DSN lives in `sentry.client.config.ts` |
+| `CLOUDINARY_CLOUD_NAME` / `CLOUDINARY_API_KEY` / `CLOUDINARY_API_SECRET` | *(optional)* signed image attachments; the secret never leaves the server |
 
 > Nuxt only auto-maps `NUXT_`-prefixed env at runtime, so the server also reads these two names
 > directly from `process.env` — set them as plain environment variables in production.
@@ -232,7 +233,8 @@ reassign · resolve/reopen · per-agent unread · internal notes · live presenc
 management · the embeddable widget with pre-chat, typing, and presence · notification toast + sound ·
 canned responses · visitor context panel · `Perch.identify()` with HMAC verification · password
 reset & invite emails (Resend) · rate limiting · per-workspace domain allowlist · Sentry +
-`/api/health` · cursor pagination · workspace & account deletion · Vitest security suite.
+`/api/health` · cursor pagination · workspace & account deletion · Vitest security suite ·
+image attachments (signed direct-to-Cloudinary uploads, images only, ≤ 1 MB).
 
 
 ---

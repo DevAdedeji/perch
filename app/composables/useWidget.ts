@@ -36,6 +36,8 @@ export function useWidget(siteId: string) {
   const visitorEmail = ref<string | null>(null)
 
   let visitorId = ''
+  // exposed so the composer can sign attachment uploads for this visitor
+  const visitorIdRef = ref('')
   let ticket = ''
   let presenceChan = ''
   let socket: WebSocket | null = null
@@ -50,6 +52,7 @@ export function useWidget(siteId: string) {
       localStorage.setItem(key, id)
     }
     visitorId = id
+    visitorIdRef.value = id
   }
 
   async function handshake() {
@@ -224,9 +227,13 @@ export function useWidget(siteId: string) {
   // finishes creating the conversation before the next one fires)
   let sendChain: Promise<unknown> = Promise.resolve()
 
-  async function sendMessage(content: string, identity?: { name?: string, email?: string }) {
+  async function sendMessage(
+    content: string,
+    identity?: { name?: string, email?: string },
+    attachment?: { url: string, type: string }
+  ) {
     const text = content.trim()
-    if (!text) return
+    if (!text && !attachment) return
 
     // optimistic: show the message instantly, reconcile with the server response
     const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -236,8 +243,8 @@ export function useWidget(siteId: string) {
       sender_type: 'visitor',
       sender_id: null,
       content: text,
-      attachment_url: null,
-      attachment_type: null,
+      attachment_url: attachment?.url ?? null,
+      attachment_type: attachment?.type ?? null,
       is_internal_note: false,
       created_at: new Date().toISOString(),
       pending: true
@@ -247,7 +254,15 @@ export function useWidget(siteId: string) {
       try {
         const res = await $fetch<{ conversation_id: string, message: MessageDTO }>('/api/widget/messages', {
           method: 'POST',
-          body: { site_id: siteId, visitor_id: visitorId, content: text, page_url: document.referrer, ...identity }
+          body: {
+            site_id: siteId,
+            visitor_id: visitorId,
+            content: text,
+            attachment_url: attachment?.url,
+            attachment_type: attachment?.type,
+            page_url: document.referrer,
+            ...identity
+          }
         })
         if (!conversationId.value) {
           conversationId.value = res.conversation_id
@@ -288,6 +303,7 @@ export function useWidget(siteId: string) {
 
   return {
     workspace,
+    visitorId: visitorIdRef,
     agentName,
     businessOnline,
     conversationId,

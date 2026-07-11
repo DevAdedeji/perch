@@ -18,6 +18,26 @@ const filters: { label: string, value: InboxFilter }[] = [
 
 const reply = ref('')
 const internalNote = ref(false)
+
+const { uploading, uploadImage } = useImageUpload()
+const attachEl = ref<HTMLInputElement | null>(null)
+
+function pickAttachment() {
+  attachEl.value?.click()
+}
+
+async function onAttachmentPicked(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  try {
+    const img = await uploadImage(file)
+    await cr.sendReply('', internalNote.value, img)
+  } catch (err) {
+    toast.add({ title: (err as Error).message || 'Could not upload the image', color: 'error' })
+  }
+}
 const contextOpen = ref(false) // slideover on < xl
 function openContext() {
   contextOpen.value = true
@@ -615,6 +635,20 @@ const statusBadge = {
                       />
                       Internal note · {{ cr.memberName(row.m.sender_id) }} · {{ formatTime(row.m.created_at) }}
                     </p>
+                    <a
+                      v-if="row.m.attachment_url"
+                      :href="row.m.attachment_url"
+                      target="_blank"
+                      rel="noopener"
+                      class="block my-1"
+                    >
+                      <img
+                        :src="cldThumb(row.m.attachment_url)"
+                        class="rounded-lg max-h-56 w-auto"
+                        loading="lazy"
+                        alt="Image attachment"
+                      >
+                    </a>
                     {{ row.m.content }}
                   </div>
                 </div>
@@ -648,7 +682,23 @@ const statusBadge = {
                         { 'opacity-60': row.m.pending }
                       ]"
                     >
-                      {{ row.m.content }}
+                      <a
+                        v-if="row.m.attachment_url"
+                        :href="row.m.attachment_url"
+                        target="_blank"
+                        rel="noopener"
+                        class="block -mx-2 my-0.5 first:mt-0"
+                      >
+                        <img
+                          :src="cldThumb(row.m.attachment_url)"
+                          class="rounded-lg max-h-56 w-auto"
+                          loading="lazy"
+                          alt="Image attachment"
+                        >
+                      </a>
+                      <template v-if="row.m.content">
+                        {{ row.m.content }}
+                      </template>
                     </div>
                   </div>
                   <p
@@ -720,6 +770,23 @@ const statusBadge = {
                     @keydown="onComposerKeydown"
                   />
                   <div class="flex items-center gap-2 px-2.5 pb-2">
+                    <input
+                      ref="attachEl"
+                      type="file"
+                      accept="image/*"
+                      class="hidden"
+                      @change="onAttachmentPicked"
+                    >
+                    <UButton
+                      size="sm"
+                      color="neutral"
+                      variant="ghost"
+                      square
+                      icon="i-lucide-image-plus"
+                      :loading="uploading"
+                      aria-label="Attach an image (max 1 MB)"
+                      @click="pickAttachment"
+                    />
                     <USwitch
                       v-model="internalNote"
                       size="sm"

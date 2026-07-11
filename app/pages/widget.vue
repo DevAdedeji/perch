@@ -13,6 +13,29 @@ const {
 
 type ChatMessage = (typeof messages)['value'][number]
 
+const { uploading, uploadImage } = useImageUpload()
+const fileEl = ref<HTMLInputElement | null>(null)
+const uploadError = ref('')
+
+function pickImage() {
+  fileEl.value?.click()
+}
+
+async function onFilePicked(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  uploadError.value = ''
+  try {
+    const img = await uploadImage(file, { site_id: siteId.value, visitor_id: widget.visitorId.value })
+    await widget.sendMessage('', undefined, img)
+  } catch (err) {
+    uploadError.value = (err as Error).message || 'Could not upload the image'
+    setTimeout(() => (uploadError.value = ''), 4000)
+  }
+}
+
 const draft = ref('')
 const prechat = reactive({ name: '', email: '', message: '' })
 const sending = ref(false)
@@ -443,7 +466,23 @@ onBeforeUnmount(() => {
                 ]"
                 :style="row.m.sender_type === 'visitor' ? { background: accent, color: onAccent } : {}"
               >
-                {{ row.m.content }}
+                <a
+                  v-if="row.m.attachment_url"
+                  :href="row.m.attachment_url"
+                  target="_blank"
+                  rel="noopener"
+                  class="block -mx-2 my-0.5 first:mt-0"
+                >
+                  <img
+                    :src="cldThumb(row.m.attachment_url)"
+                    class="rounded-lg max-h-48 w-auto"
+                    loading="lazy"
+                    alt="Image attachment"
+                  >
+                </a>
+                <template v-if="row.m.content">
+                  {{ row.m.content }}
+                </template>
               </div>
             </div>
             <!-- group meta: time / sending state -->
@@ -482,7 +521,32 @@ onBeforeUnmount(() => {
         >
           We’re away right now — we’ll reply as soon as we’re back.
         </p>
+        <p
+          v-if="uploadError"
+          class="pb-2 text-[11px] text-red-500 text-center"
+        >
+          {{ uploadError }}
+        </p>
         <div class="flex items-end gap-2">
+          <input
+            ref="fileEl"
+            type="file"
+            accept="image/*"
+            class="hidden"
+            @change="onFilePicked"
+          >
+          <button
+            class="grid place-items-center size-9 shrink-0 rounded-xl text-dimmed hover:text-highlighted hover:bg-elevated transition disabled:opacity-50"
+            :disabled="uploading"
+            aria-label="Attach an image (max 1 MB)"
+            @click="pickImage"
+          >
+            <UIcon
+              :name="uploading ? 'i-lucide-loader-circle' : 'i-lucide-image-plus'"
+              class="size-5"
+              :class="uploading && 'animate-spin'"
+            />
+          </button>
           <div
             class="flex-1 flex items-end rounded-xl bg-default px-3 py-1 transition-shadow min-w-0"
             :class="composerFocused ? 'ring-2' : 'ring-1 ring-default'"

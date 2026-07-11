@@ -49,7 +49,7 @@ export default defineEventHandler(async (event) => {
       visitorEmail: visitors.email,
       visitorPublicId: visitors.visitorId,
       lastReadAt: conversationReads.lastReadAt,
-      preview: sql<string | null>`(select content from ${messages} m where m.conversation_id = ${conversations.id} order by m.created_at desc limit 1)`
+      preview: sql<string | null>`(select coalesce(nullif(m.content, ''), case when m.attachment_url is not null then '📷 Photo' end) from ${messages} m where m.conversation_id = ${conversations.id} order by m.created_at desc limit 1)`
     })
     .from(conversations)
     .innerJoin(visitors, eq(visitors.id, conversations.visitorRef))

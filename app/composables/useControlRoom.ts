@@ -222,10 +222,10 @@ export function useControlRoom() {
   }
 
   /* ── actions ─────────────────────────────────────────────── */
-  async function sendReply(content: string, isInternalNote = false) {
+  async function sendReply(content: string, isInternalNote = false, attachment?: { url: string, type: string }) {
     const text = content.trim()
     const conversationId = activeId.value
-    if (!conversationId || !text) return
+    if (!conversationId || (!text && !attachment)) return
 
     // optimistic: show the message instantly, reconcile with the server + WS echo
     const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`
@@ -235,8 +235,8 @@ export function useControlRoom() {
       sender_type: 'agent',
       sender_id: myMemberId.value,
       content: text,
-      attachment_url: null,
-      attachment_type: null,
+      attachment_url: attachment?.url ?? null,
+      attachment_type: attachment?.type ?? null,
       is_internal_note: isInternalNote,
       created_at: new Date().toISOString(),
       pending: true
@@ -245,7 +245,12 @@ export function useControlRoom() {
     try {
       const { message } = await $fetch<{ message: MessageDTO }>(`/api/conversations/${conversationId}/messages`, {
         method: 'POST',
-        body: { content: text, is_internal_note: isInternalNote }
+        body: {
+          content: text,
+          attachment_url: attachment?.url,
+          attachment_type: attachment?.type,
+          is_internal_note: isInternalNote
+        }
       })
       // swap the temp for the real one (the WS echo, if it arrives, dedups by id)
       messages.value = messages.value.filter(m => m.id !== tempId)

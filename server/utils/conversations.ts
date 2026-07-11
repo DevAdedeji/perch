@@ -41,6 +41,8 @@ interface IncomingVisitorMessage {
   name?: string | null
   email?: string | null
   content: string
+  attachmentUrl?: string | null
+  attachmentType?: string | null
   pageUrl?: string
 }
 
@@ -105,7 +107,9 @@ export async function ingestVisitorMessage(input: IncomingVisitorMessage) {
   const [message] = await db.insert(messages).values({
     conversationId: conversation.id,
     senderType: 'visitor',
-    content: input.content
+    content: input.content,
+    attachmentUrl: input.attachmentUrl ?? null,
+    attachmentType: input.attachmentType ?? null
   }).returning()
 
   // broadcast
@@ -148,6 +152,8 @@ interface AgentMessageInput {
   workspaceId: string
   senderMemberId: string
   content: string
+  attachmentUrl?: string | null
+  attachmentType?: string | null
   isInternalNote?: boolean
 }
 
@@ -160,6 +166,8 @@ export async function addAgentMessage(input: AgentMessageInput) {
     senderType: 'agent',
     senderId: input.senderMemberId,
     content: input.content,
+    attachmentUrl: input.attachmentUrl ?? null,
+    attachmentType: input.attachmentType ?? null,
     isInternalNote: input.isInternalNote ?? false
   }).returning()
 
