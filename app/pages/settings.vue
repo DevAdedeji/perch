@@ -296,6 +296,54 @@ async function removeCanned(c: Canned) {
           </p>
 
           <div class="mt-5 space-y-5">
+            <div>
+              <p class="text-sm font-medium text-highlighted">
+                Logo
+              </p>
+              <p class="text-xs text-muted mb-3">
+                Shown in your widget's header and message bubbles instead of your initial.
+              </p>
+              <div class="flex items-center gap-3">
+                <span class="grid place-items-center size-12 shrink-0 rounded-xl overflow-hidden avatar-amber text-base font-bold">
+                  <img
+                    v-if="workspace?.logoUrl"
+                    :src="workspace.logoUrl"
+                    class="size-full object-cover"
+                    alt="Workspace logo"
+                  >
+                  <template v-else>{{ (workspace?.name ?? 'W').charAt(0).toUpperCase() }}</template>
+                </span>
+                <input
+                  ref="logoEl"
+                  type="file"
+                  accept="image/*"
+                  class="hidden"
+                  @change="onLogoPicked"
+                >
+                <UButton
+                  size="sm"
+                  color="neutral"
+                  variant="subtle"
+                  icon="i-lucide-upload"
+                  :loading="logoUploading"
+                  :disabled="!isAdmin"
+                  @click="pickLogo"
+                >
+                  Upload logo
+                </UButton>
+                <UButton
+                  v-if="workspace?.logoUrl"
+                  size="sm"
+                  color="neutral"
+                  variant="ghost"
+                  :disabled="!isAdmin"
+                  @click="removeLogo"
+                >
+                  Remove
+                </UButton>
+              </div>
+            </div>
+
             <UFormField label="Workspace name">
               <div class="flex gap-2">
                 <UInput
@@ -352,54 +400,6 @@ async function removeCanned(c: Canned) {
                   :aria-label="c"
                   @click="setColor(c)"
                 />
-              </div>
-            </div>
-
-            <div>
-              <p class="text-sm font-medium text-highlighted">
-                Logo
-              </p>
-              <p class="text-xs text-muted mb-3">
-                Shown in your widget's header and message bubbles instead of your initial.
-              </p>
-              <div class="flex items-center gap-3">
-                <span class="grid place-items-center size-12 shrink-0 rounded-xl overflow-hidden avatar-amber text-base font-bold">
-                  <img
-                    v-if="workspace?.logoUrl"
-                    :src="workspace.logoUrl"
-                    class="size-full object-cover"
-                    alt="Workspace logo"
-                  >
-                  <template v-else>{{ (workspace?.name ?? 'W').charAt(0).toUpperCase() }}</template>
-                </span>
-                <input
-                  ref="logoEl"
-                  type="file"
-                  accept="image/*"
-                  class="hidden"
-                  @change="onLogoPicked"
-                >
-                <UButton
-                  size="sm"
-                  color="neutral"
-                  variant="subtle"
-                  icon="i-lucide-upload"
-                  :loading="logoUploading"
-                  :disabled="!isAdmin"
-                  @click="pickLogo"
-                >
-                  Upload logo
-                </UButton>
-                <UButton
-                  v-if="workspace?.logoUrl"
-                  size="sm"
-                  color="neutral"
-                  variant="ghost"
-                  :disabled="!isAdmin"
-                  @click="removeLogo"
-                >
-                  Remove
-                </UButton>
               </div>
             </div>
           </div>

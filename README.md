@@ -208,11 +208,17 @@ Useful scripts: `pnpm build` (production Nitro bundle), `pnpm preview`, `pnpm li
 ## Deployment
 
 The whole app is one Nitro process, so it deploys as a single service on a host that supports
-**long-lived WebSocket connections** (Render, Fly, a VM — *not* Vercel/Netlify/Cloud Run, which don't
-hold persistent sockets). The included multi-stage `Dockerfile` produces a self-contained
-`.output` and runs `node .output/server/index.mjs`.
+**long-lived WebSocket connections** (Railway, Render, Fly, a VM — *not* Vercel/Netlify/Cloud Run,
+which don't hold persistent sockets). The included multi-stage `Dockerfile` produces a
+self-contained `.output`, and its CMD runs **pending database migrations before booting the
+server** (`scripts/migrate.mjs`, bundled at build time) — a deploy with unapplied migrations
+fails loudly instead of serving against a stale schema.
 
-Notes from getting this live on a free tier:
+**Backups:** Neon's point-in-time restore covers recent mistakes; `scripts/backup.sh` takes the
+off-provider copy — a nightly `pg_dump | gzip` with retention pruning, meant for a cron on any
+machine (see the script header for the crontab line and restore command).
+
+Notes from getting this live on a small tier:
 - The Nitro build can OOM on small builders — the Dockerfile raises V8's heap
   (`--max-old-space-size=4096`) and server/client sourcemaps are disabled in `nuxt.config.ts`.
 - `/api/health` is the real health check (process + database). Point uptime monitoring there —
@@ -234,7 +240,9 @@ management · the embeddable widget with pre-chat, typing, and presence · notif
 canned responses · visitor context panel · `Perch.identify()` with HMAC verification · password
 reset & invite emails (Resend) · rate limiting · per-workspace domain allowlist · Sentry +
 `/api/health` · cursor pagination · workspace & account deletion · Vitest security suite ·
-image attachments (signed direct-to-Cloudinary uploads, images only, ≤ 1 MB).
+image attachments (signed direct-to-Cloudinary uploads, images only, ≤ 1 MB) · email verification ·
+account management (name, email change with confirm-on-new-address, password change) · security
+headers · migrations-on-deploy · privacy & terms pages · nightly backup script.
 
 
 ---

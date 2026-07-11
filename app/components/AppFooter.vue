@@ -2,15 +2,25 @@
 const cols = [
   {
     title: 'Product',
-    links: ['Control Room', 'Embed widget', 'Real-time engine', 'Integrations', 'Changelog']
+    links: [
+      { label: 'Get started', to: '/signup' },
+      { label: 'Sign in', to: '/login' },
+      { label: 'Status', to: '/api/health', external: true }
+    ]
   },
   {
     title: 'Developers',
-    links: ['Documentation', 'WebSocket API', 'Widget SDK', 'Status', 'Open source']
+    links: [
+      { label: 'Source on GitHub', to: 'https://github.com/DevAdedeji/perch', external: true },
+      { label: 'Report an issue', to: 'https://github.com/DevAdedeji/perch/issues', external: true }
+    ]
   },
   {
-    title: 'Company',
-    links: ['About', 'Blog', 'Careers', 'Contact', 'Privacy']
+    title: 'Legal',
+    links: [
+      { label: 'Privacy', to: '/privacy' },
+      { label: 'Terms', to: '/terms' }
+    ]
   }
 ]
 
@@ -28,14 +38,14 @@ const year = new Date().getFullYear()
           </p>
           <div class="mt-5 flex items-center gap-2">
             <UButton
-              v-for="icon in ['i-simple-icons-github', 'i-simple-icons-x', 'i-simple-icons-discord']"
-              :key="icon"
-              :icon="icon"
+              icon="i-simple-icons-github"
+              to="https://github.com/DevAdedeji/perch"
+              target="_blank"
               color="neutral"
               variant="soft"
               size="sm"
               square
-              :aria-label="icon"
+              aria-label="Perch on GitHub"
             />
           </div>
         </div>
@@ -50,12 +60,13 @@ const year = new Date().getFullYear()
           <ul class="mt-3 space-y-2.5">
             <li
               v-for="link in col.links"
-              :key="link"
+              :key="link.label"
             >
-              <a
-                href="#"
+              <NuxtLink
+                :to="link.to"
+                :target="link.external ? '_blank' : undefined"
                 class="text-sm text-muted hover:text-highlighted transition-colors"
-              >{{ link }}</a>
+              >{{ link.label }}</NuxtLink>
             </li>
           </ul>
         </div>
@@ -63,7 +74,7 @@ const year = new Date().getFullYear()
 
       <div class="mt-12 flex flex-col sm:flex-row items-center justify-between gap-4 border-t border-default pt-6">
         <p class="text-sm text-dimmed">
-          © {{ year }} Perch. A portfolio build, made with care.
+          © {{ year }} Perch. Made with care.
         </p>
         <p class="flex items-center gap-2 text-sm text-dimmed">
           <span class="size-2 rounded-full bg-green-500" />

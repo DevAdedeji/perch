@@ -2,7 +2,7 @@
 import { channels } from '@perch/shared'
 import type { ServerEvent } from '@perch/shared'
 
-const { currentWorkspace } = useAuth()
+const { user, currentWorkspace } = useAuth()
 const rt = useRealtime()
 const toast = useToast()
 const { play } = useNotificationSound()
@@ -15,6 +15,26 @@ const activeConversationId = useState<string | null>('inbox:activeId', () => nul
 
 function openDrawer() {
   drawerOpen.value = true
+}
+
+/* ── unverified-email nudge (dismisses for the session, not forever) ── */
+const verifyDismissed = useState('verify:dismissed', () => false)
+const showVerifyBanner = computed(() =>
+  !!user.value && !user.value.emailVerified && !verifyDismissed.value
+)
+const resendingVerification = ref(false)
+
+async function resendVerification() {
+  if (resendingVerification.value) return
+  resendingVerification.value = true
+  try {
+    await $fetch('/api/auth/send-verification', { method: 'POST' })
+    toast.add({ title: 'Verification email sent', description: 'Check your inbox for the link.', icon: 'i-lucide-mail-check', color: 'success' })
+  } catch (e) {
+    toast.add({ title: getErrorMessage(e, 'Could not send the email'), color: 'error' })
+  } finally {
+    resendingVerification.value = false
+  }
 }
 
 // close the mobile drawer on route change
@@ -127,6 +147,37 @@ watch(wid, (next, prev) => {
           <UColorModeButton />
         </div>
       </header>
+
+      <!-- unverified-email nudge -->
+      <div
+        v-if="showVerifyBanner"
+        class="shrink-0 flex items-center gap-3 px-3 sm:px-4 py-2 bg-amber-500/10 border-b border-amber-500/25"
+      >
+        <UIcon
+          name="i-lucide-mail-warning"
+          class="hidden sm:block size-4 shrink-0 text-amber-600 dark:text-amber-400"
+        />
+        <p class="flex-1 min-w-0 text-xs sm:text-sm text-amber-700 dark:text-amber-400 truncate">
+          Verify your email address to secure your account.
+        </p>
+        <UButton
+          color="neutral"
+          variant="outline"
+          size="xs"
+          :loading="resendingVerification"
+          @click="resendVerification"
+        >
+          Resend email
+        </UButton>
+        <UButton
+          color="neutral"
+          variant="ghost"
+          size="xs"
+          icon="i-lucide-x"
+          aria-label="Dismiss"
+          @click="() => { verifyDismissed = true }"
+        />
+      </div>
 
       <div class="flex flex-1 min-h-0">
         <!-- desktop sidebar -->

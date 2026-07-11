@@ -132,6 +132,19 @@ async function onSubmit(event: FormSubmitEvent<Schema>) {
         >
           Create account
         </UButton>
+
+        <p class="text-center text-xs text-dimmed">
+          By creating an account you agree to the
+          <NuxtLink
+            to="/terms"
+            class="underline hover:text-muted"
+          >Terms</NuxtLink>
+          and
+          <NuxtLink
+            to="/privacy"
+            class="underline hover:text-muted"
+          >Privacy Policy</NuxtLink>.
+        </p>
       </UForm>
     </div>
 

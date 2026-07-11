@@ -8,7 +8,8 @@ const { status: myPresence, away, setAway } = usePresence()
 const nav = [
   { label: 'Inbox', icon: 'i-lucide-inbox', to: '/dashboard', soon: false },
   { label: 'Team', icon: 'i-lucide-users', to: '/team', soon: false },
-  { label: 'Settings', icon: 'i-lucide-settings', to: '/settings', soon: false }
+  { label: 'Settings', icon: 'i-lucide-settings', to: '/settings', soon: false },
+  { label: 'Account', icon: 'i-lucide-user-cog', to: '/account', soon: false }
 ]
 
 const canSwitch = computed(() => workspaces.value.length > 1)
