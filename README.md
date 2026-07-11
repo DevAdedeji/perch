@@ -89,7 +89,12 @@ Verified visitors get a green **Verified** badge in the agent's context panel.
   internal notes are filtered **server-side** before they ever reach a visitor socket.
 - **Production hardening.** Rate limiting on every public and auth endpoint (per-IP and per-account
   brute-force throttles, per-visitor message caps), a full password-reset flow with single-use
-  hashed tokens, and transactional email (Resend) for resets and team invites.
+  hashed tokens, transactional email (Resend) for resets and team invites, a per-workspace
+  **domain allowlist** (a copied site_id can't be embedded on a stranger's site), Sentry error
+  tracking, and a real `/api/health` check.
+- **Tested where it hurts.** A Vitest suite covers the security-critical invariants: ticket
+  signing/tampering/expiry, identity HMAC verification, the domain allowlist (including suffix
+  look-alike attacks), rate-limit windows, and agent visibility scoping — `pnpm test`.
 - **A deliberate, documented scaling path** (`publish()` → Redis pub/sub) that is intentionally *not*
   built for v1 — see [Scaling](#scaling-the-real-time-layer).
 
@@ -181,7 +186,8 @@ pnpm --filter @perch/widget-loader build
 pnpm dev
 ```
 
-Useful scripts: `pnpm build` (production Nitro bundle), `pnpm preview`, `pnpm lint`, `pnpm typecheck`.
+Useful scripts: `pnpm build` (production Nitro bundle), `pnpm preview`, `pnpm lint`, `pnpm typecheck`,
+`pnpm test` (Vitest — tickets, HMAC identity, domain allowlist, rate limits, visibility scoping).
 
 ### Environment variables
 

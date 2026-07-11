@@ -136,7 +136,7 @@ export async function ingestVisitorMessage(input: IncomingVisitorMessage) {
  * Predicate for inbox broadcasts: admins see all; agents only receive the
  * unassigned pool + conversations assigned to them (§ agent visibility).
  */
-function inboxScope(assignedAgentId: string | null) {
+export function inboxScope(assignedAgentId: string | null) {
   return (ctx: Record<string, unknown>) =>
     ctx.memberRole === 'admin' || assignedAgentId == null || ctx.memberId === assignedAgentId
 }

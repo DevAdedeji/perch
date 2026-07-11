@@ -28,6 +28,11 @@ export default defineEventHandler(async (event) => {
   if (!workspace) {
     throw createError({ statusCode: 404, statusMessage: 'Unknown site' })
   }
+  // anyone can copy a site_id out of page source — the domain allowlist is
+  // what stops strangers from mounting this workspace's chat on their site
+  if (!isDomainAllowed(page_url, workspace.allowedDomains)) {
+    throw createError({ statusCode: 403, statusMessage: 'This site is not allowed to embed this chat' })
+  }
 
   const now = new Date()
   const [visitor] = await db.insert(visitors).values({

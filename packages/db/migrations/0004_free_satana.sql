@@ -1,0 +1,1 @@
+ALTER TABLE "workspaces" ADD COLUMN "allowed_domains" text[] DEFAULT '{}' NOT NULL;

@@ -5,7 +5,8 @@ const schema = z.object({
   name: z.string().trim().min(1).max(80).optional(),
   prechatFormEnabled: z.boolean().optional(),
   identityVerificationEnabled: z.boolean().optional(),
-  widgetPrimaryColor: hexColor.optional()
+  widgetPrimaryColor: hexColor.optional(),
+  allowedDomains: z.array(z.string().trim().min(1).max(253)).max(20).optional()
 })
 
 /** Update workspace settings (admin only). */
@@ -19,7 +20,19 @@ export default defineEventHandler(async (event) => {
   }
 
   const db = useDb()
-  const patch = result.data
+  const patch = { ...result.data }
+  if (patch.allowedDomains) {
+    // normalize + validate each entry ("https://App.Example.com/x" -> "app.example.com")
+    const normalized: string[] = []
+    for (const entry of patch.allowedDomains) {
+      const domain = normalizeDomain(entry)
+      if (!domain) {
+        throw createError({ statusCode: 400, statusMessage: `"${entry}" is not a valid domain` })
+      }
+      if (!normalized.includes(domain)) normalized.push(domain)
+    }
+    patch.allowedDomains = normalized
+  }
   const [workspace] = Object.keys(patch).length
     ? await db.update(workspaces).set(patch).where(eq(workspaces.id, workspaceId)).returning()
     : [await db.query.workspaces.findFirst({ where: eq(workspaces.id, workspaceId) })]

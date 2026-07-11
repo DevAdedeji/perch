@@ -70,6 +70,7 @@ export function serializeWorkspace(w: Workspace) {
     logoUrl: w.logoUrl,
     widgetPrimaryColor: w.widgetPrimaryColor,
     autoAssignEnabled: w.autoAssignEnabled,
-    prechatFormEnabled: w.prechatFormEnabled
+    prechatFormEnabled: w.prechatFormEnabled,
+    allowedDomains: w.allowedDomains
   }
 }

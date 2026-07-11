@@ -1,4 +1,3 @@
-import { createHmac, timingSafeEqual } from 'node:crypto'
 import { eq, visitors, workspaces } from '@perch/db'
 import { z } from 'zod'
 
@@ -12,12 +11,6 @@ const schema = z.object({
   // workspace's identity secret — computed on the business's server
   hash: z.string().regex(/^[a-f0-9]{64}$/i).optional()
 }).refine(d => d.user_id || d.name || d.email, { message: 'Nothing to identify' })
-
-function validSignature(secret: string, subject: string, hash: string): boolean {
-  const expected = createHmac('sha256', secret).update(subject).digest()
-  const provided = Buffer.from(hash, 'hex')
-  return provided.length === expected.length && timingSafeEqual(expected, provided)
-}
 
 /**
  * Public identify endpoint — the host site passes its signed-in user
@@ -50,7 +43,7 @@ export default defineEventHandler(async (event) => {
   let verified = false
 
   if (hash) {
-    if (!workspace.identitySecret || !subject || !validSignature(workspace.identitySecret, subject, hash)) {
+    if (!workspace.identitySecret || !subject || !verifyIdentitySignature(workspace.identitySecret, subject, hash)) {
       throw createError({ statusCode: 401, statusMessage: 'Identity signature is invalid' })
     }
     verified = true

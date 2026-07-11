@@ -50,6 +50,8 @@ export const workspaces = pgTable('workspaces', {
   identitySecret: text('identity_secret'),
   // when on, unsigned identify() calls are rejected (Intercom-style enforcement)
   identityVerificationEnabled: boolean('identity_verification_enabled').default(false).notNull(),
+  // hostnames allowed to embed the widget; empty = any site (see isDomainAllowed)
+  allowedDomains: text('allowed_domains').array().default([]).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull()
 })
 

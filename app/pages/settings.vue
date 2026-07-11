@@ -10,6 +10,7 @@ interface WorkspaceDetail {
   prechatFormEnabled: boolean
   identityVerificationEnabled: boolean
   identitySecret: string | null
+  allowedDomains: string[]
   role: 'admin' | 'agent'
 }
 
@@ -97,6 +98,33 @@ async function setColor(color: string) {
     toast.add({ title: 'Could not update', color: 'error' })
   }
 }
+/* -- allowed domains ---------------------------- */
+const domainInput = ref('')
+const domainSaving = ref(false)
+
+async function addDomain() {
+  const entry = domainInput.value.trim()
+  if (!entry || !workspace.value || domainSaving.value) return
+  domainSaving.value = true
+  try {
+    await patchWorkspace({ allowedDomains: [...workspace.value.allowedDomains, entry] })
+    domainInput.value = ''
+  } catch (e) {
+    toast.add({ title: getErrorMessage(e, 'Could not add domain'), color: 'error' })
+  } finally {
+    domainSaving.value = false
+  }
+}
+
+async function removeDomain(domain: string) {
+  if (!workspace.value) return
+  try {
+    await patchWorkspace({ allowedDomains: workspace.value.allowedDomains.filter(d => d !== domain) })
+  } catch (e) {
+    toast.add({ title: getErrorMessage(e, 'Could not remove domain'), color: 'error' })
+  }
+}
+
 async function toggleIdentityVerification(value: boolean) {
   try {
     await patchWorkspace(
@@ -334,6 +362,79 @@ async function removeCanned(c: Canned) {
               </UButton>
             </div>
           </form>
+        </section>
+
+        <!-- Allowed domains -->
+        <section class="rounded-2xl border-glow bg-elevated/30 p-5 sm:p-6">
+          <h2 class="font-display font-semibold text-highlighted">
+            Allowed domains
+          </h2>
+          <p class="text-sm text-muted mt-0.5">
+            Restrict which websites can embed your chat. Anyone can read your
+            <span class="font-mono text-xs text-highlighted">site_id</span> from your page source —
+            this stops strangers using it. Leave empty to allow any site.
+          </p>
+
+          <div class="mt-4 space-y-3">
+            <div
+              v-if="workspace?.allowedDomains.length"
+              class="flex flex-wrap gap-2"
+            >
+              <span
+                v-for="d in workspace.allowedDomains"
+                :key="d"
+                class="inline-flex items-center gap-1.5 rounded-lg bg-default ring-1 ring-default pl-2.5 pr-1 py-1 font-mono text-xs text-highlighted"
+              >
+                {{ d }}
+                <UButton
+                  v-if="isAdmin"
+                  size="xs"
+                  color="neutral"
+                  variant="ghost"
+                  icon="i-lucide-x"
+                  square
+                  :aria-label="`Remove ${d}`"
+                  @click="removeDomain(d)"
+                />
+              </span>
+            </div>
+            <p
+              v-else
+              class="rounded-xl ring-1 ring-default bg-default px-4 py-3 text-xs text-dimmed"
+            >
+              No restrictions — the widget works on any site that has your snippet.
+            </p>
+
+            <form
+              v-if="isAdmin"
+              class="flex gap-2"
+              @submit.prevent="addDomain"
+            >
+              <UInput
+                v-model="domainInput"
+                placeholder="yourdomain.com"
+                size="lg"
+                class="flex-1"
+              />
+              <UButton
+                type="submit"
+                color="primary"
+                size="lg"
+                icon="i-lucide-plus"
+                :loading="domainSaving"
+                :disabled="!domainInput.trim()"
+              >
+                Add
+              </UButton>
+            </form>
+            <p
+              v-if="workspace?.allowedDomains.length"
+              class="text-xs text-dimmed"
+            >
+              Subdomains are included automatically (adding <span class="font-mono">example.com</span>
+              also allows <span class="font-mono">app.example.com</span>). Make sure your own site is on the list.
+            </p>
+          </div>
         </section>
 
         <!-- Identity verification -->
