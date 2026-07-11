@@ -14,7 +14,7 @@ interface WorkspaceDetail {
   role: 'admin' | 'agent'
 }
 
-const { currentWorkspace } = useAuth()
+const { currentWorkspace, refresh } = useAuth()
 const toast = useToast()
 const origin = useRequestURL().origin
 
@@ -182,6 +182,48 @@ async function addCanned() {
     toast.add({ title: getErrorMessage(e, 'Could not save'), color: 'error' })
   } finally {
     cannedSaving.value = false
+  }
+}
+
+/* -- danger zone -------------------------------- */
+const deleteWsOpen = ref(false)
+const deleteWsConfirm = ref('')
+const deletingWs = ref(false)
+
+async function deleteWorkspace() {
+  if (deleteWsConfirm.value.trim() !== workspace.value?.name || deletingWs.value) return
+  deletingWs.value = true
+  try {
+    await $fetch(`/api/workspaces/${wid.value}`, { method: 'DELETE' })
+    deleteWsOpen.value = false
+    toast.add({ title: 'Workspace deleted', color: 'neutral' })
+    await refresh()
+    await navigateTo('/dashboard')
+  } catch (e) {
+    toast.add({ title: getErrorMessage(e, 'Could not delete workspace'), color: 'error' })
+  } finally {
+    deletingWs.value = false
+  }
+}
+
+const deleteAccountOpen = ref(false)
+const deleteAccountPassword = ref('')
+const deletingAccount = ref(false)
+
+async function deleteAccount() {
+  if (!deleteAccountPassword.value || deletingAccount.value) return
+  deletingAccount.value = true
+  try {
+    await $fetch('/api/auth/account', {
+      method: 'DELETE',
+      body: { password: deleteAccountPassword.value }
+    })
+    await refresh()
+    await navigateTo('/')
+  } catch (e) {
+    toast.add({ title: getErrorMessage(e, 'Could not delete account'), color: 'error' })
+  } finally {
+    deletingAccount.value = false
   }
 }
 
@@ -564,7 +606,133 @@ async function removeCanned(c: Canned) {
             </div>
           </div>
         </section>
+
+        <!-- Danger zone -->
+        <section class="rounded-2xl ring-1 ring-red-500/25 bg-red-500/4 p-5 sm:p-6">
+          <h2 class="font-display font-semibold text-red-600 dark:text-red-400">
+            Danger zone
+          </h2>
+          <p class="text-sm text-muted mt-0.5">
+            These are permanent. There is no undo and no soft delete.
+          </p>
+
+          <div class="mt-5 space-y-4">
+            <div
+              v-if="isAdmin"
+              class="flex items-center justify-between gap-4"
+            >
+              <div>
+                <p class="text-sm font-medium text-highlighted">
+                  Delete this workspace
+                </p>
+                <p class="text-xs text-muted">
+                  Removes every conversation, message, visitor, and teammate in
+                  <span class="font-medium text-highlighted">{{ workspace?.name }}</span>.
+                </p>
+              </div>
+              <UButton
+                color="error"
+                variant="subtle"
+                @click="deleteWsOpen = true"
+              >
+                Delete workspace
+              </UButton>
+            </div>
+
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <p class="text-sm font-medium text-highlighted">
+                  Delete my account
+                </p>
+                <p class="text-xs text-muted">
+                  Deletes your login and any workspace where you're the only member.
+                  Your assigned chats return to the pool for the rest of the team.
+                </p>
+              </div>
+              <UButton
+                class="whitespace-nowrap!"
+                color="error"
+                variant="subtle"
+                @click="deleteAccountOpen = true"
+              >
+                Delete account
+              </UButton>
+            </div>
+          </div>
+        </section>
       </template>
     </div>
+
+    <!-- delete workspace confirm -->
+    <UModal
+      v-model:open="deleteWsOpen"
+      title="Delete this workspace?"
+      :description="`Every conversation, visitor, and teammate in ${workspace?.name ?? 'this workspace'} will be permanently deleted.`"
+    >
+      <template #body>
+        <UFormField :label="`Type “${workspace?.name}” to confirm`">
+          <UInput
+            v-model="deleteWsConfirm"
+            size="lg"
+            class="w-full"
+            :placeholder="workspace?.name"
+          />
+        </UFormField>
+      </template>
+      <template #footer>
+        <div class="flex justify-end gap-2 w-full">
+          <UButton
+            color="neutral"
+            variant="ghost"
+            @click="deleteWsOpen = false"
+          >
+            Cancel
+          </UButton>
+          <UButton
+            color="error"
+            :loading="deletingWs"
+            :disabled="deleteWsConfirm.trim() !== workspace?.name"
+            @click="deleteWorkspace"
+          >
+            Delete forever
+          </UButton>
+        </div>
+      </template>
+    </UModal>
+
+    <!-- delete account confirm -->
+    <UModal
+      v-model:open="deleteAccountOpen"
+      title="Delete your account?"
+      description="Your login and any workspace where you're the only member will be permanently deleted."
+    >
+      <template #body>
+        <UFormField label="Confirm with your password">
+          <PasswordInput
+            v-model="deleteAccountPassword"
+            autocomplete="current-password"
+          />
+        </UFormField>
+      </template>
+      <template #footer>
+        <div class="flex justify-end gap-2 w-full">
+          <UButton
+            color="neutral"
+            variant="ghost"
+            @click="deleteAccountOpen = false"
+          >
+            Cancel
+          </UButton>
+          <UButton
+            color="error"
+            :loading="deletingAccount"
+            :disabled="!deleteAccountPassword"
+            @click="deleteAccount"
+          >
+            Delete my account
+          </UButton>
+        </div>
+      </template>
+    </UModal>
   </div>
 </template>

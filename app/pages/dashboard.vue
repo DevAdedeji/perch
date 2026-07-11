@@ -96,13 +96,27 @@ function bubbleShape(row: MsgRow) {
     : ['rounded-2xl rounded-bl-md', !row.first && 'rounded-tl-md']
 }
 
-// keep the thread pinned to the newest message
+// keep the thread pinned to the newest message — but only when the newest
+// message actually changed (prepending older pages must not yank the scroll)
 const threadEl = ref<HTMLElement | null>(null)
-watch(() => cr.messages.value.length, () => {
-  nextTick(() => {
-    threadEl.value?.scrollTo({ top: threadEl.value.scrollHeight, behavior: 'smooth' })
-  })
+let lastMessageId: string | null = null
+watch(() => cr.messages.value[cr.messages.value.length - 1]?.id ?? null, (id) => {
+  if (id && id !== lastMessageId) {
+    nextTick(() => {
+      threadEl.value?.scrollTo({ top: threadEl.value.scrollHeight, behavior: 'smooth' })
+    })
+  }
+  lastMessageId = id
 })
+
+async function onLoadOlder() {
+  const el = threadEl.value
+  const previousHeight = el?.scrollHeight ?? 0
+  await cr.loadOlderMessages()
+  // keep the viewport anchored on the message the agent was looking at
+  await nextTick()
+  if (el) el.scrollTop += el.scrollHeight - previousHeight
+}
 watch(() => cr.loadingThread.value, (loading) => {
   if (!loading) {
     nextTick(() => {
@@ -382,6 +396,23 @@ const statusBadge = {
             />
           </li>
         </ul>
+
+        <div
+          v-if="!cr.loadingList.value && cr.hasMoreConversations.value"
+          class="p-3"
+        >
+          <UButton
+            block
+            size="sm"
+            color="neutral"
+            variant="subtle"
+            icon="i-lucide-chevrons-down"
+            :loading="cr.loadingMore.value"
+            @click="cr.loadMoreConversations()"
+          >
+            Load more conversations
+          </UButton>
+        </div>
       </div>
     </div>
 
@@ -536,6 +567,21 @@ const statusBadge = {
               ref="threadEl"
               class="flex-1 overflow-y-auto px-5 py-5 bg-grid"
             >
+              <div
+                v-if="cr.hasMoreMessages.value"
+                class="flex justify-center pb-3"
+              >
+                <UButton
+                  size="xs"
+                  color="neutral"
+                  variant="subtle"
+                  icon="i-lucide-history"
+                  :loading="cr.loadingOlder.value"
+                  @click="onLoadOlder"
+                >
+                  Load earlier messages
+                </UButton>
+              </div>
               <template
                 v-for="row in rows"
                 :key="row.kind === 'day' ? row.id : row.m.id"

@@ -1,4 +1,4 @@
-import { and, asc, conversations, eq, messages, visitors, workspaces } from '@perch/db'
+import { and, conversations, desc, eq, messages, visitors, workspaces } from '@perch/db'
 import type { MessageDTO } from '@perch/shared'
 import { z } from 'zod'
 
@@ -54,11 +54,14 @@ export default defineEventHandler(async (event) => {
 
   let thread: MessageDTO[] = []
   if (conversation) {
+    // last 100 is plenty for a resumed visitor thread — unbounded loads are
+    // the kind of thing that degrades invisibly as usage accumulates
     const rows = await db.query.messages.findMany({
       where: and(eq(messages.conversationId, conversation.id), eq(messages.isInternalNote, false)),
-      orderBy: asc(messages.createdAt)
+      orderBy: desc(messages.createdAt),
+      limit: 100
     })
-    thread = rows.map(serializeMessage)
+    thread = rows.reverse().map(serializeMessage)
   }
 
   const secret = (useRuntimeConfig(event).realtimeSecret || process.env.NUXT_SESSION_PASSWORD)!

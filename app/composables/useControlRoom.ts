@@ -75,6 +75,12 @@ export function useControlRoom() {
   const canned = ref<CannedResponse[]>([])
   const context = ref<VisitorContext | null>(null)
 
+  // cursor pagination state (inbox list + open thread)
+  const hasMoreConversations = ref(false)
+  const loadingMore = ref(false)
+  const hasMoreMessages = ref(false)
+  const loadingOlder = ref(false)
+
   const workspaceId = computed(() => currentWorkspace.value?.workspaceId ?? null)
   const activeConversation = computed(() => conversations.value.find(c => c.id === activeId.value) ?? null)
 
@@ -112,11 +118,33 @@ export function useControlRoom() {
     if (showLoader) loadingList.value = true
     try {
       const query = filter.value === 'all' ? '' : `?status=${filter.value}`
-      const data = await $fetch<InboxItem[]>(`/api/workspaces/${workspaceId.value}/conversations${query}`)
+      const data = await $fetch<{ items: InboxItem[], has_more: boolean }>(
+        `/api/workspaces/${workspaceId.value}/conversations${query}`
+      )
       if (seq !== listSeq) return // a newer load superseded this one
-      conversations.value = data
+      conversations.value = data.items
+      hasMoreConversations.value = data.has_more
     } finally {
       if (seq === listSeq) loadingList.value = false
+    }
+  }
+
+  async function loadMoreConversations() {
+    const last = conversations.value[conversations.value.length - 1]
+    if (!workspaceId.value || !last || loadingMore.value) return
+    const seq = listSeq
+    loadingMore.value = true
+    try {
+      const status = filter.value === 'all' ? '' : `&status=${filter.value}`
+      const data = await $fetch<{ items: InboxItem[], has_more: boolean }>(
+        `/api/workspaces/${workspaceId.value}/conversations?before=${last.id}${status}`
+      )
+      if (seq !== listSeq) return // list was reloaded while we fetched
+      const known = new Set(conversations.value.map(c => c.id))
+      conversations.value.push(...data.items.filter(c => !known.has(c.id)))
+      hasMoreConversations.value = data.has_more
+    } finally {
+      loadingMore.value = false
     }
   }
 
@@ -155,14 +183,34 @@ export function useControlRoom() {
       })
       .catch(() => {})
     try {
-      const data = await $fetch<MessageDTO[]>(`/api/conversations/${id}/messages`)
+      const data = await $fetch<{ items: MessageDTO[], has_more: boolean }>(`/api/conversations/${id}/messages`)
       if (seq !== threadSeq) return // switched to another chat mid-load
-      messages.value = data
+      messages.value = data.items
+      hasMoreMessages.value = data.has_more
       await $fetch(`/api/conversations/${id}/read`, { method: 'POST' }).catch(() => {})
       const item = conversations.value.find(c => c.id === id)
       if (item) item.unread = false
     } finally {
       if (seq === threadSeq) loadingThread.value = false
+    }
+  }
+
+  async function loadOlderMessages() {
+    const oldest = messages.value[0]
+    const conversationId = activeId.value
+    if (!conversationId || !oldest || loadingOlder.value) return
+    const seq = threadSeq
+    loadingOlder.value = true
+    try {
+      const data = await $fetch<{ items: MessageDTO[], has_more: boolean }>(
+        `/api/conversations/${conversationId}/messages?before=${oldest.id}`
+      )
+      if (seq !== threadSeq) return // switched threads while fetching
+      const known = new Set(messages.value.map(m => m.id))
+      messages.value.unshift(...data.items.filter(m => !known.has(m.id)))
+      hasMoreMessages.value = data.has_more
+    } finally {
+      loadingOlder.value = false
     }
   }
 
@@ -334,11 +382,17 @@ export function useControlRoom() {
     counts,
     canned,
     context,
+    hasMoreConversations,
+    loadingMore,
+    hasMoreMessages,
+    loadingOlder,
     status: rt.status,
     memberName,
     memberPresence,
     select,
     deselect,
+    loadMoreConversations,
+    loadOlderMessages,
     assign,
     sendReply,
     claim,

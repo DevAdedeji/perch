@@ -229,7 +229,10 @@ Notes from getting this live on a free tier:
 
 **Built:** auth · workspaces & invites · role-scoped Control Room inbox · atomic claim / assign /
 reassign · resolve/reopen · per-agent unread · internal notes · live presence · settings & team
-management · the embeddable widget with pre-chat, typing, and presence · notification toast + sound.
+management · the embeddable widget with pre-chat, typing, and presence · notification toast + sound ·
+canned responses · visitor context panel · `Perch.identify()` with HMAC verification · password
+reset & invite emails (Resend) · rate limiting · per-workspace domain allowlist · Sentry +
+`/api/health` · cursor pagination · workspace & account deletion · Vitest security suite.
 
 
 ---
