@@ -191,6 +191,7 @@ Useful scripts: `pnpm build` (production Nitro bundle), `pnpm preview`, `pnpm li
 | `NUXT_SESSION_PASSWORD` | 32+ char secret — seals auth cookies **and** signs the HMAC WS tickets |
 | `RESEND_API_KEY` | *(optional)* transactional email — password resets + invite emails. Without it, emails are logged to the server console |
 | `RESEND_FROM` | *(optional)* from address, e.g. `Perch <no-reply@yourdomain.com>` |
+| `SENTRY_DSN` | *(optional)* server-side error tracking; the client DSN lives in `sentry.client.config.ts` |
 
 > Nuxt only auto-maps `NUXT_`-prefixed env at runtime, so the server also reads these two names
 > directly from `process.env` — set them as plain environment variables in production.
@@ -207,8 +208,12 @@ hold persistent sockets). The included multi-stage `Dockerfile` produces a self-
 Notes from getting this live on a free tier:
 - The Nitro build can OOM on small builders — the Dockerfile raises V8's heap
   (`--max-old-space-size=4096`) and server/client sourcemaps are disabled in `nuxt.config.ts`.
-- Free-tier services that sleep on idle break presence; an UptimeRobot HTTP monitor pinging `/`
-  every 5 minutes keeps the single instance warm.
+- `/api/health` is the real health check (process + database). Point uptime monitoring there —
+  pinging `/` proves nothing, since the landing page is prerendered.
+- Free-tier services that sleep on idle break presence; an UptimeRobot monitor on `/api/health`
+  every 5 minutes keeps both the instance and Neon's compute warm.
+- Errors report to Sentry (`@sentry/nuxt`); source-map upload is deliberately off to keep builds
+  inside the free-tier builder's RAM.
 
 ---
 

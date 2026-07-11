@@ -5,7 +5,8 @@ export default defineNuxtConfig({
     '@nuxt/eslint',
     '@nuxt/ui',
     '@vueuse/motion/nuxt',
-    'nuxt-auth-utils'
+    'nuxt-auth-utils',
+    '@sentry/nuxt/module'
   ],
 
   devtools: {
@@ -57,6 +58,17 @@ export default defineNuxtConfig({
         commaDangle: 'never',
         braceStyle: '1tbs'
       }
+    }
+  },
+
+  sentry: {
+    // import the server config at the top of the Nitro entry — works inside
+    // the Docker CMD without NODE_OPTIONS gymnastics
+    autoInjectServerSentry: 'top-level-import',
+    // sourcemap upload needs sourcemaps, which we keep off to stay inside the
+    // free-tier builder's RAM (see `sourcemap` below)
+    sourceMapsUploadOptions: {
+      enabled: false
     }
   }
 })
