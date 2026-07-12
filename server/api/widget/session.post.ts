@@ -1,4 +1,4 @@
-import { and, conversationReads, conversations, desc, eq, messages, sql, visitors, workspaces } from '@perch/db'
+import { and, articles, conversationReads, conversations, desc, eq, messages, sql, visitors, workspaces } from '@perch/db'
 import type { MessageDTO } from '@perch/shared'
 import { z } from 'zod'
 
@@ -77,12 +77,19 @@ export default defineEventHandler(async (event) => {
   const secret = (useRuntimeConfig(event).realtimeSecret || process.env.NUXT_SESSION_PASSWORD)!
   const wsTicket = signTicket({ role: 'visitor', wid: workspace.id, vid: visitor!.id }, secret)
 
+  // the Help tab only renders when there's something to read
+  const published = await db.query.articles.findFirst({
+    where: and(eq(articles.workspaceId, workspace.id), eq(articles.status, 'published')),
+    columns: { id: true }
+  })
+
   return {
     workspace: {
       name: workspace.name,
       color: workspace.widgetPrimaryColor,
       logo_url: workspace.logoUrl,
-      prechat_enabled: workspace.prechatFormEnabled
+      prechat_enabled: workspace.prechatFormEnabled,
+      has_articles: !!published
     },
     agent: agentName ? { name: agentName } : null,
     visitor: { name: visitor!.name, email: visitor!.email },

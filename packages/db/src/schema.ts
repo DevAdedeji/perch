@@ -9,6 +9,7 @@
 import {
   boolean,
   index,
+  integer,
   jsonb,
   pgEnum,
   pgTable,
@@ -186,6 +187,35 @@ export const auditLogs = pgTable('audit_logs', {
   action: text('action').notNull(),
   detail: jsonb('detail').$type<Record<string, unknown>>().default({}).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull()
+})
+
+/** Help-center article groups ("Getting started", "Billing", …). */
+export const articleGroups = pgTable('article_groups', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  description: text('description'),
+  sortOrder: integer('sort_order').default(0).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull()
+})
+
+/**
+ * Help-center articles. Body is plain text (rendered as paragraphs) — visitors
+ * read these inside the widget iframe on OUR origin, so no workspace-authored
+ * HTML/markdown until it can be sanitized properly.
+ */
+export const articles = pgTable('articles', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  groupId: uuid('group_id').notNull().references(() => articleGroups.id, { onDelete: 'cascade' }),
+  // denormalized so widget/dashboard queries never need the join for scoping
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  title: text('title').notNull(),
+  body: text('body').notNull(),
+  // external FAQ link — when set, the widget opens this instead of the body
+  url: text('url'),
+  status: text('status', { enum: ['draft', 'published'] }).default('draft').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
 })
 
 export const cannedResponses = pgTable('canned_responses', {

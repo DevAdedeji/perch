@@ -43,6 +43,62 @@ async function onFilePicked(e: Event) {
   setTimeout(() => (uploadError.value = ''), 4000)
 }
 
+/* ── help tab (only rendered when the workspace has published articles) ── */
+interface HelpArticle {
+  id: string
+  title: string
+  body: string
+  url: string | null
+}
+interface HelpGroup {
+  id: string
+  name: string
+  description: string | null
+  articles: HelpArticle[]
+}
+
+const tab = ref<'chat' | 'help'>('chat')
+const helpGroups = ref<HelpGroup[]>([])
+const helpStatus = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
+const helpQuery = ref('')
+const activeArticle = ref<HelpArticle | null>(null)
+const chatDot = ref(false)
+
+async function loadHelp() {
+  if (helpStatus.value === 'ready' || helpStatus.value === 'loading') return
+  helpStatus.value = 'loading'
+  try {
+    helpGroups.value = await $fetch<HelpGroup[]>('/api/widget/articles', {
+      query: { site_id: siteId.value }
+    })
+    helpStatus.value = 'ready'
+  } catch {
+    helpStatus.value = 'error'
+  }
+}
+
+function openTab(next: 'chat' | 'help') {
+  tab.value = next
+  if (next === 'help') {
+    loadHelp()
+  } else {
+    chatDot.value = false
+    scrollToBottom()
+  }
+}
+
+const filteredGroups = computed(() => {
+  const q = helpQuery.value.trim().toLowerCase()
+  if (!q) return helpGroups.value
+  return helpGroups.value
+    .map(g => ({
+      ...g,
+      articles: g.articles.filter(a =>
+        a.title.toLowerCase().includes(q) || a.body.toLowerCase().includes(q))
+    }))
+    .filter(g => g.articles.length > 0)
+})
+
 const draft = ref('')
 const prechat = reactive({ name: '', email: '', message: '' })
 const sending = ref(false)
@@ -213,6 +269,10 @@ watch(() => messages.value.length, () => {
     unread.value++
     post({ perch: 'unread', count: unread.value })
   }
+  // reading help while an agent replies — dot the Chat tab
+  if (last && last.sender_type === 'agent' && tab.value === 'help') {
+    chatDot.value = true
+  }
 })
 watch(agentTyping, (v) => {
   if (v) scrollToBottom(true)
@@ -330,6 +390,138 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
+    <!-- help: article detail -->
+    <div
+      v-else-if="tab === 'help' && activeArticle"
+      class="flex-1 overflow-y-auto overscroll-contain"
+    >
+      <div class="sticky top-0 flex items-center gap-2 px-3 py-2.5 bg-default/95 backdrop-blur border-b border-default">
+        <button
+          class="grid place-items-center size-7 rounded-lg text-dimmed hover:text-highlighted hover:bg-elevated transition"
+          aria-label="Back to articles"
+          @click="activeArticle = null"
+        >
+          <UIcon
+            name="i-lucide-arrow-left"
+            class="size-4"
+          />
+        </button>
+        <p class="text-xs text-dimmed truncate">
+          Help
+        </p>
+      </div>
+      <article class="px-5 py-4">
+        <h1 class="font-display text-base font-bold text-highlighted">
+          {{ activeArticle.title }}
+        </h1>
+        <p class="mt-3 text-sm leading-relaxed text-muted whitespace-pre-wrap wrap-break-word">
+          {{ activeArticle.body }}
+        </p>
+      </article>
+    </div>
+
+    <!-- help: browse + search -->
+    <div
+      v-else-if="tab === 'help'"
+      class="flex-1 overflow-y-auto overscroll-contain px-4 py-4"
+    >
+      <div
+        class="flex items-center gap-2 rounded-xl bg-elevated ring-1 ring-default px-3 py-2 mb-4 focus-within:ring-2 transition-shadow"
+        :style="{ '--tw-ring-color': accent }"
+      >
+        <UIcon
+          name="i-lucide-search"
+          class="size-4 shrink-0 text-dimmed"
+        />
+        <input
+          v-model="helpQuery"
+          type="text"
+          placeholder="Search articles…"
+          class="w-full bg-transparent text-sm outline-none"
+        >
+      </div>
+
+      <div
+        v-if="helpStatus === 'loading'"
+        class="grid place-items-center py-10"
+      >
+        <UIcon
+          name="i-lucide-loader-circle"
+          class="size-5 animate-spin text-dimmed"
+        />
+      </div>
+      <div
+        v-else-if="helpStatus === 'error'"
+        class="text-center py-10"
+      >
+        <p class="text-sm text-muted">
+          Couldn’t load articles.
+        </p>
+        <button
+          class="mt-3 text-sm font-medium hover:underline"
+          :style="{ color: accent }"
+          @click="helpStatus = 'idle'; loadHelp()"
+        >
+          Try again
+        </button>
+      </div>
+      <p
+        v-else-if="!filteredGroups.length"
+        class="text-center py-10 text-sm text-dimmed"
+      >
+        No articles match “{{ helpQuery }}”.
+      </p>
+
+      <div
+        v-for="g in filteredGroups"
+        v-else
+        :key="g.id"
+        class="mb-5"
+      >
+        <p class="text-[11px] font-semibold uppercase tracking-wider text-dimmed">
+          {{ g.name }}
+        </p>
+        <p
+          v-if="g.description"
+          class="mt-0.5 text-xs text-dimmed"
+        >
+          {{ g.description }}
+        </p>
+        <ul class="mt-2 rounded-xl ring-1 ring-default divide-y divide-default/60 overflow-hidden bg-elevated/40">
+          <li
+            v-for="a in g.articles"
+            :key="a.id"
+          >
+            <!-- link articles jump to the business's own site -->
+            <a
+              v-if="a.url"
+              :href="a.url"
+              target="_blank"
+              rel="noopener"
+              class="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-left hover:bg-elevated transition-colors"
+            >
+              <span class="min-w-0 flex-1 text-sm font-medium text-highlighted truncate">{{ a.title }}</span>
+              <UIcon
+                name="i-lucide-external-link"
+                class="size-4 shrink-0 text-dimmed"
+              />
+            </a>
+            <button
+              v-else
+              class="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-left hover:bg-elevated transition-colors"
+              @click="activeArticle = a"
+            >
+              <span class="min-w-0 flex-1 text-sm font-medium text-highlighted truncate">{{ a.title }}</span>
+              <UIcon
+                name="i-lucide-chevron-right"
+                class="size-4 shrink-0 text-dimmed"
+              />
+            </button>
+          </li>
+        </ul>
+      </div>
+    </div>
+
     <!-- pre-chat form -->
     <form
       v-else-if="showPrechat"
@@ -384,7 +576,7 @@ onBeforeUnmount(() => {
       </button>
     </form>
 
-    <!-- chat -->
+    <!-- chat / help -->
     <template v-else>
       <div
         ref="threadEl"
@@ -604,6 +796,42 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </template>
+
+    <!-- tab bar (only when there's a help center to show) -->
+    <nav
+      v-if="status === 'ready' && workspace?.has_articles"
+      class="shrink-0 grid grid-cols-2 border-t border-default bg-elevated/50"
+    >
+      <button
+        class="relative flex items-center justify-center gap-1.5 py-2.5 text-xs font-semibold transition-colors"
+        :style="tab === 'chat' ? { color: accent } : {}"
+        :class="tab === 'chat' ? '' : 'text-dimmed hover:text-muted'"
+        @click="openTab('chat')"
+      >
+        <UIcon
+          name="i-lucide-message-circle"
+          class="size-4"
+        />
+        Chat
+        <span
+          v-if="chatDot"
+          class="absolute top-1.5 ml-12 size-1.5 rounded-full"
+          :style="{ background: accent }"
+        />
+      </button>
+      <button
+        class="flex items-center justify-center gap-1.5 py-2.5 text-xs font-semibold transition-colors"
+        :style="tab === 'help' ? { color: accent } : {}"
+        :class="tab === 'help' ? '' : 'text-dimmed hover:text-muted'"
+        @click="openTab('help')"
+      >
+        <UIcon
+          name="i-lucide-book-open"
+          class="size-4"
+        />
+        Help
+      </button>
+    </nav>
 
     <!-- persistent branding (free plan) — removable on a paid plan later -->
     <a

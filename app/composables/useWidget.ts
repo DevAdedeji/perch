@@ -6,6 +6,7 @@ interface WidgetWorkspace {
   color: string
   logo_url: string | null
   prechat_enabled: boolean
+  has_articles: boolean
 }
 
 interface SessionResponse {
