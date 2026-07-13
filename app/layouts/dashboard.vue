@@ -12,6 +12,8 @@ const drawerOpen = ref(false)
 const wid = computed(() => currentWorkspace.value?.workspaceId ?? null)
 // the conversation the agent is actively viewing (set by the inbox)
 const activeConversationId = useState<string | null>('inbox:activeId', () => null)
+// a mention toast can ask the inbox to open a specific conversation
+const pendingSelect = useState<string | null>('inbox:pendingSelect', () => null)
 
 function openDrawer() {
   drawerOpen.value = true
@@ -67,6 +69,24 @@ async function loadTeam() {
  * agent is already looking at that exact conversation in a focused tab.
  */
 function onEvent(ev: ServerEvent) {
+  // someone @mentioned this agent in an internal note
+  if (ev.type === 'mention') {
+    toast.add({
+      title: `${ev.payload.by_name} mentioned you`,
+      description: ev.payload.excerpt,
+      icon: 'i-lucide-at-sign',
+      color: 'warning',
+      actions: [{
+        label: 'View',
+        onClick: () => {
+          pendingSelect.value = ev.payload.conversation_id
+          navigateTo('/dashboard')
+        }
+      }]
+    })
+    play()
+    return
+  }
   if (ev.type === 'presence') {
     const member = team.value.find(m => m.id === ev.payload.member_id)
     if (member) member.presence = ev.payload.presence

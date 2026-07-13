@@ -13,6 +13,8 @@ interface Member {
   presence: 'online' | 'away' | 'offline'
   openCount: number
   resolvedCount: number
+  csatGood: number
+  csatBad: number
 }
 
 const { currentWorkspace, user } = useAuth()
@@ -141,6 +143,20 @@ const sortedMembers = computed(() =>
 
 // §3.3 workload view: totals for the at-a-glance strip
 const totalOpen = computed(() => members.value.reduce((n, m) => n + m.openCount, 0))
+
+// §13.0.1 CSAT: percentage of thumbs-up among rated conversations
+function csatLabel(m: Member): string {
+  const total = m.csatGood + m.csatBad
+  return total ? `${Math.round((m.csatGood / total) * 100)}%` : '—'
+}
+function csatTone(m: Member): string {
+  const total = m.csatGood + m.csatBad
+  if (!total) return 'text-dimmed'
+  const pct = m.csatGood / total
+  return pct >= 0.8
+    ? 'font-semibold text-green-600 dark:text-green-500'
+    : pct >= 0.5 ? 'font-semibold text-amber-600 dark:text-amber-400' : 'font-semibold text-red-500'
+}
 </script>
 
 <template>
@@ -224,6 +240,12 @@ const totalOpen = computed(() => members.value.reduce((n, m) => n + m.openCount,
                   <th class="px-3 py-2.5 text-center font-medium">
                     Resolved
                   </th>
+                  <th
+                    class="px-3 py-2.5 text-center font-medium"
+                    title="Thumbs-up share of rated conversations"
+                  >
+                    CSAT
+                  </th>
                   <th class="px-3 py-2.5 text-left font-medium">
                     Role
                   </th>
@@ -275,6 +297,13 @@ const totalOpen = computed(() => members.value.reduce((n, m) => n + m.openCount,
                   </td>
                   <td class="px-3 py-3 text-center tabular-nums text-muted">
                     {{ m.resolvedCount }}
+                  </td>
+                  <td
+                    class="px-3 py-3 text-center tabular-nums"
+                    :class="csatTone(m)"
+                    :title="`${m.csatGood} 👍 · ${m.csatBad} 👎`"
+                  >
+                    {{ csatLabel(m) }}
                   </td>
                   <td class="px-3 py-3 whitespace-nowrap">
                     <USelect

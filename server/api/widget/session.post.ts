@@ -103,6 +103,7 @@ export default defineEventHandler(async (event) => {
     within_hours: withinHours,
     away_label: withinHours ? null : nextOpeningLabel(workspace.businessHours, workspace.timezone),
     conversation_status: conversation?.status ?? null,
+    csat_rating: conversation?.csatRating ?? null,
     conversation_id: conversation?.id ?? null,
     agent_last_read_at: agentLastReadAt,
     messages: thread,

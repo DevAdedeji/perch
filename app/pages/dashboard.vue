@@ -7,6 +7,7 @@ useHead({ title: 'Inbox · Perch' })
 
 const toast = useToast()
 const cr = useControlRoom()
+const { currentWorkspace } = useAuth()
 const { enabled: soundEnabled, toggle: toggleSound } = useNotificationSound()
 
 const filters: { label: string, value: InboxFilter }[] = [
@@ -18,6 +19,77 @@ const filters: { label: string, value: InboxFilter }[] = [
 
 const reply = ref('')
 const internalNote = ref(false)
+
+/* ── inbox search (visitor name/email or message text) ── */
+interface SearchResult {
+  id: string
+  status: 'open' | 'unassigned' | 'resolved'
+  assignedAgentId: string | null
+  lastMessageAt: string
+  snippet: string | null
+  visitor: { id: string, name: string | null, email: string | null, visitorId: string }
+}
+
+const searchQuery = ref('')
+const searchResults = ref<SearchResult[]>([])
+const searching = ref(false)
+const searchActive = computed(() => searchQuery.value.trim().length >= 2)
+let searchTimer: ReturnType<typeof setTimeout> | undefined
+let searchSeq = 0
+
+watch(searchQuery, () => {
+  clearTimeout(searchTimer)
+  if (!searchActive.value) {
+    searchResults.value = []
+    return
+  }
+  searching.value = true
+  searchTimer = setTimeout(async () => {
+    const seq = ++searchSeq
+    try {
+      const res = await $fetch<SearchResult[]>(
+        `/api/workspaces/${currentWorkspace.value?.workspaceId}/conversations/search`,
+        { query: { q: searchQuery.value.trim() } }
+      )
+      if (seq === searchSeq) searchResults.value = res
+    } catch {
+      if (seq === searchSeq) searchResults.value = []
+    } finally {
+      if (seq === searchSeq) searching.value = false
+    }
+  }, 300)
+})
+
+function openSearchResult(id: string) {
+  cr.select(id, { force: true })
+}
+
+/* ── @mentions in internal notes ── */
+const mentionIndex = ref(0)
+// what the picker inserted → the member it stands for (validated again on send)
+const pickedMentions = new Map<string, string>()
+
+const mentionQuery = computed<string | null>(() => {
+  if (!internalNote.value) return null
+  const m = reply.value.match(/@([\w-]*)$/)
+  return m ? m[1]!.toLowerCase() : null
+})
+const mentionMatches = computed(() =>
+  mentionQuery.value === null
+    ? []
+    : cr.members.value.filter(m => m.name.toLowerCase().includes(mentionQuery.value!)).slice(0, 6)
+)
+const mentionOpen = computed(() => mentionMatches.value.length > 0)
+watch(mentionQuery, () => {
+  mentionIndex.value = 0
+})
+
+function applyMention(m: { id: string, name: string }) {
+  const token = `@${m.name.split(' ')[0]}`
+  reply.value = reply.value.replace(/@[\w-]*$/, `${token} `)
+  pickedMentions.set(token, m.id)
+  nextTick(() => composerEl.value?.textareaRef?.focus())
+}
 
 const { uploading, uploadImage } = useImageUpload()
 const attachEl = ref<HTMLInputElement | null>(null)
@@ -185,6 +257,23 @@ function applyCanned(c: CannedResponse) {
 }
 
 function onComposerKeydown(e: KeyboardEvent) {
+  if (mentionOpen.value) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      mentionIndex.value = (mentionIndex.value + 1) % mentionMatches.value.length
+      return
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      mentionIndex.value = (mentionIndex.value - 1 + mentionMatches.value.length) % mentionMatches.value.length
+      return
+    }
+    if (e.key === 'Enter' || e.key === 'Tab') {
+      e.preventDefault()
+      applyMention(mentionMatches.value[mentionIndex.value]!)
+      return
+    }
+  }
   if (cannedOpen.value) {
     if (e.key === 'ArrowDown') {
       e.preventDefault()
@@ -217,11 +306,18 @@ async function onSend() {
   const text = reply.value.trim()
   if (!text) return
   const note = internalNote.value
+  // mentions count only if their @token is still in the sent text
+  const mentionIds = note
+    ? [...new Set([...pickedMentions.entries()]
+        .filter(([token]) => text.includes(token))
+        .map(([, id]) => id))]
+    : []
+  pickedMentions.clear()
   // clear instantly — the message appears optimistically; failures become
   // retryable bubbles (see useControlRoom.performSend)
   reply.value = ''
   internalNote.value = false
-  await cr.sendReply(text, note)
+  await cr.sendReply(text, note, undefined, mentionIds)
 }
 
 async function onClaim(id: string) {
@@ -263,6 +359,56 @@ async function onAssign(memberId: string, memberName: string) {
     toast.add({ title: `Transferred to ${memberName}`, icon: 'i-lucide-arrow-right-left', color: 'success' })
   } catch (e) {
     toast.add({ title: getErrorMessage(e, 'Could not transfer'), color: 'error' })
+  }
+}
+
+// a mention toast (from the layout) asked us to open a specific conversation
+const pendingSelect = useState<string | null>('inbox:pendingSelect', () => null)
+watch(pendingSelect, (id) => {
+  if (id) {
+    cr.select(id, { force: true })
+    pendingSelect.value = null
+  }
+}, { immediate: true })
+
+/* ── conversation tagging ── */
+const tagPickerOpen = ref(false)
+const tagInput = ref('')
+const addingTag = ref(false)
+
+const tagSuggestions = computed(() => {
+  const active = cr.activeConversation.value
+  const applied = new Set((active?.tags ?? []).map(t => t.id))
+  const q = tagInput.value.trim().toLowerCase()
+  return cr.workspaceTags.value
+    .filter(t => !applied.has(t.id) && (!q || t.name.includes(q)))
+    .slice(0, 8)
+})
+
+async function addTagToActive(tag: { id: string, name: string }) {
+  const active = cr.activeConversation.value
+  if (!active) return
+  try {
+    await cr.applyTag(active.id, tag)
+    tagInput.value = ''
+  } catch (e) {
+    toast.add({ title: getErrorMessage(e, 'Could not tag'), color: 'error' })
+  }
+}
+
+async function createAndApplyTag() {
+  const name = tagInput.value.trim().toLowerCase()
+  const active = cr.activeConversation.value
+  if (!name || !active || addingTag.value) return
+  addingTag.value = true
+  try {
+    const tag = await cr.createTag(name)
+    await cr.applyTag(active.id, tag)
+    tagInput.value = ''
+  } catch (e) {
+    toast.add({ title: getErrorMessage(e, 'Could not create tag'), color: 'error' })
+  } finally {
+    addingTag.value = false
   }
 }
 
@@ -318,129 +464,220 @@ const statusBadge = {
             >{{ tabCount(f.value) }}</span>
           </button>
         </div>
+
+        <!-- search: name, email, or anything anyone said -->
+        <div class="mt-2.5 flex items-center gap-2 rounded-lg bg-elevated/60 ring-1 ring-default px-2.5 py-1.5 focus-within:ring-amber-500/60 transition-shadow">
+          <UIcon
+            :name="searching ? 'i-lucide-loader-circle' : 'i-lucide-search'"
+            class="size-4 shrink-0 text-dimmed"
+            :class="searching && 'animate-spin'"
+          />
+          <input
+            v-model="searchQuery"
+            type="text"
+            placeholder="Search conversations…"
+            class="w-full bg-transparent text-sm outline-none placeholder:text-dimmed"
+          >
+          <button
+            v-if="searchQuery"
+            class="text-dimmed hover:text-highlighted"
+            aria-label="Clear search"
+            @click="searchQuery = ''"
+          >
+            <UIcon
+              name="i-lucide-x"
+              class="size-4"
+            />
+          </button>
+        </div>
+
+        <!-- tag filter -->
+        <div
+          v-if="cr.workspaceTags.value.length"
+          class="mt-2 flex items-center gap-1 overflow-x-auto scrollbar-none"
+        >
+          <button
+            class="rounded-lg px-2 py-0.5 text-[11px] font-medium whitespace-nowrap transition-colors"
+            :class="!cr.tagFilter.value ? 'bg-elevated text-highlighted' : 'text-dimmed hover:text-muted'"
+            @click="cr.tagFilter.value = null"
+          >
+            All tags
+          </button>
+          <button
+            v-for="t in cr.workspaceTags.value"
+            :key="t.id"
+            class="rounded-lg px-2 py-0.5 font-mono text-[11px] whitespace-nowrap transition-colors"
+            :class="cr.tagFilter.value === t.id
+              ? 'bg-amber-500/12 text-amber-700 dark:text-amber-400'
+              : 'text-dimmed hover:text-muted'"
+            @click="cr.tagFilter.value = cr.tagFilter.value === t.id ? null : t.id"
+          >
+            #{{ t.name }}
+          </button>
+        </div>
       </div>
 
       <div class="flex-1 overflow-y-auto">
-        <div
-          v-if="cr.loadingList.value"
-          class="p-4 space-y-3"
-        >
-          <USkeleton
-            v-for="n in 6"
-            :key="n"
-            class="h-14 w-full"
-          />
-        </div>
+        <!-- search results -->
+        <template v-if="searchActive">
+          <p
+            v-if="!searching && !searchResults.length"
+            class="p-8 text-center text-sm text-dimmed"
+          >
+            Nothing matches “{{ searchQuery.trim() }}”.
+          </p>
+          <ul
+            v-else
+            class="divide-y divide-default/60"
+          >
+            <li
+              v-for="r in searchResults"
+              :key="r.id"
+            >
+              <button
+                class="relative w-full flex gap-3 px-4 py-3 text-left transition-colors"
+                :class="cr.activeId.value === r.id ? 'bg-amber-500/6' : 'hover:bg-elevated/50'"
+                @click="openSearchResult(r.id)"
+              >
+                <span class="grid place-items-center size-9 shrink-0 rounded-xl avatar-amber text-xs font-bold">
+                  {{ initials(r.visitor.name) }}
+                </span>
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center gap-2">
+                    <span class="truncate text-sm font-medium text-highlighted">{{ r.visitor.name ?? 'Visitor' }}</span>
+                    <span class="ml-auto shrink-0 text-[11px] text-dimmed">{{ timeAgo(r.lastMessageAt) }}</span>
+                  </div>
+                  <p class="truncate text-xs mt-0.5 text-muted">
+                    {{ r.snippet ?? r.visitor.email ?? '—' }}
+                  </p>
+                </div>
+              </button>
+            </li>
+          </ul>
+        </template>
 
-        <div
-          v-else-if="!cr.conversations.value.length"
-          class="p-8 text-center"
-        >
-          <div class="mx-auto grid place-items-center size-12 rounded-xl bg-amber-500/10 ring-1 ring-amber-500/25">
-            <UIcon
-              name="i-lucide-inbox"
-              class="size-6 text-amber-600 dark:text-amber-400"
+        <template v-else>
+          <div
+            v-if="cr.loadingList.value"
+            class="p-4 space-y-3"
+          >
+            <USkeleton
+              v-for="n in 6"
+              :key="n"
+              class="h-14 w-full"
             />
           </div>
-          <p class="mt-3 text-sm font-medium text-highlighted">
-            No conversations yet
-          </p>
-          <p class="mt-1 text-xs text-muted">
-            New chats from your widget will appear here in real time.
-          </p>
-        </div>
 
-        <ul
-          v-else
-          class="divide-y divide-default/60"
-        >
-          <li
-            v-for="c in cr.conversations.value"
-            :key="c.id"
-            class="group relative"
+          <div
+            v-else-if="!cr.conversations.value.length"
+            class="p-8 text-center"
           >
-            <button
-              class="relative w-full flex gap-3 px-4 py-3 text-left transition-colors"
-              :class="cr.activeId.value === c.id ? 'bg-amber-500/6' : 'hover:bg-elevated/50'"
-              @click="cr.select(c.id)"
+            <div class="mx-auto grid place-items-center size-12 rounded-xl bg-amber-500/10 ring-1 ring-amber-500/25">
+              <UIcon
+                name="i-lucide-inbox"
+                class="size-6 text-amber-600 dark:text-amber-400"
+              />
+            </div>
+            <p class="mt-3 text-sm font-medium text-highlighted">
+              No conversations yet
+            </p>
+            <p class="mt-1 text-xs text-muted">
+              New chats from your widget will appear here in real time.
+            </p>
+          </div>
+
+          <ul
+            v-else
+            class="divide-y divide-default/60"
+          >
+            <li
+              v-for="c in cr.conversations.value"
+              :key="c.id"
+              class="group relative"
             >
-              <span
-                v-if="cr.activeId.value === c.id"
-                class="absolute inset-y-0 left-0 w-0.5 bg-amber-500"
-              />
-              <span class="grid place-items-center size-9 shrink-0 rounded-xl avatar-amber text-xs font-bold">
-                {{ initials(c.visitor.name) }}
-              </span>
-              <div class="min-w-0 flex-1">
-                <div class="flex items-center gap-2">
-                  <span
-                    class="truncate text-sm text-highlighted"
-                    :class="c.unread ? 'font-semibold' : 'font-medium'"
-                  >{{ c.visitor.name ?? 'Visitor' }}</span>
-                  <span class="ml-auto shrink-0 text-[11px] text-dimmed">{{ timeAgo(c.lastMessageAt) }}</span>
-                </div>
-                <p
-                  class="truncate text-xs mt-0.5"
-                  :class="c.unread ? 'text-highlighted font-medium' : 'text-muted'"
-                >
-                  {{ c.preview || '—' }}
-                </p>
-                <div class="mt-1.5 flex items-center gap-1.5">
-                  <UBadge
-                    :color="statusBadge[c.status].color"
-                    variant="subtle"
-                    :icon="statusBadge[c.status].icon"
-                    size="sm"
-                  >
-                    {{ statusBadge[c.status].label }}
-                  </UBadge>
-                  <span
-                    v-if="c.assignedAgentId"
-                    class="ml-auto flex items-center gap-1.5 shrink-0 rounded-full bg-elevated/70 ring-1 ring-default pl-2 pr-2.5 py-0.5"
-                    :title="cr.memberName(c.assignedAgentId) ?? ''"
-                  >
+              <button
+                class="relative w-full flex gap-3 px-4 py-3 text-left transition-colors"
+                :class="cr.activeId.value === c.id ? 'bg-amber-500/6' : 'hover:bg-elevated/50'"
+                @click="cr.select(c.id)"
+              >
+                <span
+                  v-if="cr.activeId.value === c.id"
+                  class="absolute inset-y-0 left-0 w-0.5 bg-amber-500"
+                />
+                <span class="grid place-items-center size-9 shrink-0 rounded-xl avatar-amber text-xs font-bold">
+                  {{ initials(c.visitor.name) }}
+                </span>
+                <div class="min-w-0 flex-1">
+                  <div class="flex items-center gap-2">
                     <span
-                      class="size-1.5 rounded-full"
-                      :class="presenceDot(cr.memberPresence(c.assignedAgentId))"
-                    />
-                    <span class="text-[10px] font-medium text-muted truncate max-w-20">{{ (cr.memberName(c.assignedAgentId) ?? 'Agent').split(' ')[0] }}</span>
-                  </span>
+                      class="truncate text-sm text-highlighted"
+                      :class="c.unread ? 'font-semibold' : 'font-medium'"
+                    >{{ c.visitor.name ?? 'Visitor' }}</span>
+                    <span class="ml-auto shrink-0 text-[11px] text-dimmed">{{ timeAgo(c.lastMessageAt) }}</span>
+                  </div>
+                  <p
+                    class="truncate text-xs mt-0.5"
+                    :class="c.unread ? 'text-highlighted font-medium' : 'text-muted'"
+                  >
+                    {{ c.preview || '—' }}
+                  </p>
+                  <div class="mt-1.5 flex items-center gap-1.5">
+                    <UBadge
+                      :color="statusBadge[c.status].color"
+                      variant="subtle"
+                      :icon="statusBadge[c.status].icon"
+                      size="sm"
+                    >
+                      {{ statusBadge[c.status].label }}
+                    </UBadge>
+                    <span
+                      v-if="c.assignedAgentId"
+                      class="ml-auto flex items-center gap-1.5 shrink-0 rounded-full bg-elevated/70 ring-1 ring-default pl-2 pr-2.5 py-0.5"
+                      :title="cr.memberName(c.assignedAgentId) ?? ''"
+                    >
+                      <span
+                        class="size-1.5 rounded-full"
+                        :class="presenceDot(cr.memberPresence(c.assignedAgentId))"
+                      />
+                      <span class="text-[10px] font-medium text-muted truncate max-w-20">{{ (cr.memberName(c.assignedAgentId) ?? 'Agent').split(' ')[0] }}</span>
+                    </span>
+                  </div>
                 </div>
-              </div>
-              <span
-                v-if="c.unread"
-                class="mt-1.5 size-2 shrink-0 rounded-full bg-amber-500"
+                <span
+                  v-if="c.unread"
+                  class="mt-1.5 size-2 shrink-0 rounded-full bg-amber-500"
+                />
+              </button>
+              <!-- quick claim straight from the list -->
+              <UButton
+                v-if="c.status === 'unassigned'"
+                class="absolute right-3 bottom-2.5"
+                size="xs"
+                color="primary"
+                icon="i-lucide-hand"
+                label="Claim"
+                @click.stop="onClaim(c.id)"
               />
-            </button>
-            <!-- quick claim straight from the list -->
-            <UButton
-              v-if="c.status === 'unassigned'"
-              class="absolute right-3 bottom-2.5"
-              size="xs"
-              color="primary"
-              icon="i-lucide-hand"
-              label="Claim"
-              @click.stop="onClaim(c.id)"
-            />
-          </li>
-        </ul>
+            </li>
+          </ul>
 
-        <div
-          v-if="!cr.loadingList.value && cr.hasMoreConversations.value"
-          class="p-3"
-        >
-          <UButton
-            block
-            size="sm"
-            color="neutral"
-            variant="subtle"
-            icon="i-lucide-chevrons-down"
-            :loading="cr.loadingMore.value"
-            @click="cr.loadMoreConversations()"
+          <div
+            v-if="!cr.loadingList.value && cr.hasMoreConversations.value"
+            class="p-3"
           >
-            Load more conversations
-          </UButton>
-        </div>
+            <UButton
+              block
+              size="sm"
+              color="neutral"
+              variant="subtle"
+              icon="i-lucide-chevrons-down"
+              :loading="cr.loadingMore.value"
+              @click="cr.loadMoreConversations()"
+            >
+              Load more conversations
+            </UButton>
+          </div>
+        </template>
       </div>
     </div>
 
@@ -580,6 +817,75 @@ const statusBadge = {
               @click="openContext"
             />
           </div>
+        </div>
+
+        <!-- tags -->
+        <div class="shrink-0 flex items-center gap-1.5 flex-wrap px-3 sm:px-5 py-1.5 border-b border-default bg-default">
+          <span
+            v-for="t in cr.activeConversation.value.tags"
+            :key="t.id"
+            class="group/tag inline-flex items-center gap-1 rounded-md bg-amber-500/10 ring-1 ring-amber-500/25 pl-1.5 pr-1 py-0.5 font-mono text-[11px] text-amber-700 dark:text-amber-400"
+          >
+            #{{ t.name }}
+            <button
+              class="opacity-40 group-hover/tag:opacity-100 hover:text-red-500 transition-opacity"
+              :aria-label="`Remove ${t.name}`"
+              @click="cr.removeTag(cr.activeConversation.value!.id, t.id)"
+            >
+              <UIcon
+                name="i-lucide-x"
+                class="size-3"
+              />
+            </button>
+          </span>
+
+          <UPopover
+            v-model:open="tagPickerOpen"
+            :content="{ align: 'start' }"
+          >
+            <button class="inline-flex items-center gap-1 rounded-md ring-1 ring-default px-1.5 py-0.5 text-[11px] text-dimmed hover:text-highlighted hover:bg-elevated transition-colors">
+              <UIcon
+                name="i-lucide-tag"
+                class="size-3"
+              />
+              {{ cr.activeConversation.value.tags.length ? 'Tag' : 'Add tag' }}
+            </button>
+            <template #content>
+              <div class="w-56 p-2">
+                <UInput
+                  v-model="tagInput"
+                  size="sm"
+                  placeholder="Find or create a tag…"
+                  autofocus
+                  @keyup.enter="tagSuggestions.length ? addTagToActive(tagSuggestions[0]!) : createAndApplyTag()"
+                />
+                <ul
+                  v-if="tagSuggestions.length"
+                  class="mt-1.5 space-y-0.5"
+                >
+                  <li
+                    v-for="t in tagSuggestions"
+                    :key="t.id"
+                  >
+                    <button
+                      class="w-full rounded-md px-2 py-1 text-left font-mono text-xs text-muted hover:bg-elevated hover:text-highlighted transition-colors"
+                      @click="addTagToActive(t)"
+                    >
+                      #{{ t.name }}
+                    </button>
+                  </li>
+                </ul>
+                <button
+                  v-if="tagInput.trim() && !cr.workspaceTags.value.some(t => t.name === tagInput.trim().toLowerCase())"
+                  class="mt-1.5 w-full rounded-md px-2 py-1 text-left text-xs text-amber-700 dark:text-amber-400 hover:bg-amber-500/10 transition-colors"
+                  :disabled="addingTag"
+                  @click="createAndApplyTag"
+                >
+                  + Create “#{{ tagInput.trim().toLowerCase() }}”
+                </button>
+              </div>
+            </template>
+          </UPopover>
         </div>
 
         <div class="flex-1 flex min-h-0">
@@ -766,9 +1072,37 @@ const statusBadge = {
             <!-- composer -->
             <div class="shrink-0 border-t border-default bg-default p-3">
               <div class="relative">
+                <!-- @mention picker (internal notes) -->
+                <div
+                  v-if="mentionOpen"
+                  class="absolute bottom-full left-0 right-0 mb-2 rounded-xl bg-default ring-1 ring-default shadow-xl shadow-black/10 overflow-hidden z-10"
+                >
+                  <p class="px-3 pt-2.5 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-dimmed">
+                    Mention a teammate
+                  </p>
+                  <ul class="max-h-56 overflow-y-auto pb-1">
+                    <li
+                      v-for="(m, i) in mentionMatches"
+                      :key="m.id"
+                    >
+                      <button
+                        class="w-full flex items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors"
+                        :class="i === mentionIndex ? 'bg-amber-500/10 text-highlighted' : 'text-muted hover:bg-elevated'"
+                        @click="applyMention(m)"
+                      >
+                        <span
+                          class="size-1.5 rounded-full"
+                          :class="presenceDot(m.presence)"
+                        />
+                        {{ m.name }}
+                      </button>
+                    </li>
+                  </ul>
+                </div>
+
                 <!-- canned response picker -->
                 <div
-                  v-if="cannedOpen"
+                  v-else-if="cannedOpen"
                   class="absolute bottom-full left-0 right-0 mb-2 rounded-xl bg-default ring-1 ring-default shadow-xl shadow-black/10 overflow-hidden z-10"
                 >
                   <p class="px-3 pt-2.5 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-dimmed">

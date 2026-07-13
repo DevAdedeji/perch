@@ -21,6 +21,7 @@ export default defineEventHandler(async (event) => {
     : undefined
   const limit = Math.min(Math.max(Number(query.limit) || DEFAULT_LIMIT, 1), MAX_LIMIT)
   const beforeId = typeof query.before === 'string' ? query.before : null
+  const tagId = typeof query.tag === 'string' && query.tag ? query.tag : null
 
   // agents see only the unassigned pool + their own chats; admins see everything
   const scope = member.role === 'agent'
@@ -49,7 +50,12 @@ export default defineEventHandler(async (event) => {
       visitorEmail: visitors.email,
       visitorPublicId: visitors.visitorId,
       lastReadAt: conversationReads.lastReadAt,
-      preview: sql<string | null>`(select coalesce(nullif(m.content, ''), case when m.attachment_url is not null then '📷 Photo' end) from ${messages} m where m.conversation_id = ${conversations.id} order by m.created_at desc limit 1)`
+      preview: sql<string | null>`(select coalesce(nullif(m.content, ''), case when m.attachment_url is not null then '📷 Photo' end) from ${messages} m where m.conversation_id = ${conversations.id} order by m.created_at desc limit 1)`,
+      tags: sql<{ id: string, name: string }[]>`coalesce((
+        select json_agg(json_build_object('id', t.id, 'name', t.name) order by t.name)
+        from conversation_tags ct join tags t on t.id = ct.tag_id
+        where ct.conversation_id = ${conversations.id}
+      ), '[]'::json)`
     })
     .from(conversations)
     .innerJoin(visitors, eq(visitors.id, conversations.visitorRef))
@@ -60,6 +66,9 @@ export default defineEventHandler(async (event) => {
     .where(and(
       eq(conversations.workspaceId, workspaceId),
       status ? eq(conversations.status, status) : undefined,
+      tagId
+        ? sql`exists (select 1 from conversation_tags ct where ct.conversation_id = ${conversations.id} and ct.tag_id = ${tagId}::uuid)`
+        : undefined,
       scope,
       // tuple comparison keeps the order stable when timestamps collide
       cursor
@@ -80,6 +89,7 @@ export default defineEventHandler(async (event) => {
       lastMessageAt: r.lastMessageAt.toISOString(),
       createdAt: r.createdAt.toISOString(),
       preview: r.preview ?? '',
+      tags: r.tags ?? [],
       unread: !r.lastReadAt || r.lastMessageAt > r.lastReadAt,
       visitor: {
         id: r.visitorRef,

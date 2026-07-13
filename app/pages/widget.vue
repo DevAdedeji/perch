@@ -8,8 +8,38 @@ const perchUrl = useRequestURL().origin
 
 const widget = useWidget(siteId.value)
 const {
-  workspace, agentName, businessOnline, businessState, awayLabel, conversationId, conversationStatus, messages, status, agentTyping, visitorName, agentReadAt
+  workspace, agentName, businessOnline, businessState, awayLabel, conversationId, conversationStatus, csatRating, messages, status, agentTyping, visitorName, agentReadAt
 } = widget
+
+/* ── CSAT: quick thumbs after a conversation closes ── */
+const csatComment = ref('')
+const csatCommentSent = ref(false)
+const csatSaving = ref(false)
+
+async function rate(rating: 'good' | 'bad') {
+  if (csatSaving.value) return
+  csatSaving.value = true
+  try {
+    await widget.sendCsat(rating)
+  } catch {
+    // non-critical — the buttons stay tappable
+  } finally {
+    csatSaving.value = false
+  }
+}
+
+async function sendCsatComment() {
+  if (!csatComment.value.trim() || !csatRating.value || csatSaving.value) return
+  csatSaving.value = true
+  try {
+    await widget.sendCsat(csatRating.value, csatComment.value)
+    csatCommentSent.value = true
+  } catch {
+    // keep the box editable
+  } finally {
+    csatSaving.value = false
+  }
+}
 
 const DOT_COLORS = { online: '#22c55e', away: '#f59e0b', offline: '#94a3b8' } as const
 const dotColor = computed(() => DOT_COLORS[businessState.value])
@@ -754,6 +784,70 @@ onBeforeUnmount(() => {
             Conversation closed
           </span>
           <span class="h-px flex-1 bg-default" />
+        </div>
+
+        <!-- CSAT: one tap, optional comment -->
+        <div
+          v-if="conversationStatus === 'resolved' && messages.length"
+          class="mx-auto max-w-64 rounded-2xl bg-elevated/60 ring-1 ring-default px-4 py-3 text-center"
+        >
+          <template v-if="!csatRating">
+            <p class="text-xs font-medium text-highlighted">
+              How was our support?
+            </p>
+            <div class="mt-2 flex items-center justify-center gap-3">
+              <button
+                class="grid place-items-center size-10 rounded-xl bg-default ring-1 ring-default text-lg hover:ring-green-500/60 hover:scale-110 active:scale-95 transition"
+                aria-label="Good"
+                @click="rate('good')"
+              >
+                👍
+              </button>
+              <button
+                class="grid place-items-center size-10 rounded-xl bg-default ring-1 ring-default text-lg hover:ring-red-500/60 hover:scale-110 active:scale-95 transition"
+                aria-label="Bad"
+                @click="rate('bad')"
+              >
+                👎
+              </button>
+            </div>
+          </template>
+          <template v-else-if="!csatCommentSent">
+            <p class="text-xs font-medium text-highlighted">
+              {{ csatRating === 'good' ? 'Thanks! 🎉' : 'Sorry to hear that.' }}
+            </p>
+            <p class="mt-0.5 text-[11px] text-dimmed">
+              {{ csatRating === 'good' ? 'Anything to add?' : 'What could we have done better?' }}
+            </p>
+            <div class="mt-2 flex items-center gap-1.5">
+              <input
+                v-model="csatComment"
+                type="text"
+                placeholder="Optional comment…"
+                class="w-full rounded-lg bg-default ring-1 ring-default px-2.5 py-1.5 text-xs outline-none focus:ring-2"
+                :style="{ '--tw-ring-color': accent }"
+                @keyup.enter="sendCsatComment"
+              >
+              <button
+                class="grid place-items-center size-7 shrink-0 rounded-lg transition enabled:hover:brightness-110 disabled:opacity-40"
+                :style="{ background: accent, color: onAccent }"
+                :disabled="!csatComment.trim() || csatSaving"
+                aria-label="Send comment"
+                @click="sendCsatComment"
+              >
+                <UIcon
+                  name="i-lucide-arrow-up"
+                  class="size-3.5"
+                />
+              </button>
+            </div>
+          </template>
+          <p
+            v-else
+            class="text-xs text-muted"
+          >
+            Thanks for the feedback 💛
+          </p>
         </div>
 
         <!-- agent typing -->

@@ -19,6 +19,7 @@ interface SessionResponse {
   away_label: string | null
   conversation_id: string | null
   conversation_status: 'open' | 'unassigned' | 'resolved' | null
+  csat_rating: 'good' | 'bad' | null
   agent_last_read_at: string | null
   messages: MessageDTO[]
   ws_ticket: string
@@ -40,6 +41,7 @@ export function useWidget(siteId: string) {
   const awayLabel = ref<string | null>(null)
   // resolved threads render a "closed" divider; replying reopens server-side
   const conversationStatus = ref<'open' | 'unassigned' | 'resolved' | null>(null)
+  const csatRating = ref<'good' | 'bad' | null>(null)
   const conversationId = ref<string | null>(null)
   const messages = ref<Array<MessageDTO & { pending?: boolean, failed?: boolean }>>([])
   const status = ref<'loading' | 'ready' | 'error'>('loading')
@@ -85,6 +87,7 @@ export function useWidget(siteId: string) {
     awayLabel.value = res.away_label ?? null
     conversationId.value = res.conversation_id
     conversationStatus.value = res.conversation_status ?? null
+    csatRating.value = res.csat_rating ?? null
     messages.value = res.messages
     visitorName.value = res.visitor.name
     visitorEmail.value = res.visitor.email
@@ -379,6 +382,21 @@ export function useWidget(siteId: string) {
     return performSend(tempId).catch(() => {})
   }
 
+  async function sendCsat(rating: 'good' | 'bad', comment?: string) {
+    if (!conversationId.value) return
+    csatRating.value = rating // optimistic — mis-taps can re-rate
+    await $fetch('/api/widget/csat', {
+      method: 'POST',
+      body: {
+        site_id: siteId,
+        visitor_id: visitorId,
+        conversation_id: conversationId.value,
+        rating,
+        comment: comment?.trim() || undefined
+      }
+    })
+  }
+
   function sendTyping(isTyping: boolean, preview?: string) {
     if (!conversationId.value) return
     send(isTyping
@@ -402,6 +420,8 @@ export function useWidget(siteId: string) {
     businessState,
     awayLabel,
     conversationStatus,
+    csatRating,
+    sendCsat,
     conversationId,
     messages,
     status,

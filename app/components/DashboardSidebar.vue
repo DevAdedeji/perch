@@ -7,6 +7,7 @@ const { status: myPresence, away, setAway } = usePresence()
 
 const nav = computed(() => [
   { label: 'Inbox', icon: 'i-lucide-inbox', to: '/dashboard' },
+  { label: 'Nest', icon: 'i-lucide-bird', to: '/nest' },
   { label: 'Help Center', icon: 'i-lucide-book-open', to: '/articles' },
   { label: 'Team', icon: 'i-lucide-users', to: '/team' },
   { label: 'Settings', icon: 'i-lucide-settings', to: '/settings' },

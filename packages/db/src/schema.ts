@@ -110,10 +110,43 @@ export const conversations = pgTable('conversations', {
   lastMessageAt: timestamp('last_message_at', { withTimezone: true }).defaultNow().notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
-  resolvedAt: timestamp('resolved_at', { withTimezone: true })
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+  // CSAT: the visitor's post-resolve rating (one per conversation, overwritable)
+  csatRating: text('csat_rating', { enum: ['good', 'bad'] }),
+  csatComment: text('csat_comment'),
+  csatAt: timestamp('csat_at', { withTimezone: true })
 }, t => [
   // inbox listing + status filters, sorted by recency (§4 design note)
   index('conversations_workspace_status_recency_idx').on(t.workspaceId, t.status, t.lastMessageAt)
+])
+
+/** Workspace-defined conversation labels ("billing", "bug", …). */
+export const tags = pgTable('tags', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull()
+}, t => [
+  uniqueIndex('tags_workspace_name_uq').on(t.workspaceId, t.name)
+])
+
+export const conversationTags = pgTable('conversation_tags', {
+  conversationId: uuid('conversation_id').notNull().references(() => conversations.id, { onDelete: 'cascade' }),
+  tagId: uuid('tag_id').notNull().references(() => tags.id, { onDelete: 'cascade' })
+}, t => [
+  uniqueIndex('conversation_tags_uq').on(t.conversationId, t.tagId),
+  index('conversation_tags_tag_idx').on(t.tagId)
+])
+
+/** The team lounge: one internal chat room per workspace (agents only, never visitors). */
+export const teamMessages = pgTable('team_messages', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  memberId: uuid('member_id').notNull().references(() => workspaceMembers.id, { onDelete: 'cascade' }),
+  content: text('content').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull()
+}, t => [
+  index('team_messages_workspace_recency_idx').on(t.workspaceId, t.createdAt)
 ])
 
 export const messages = pgTable('messages', {

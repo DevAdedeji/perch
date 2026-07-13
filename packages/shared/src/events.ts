@@ -104,6 +104,24 @@ export interface BusinessPresencePayload {
   state: Presence
 }
 
+export interface TeamMessagePayload {
+  id: string
+  workspace_id: string
+  member_id: string
+  member_name: string
+  content: string
+  created_at: string
+}
+
+export interface MentionPayload {
+  conversation_id: string
+  message_id: string
+  by_member_id: string
+  by_name: string
+  /** first ~90 chars of the note, for the toast */
+  excerpt: string
+}
+
 export interface ConversationReadReceiptPayload {
   conversation_id: string
   /** ISO timestamp of the agent's read — messages at or before this are "Seen". */
@@ -120,6 +138,8 @@ export type ServerEvent = | { type: 'message.new', payload: MessageDTO }
   | { type: 'presence', payload: PresencePayload }
   | { type: 'business.presence', payload: BusinessPresencePayload }
   | { type: 'conversation.read', payload: ConversationReadReceiptPayload }
+  | { type: 'team.message', payload: TeamMessagePayload }
+  | { type: 'mention', payload: MentionPayload }
 
 export type ServerEventType = ServerEvent['type']
 

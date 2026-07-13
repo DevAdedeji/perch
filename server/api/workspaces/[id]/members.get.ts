@@ -21,6 +21,15 @@ export default defineEventHandler(async (event) => {
       resolvedCount: sql<number>`(
         select count(*) from ${conversations} c
         where c.assigned_agent_id = ${workspaceMembers.id} and c.status = 'resolved'
+      )`,
+      // CSAT rollup (§13.0.1): thumbs from resolved conversations they handled
+      csatGood: sql<number>`(
+        select count(*) from ${conversations} c
+        where c.assigned_agent_id = ${workspaceMembers.id} and c.csat_rating = 'good'
+      )`,
+      csatBad: sql<number>`(
+        select count(*) from ${conversations} c
+        where c.assigned_agent_id = ${workspaceMembers.id} and c.csat_rating = 'bad'
       )`
     })
     .from(workspaceMembers)
@@ -32,6 +41,8 @@ export default defineEventHandler(async (event) => {
     ...m,
     openCount: Number(m.openCount),
     resolvedCount: Number(m.resolvedCount),
+    csatGood: Number(m.csatGood),
+    csatBad: Number(m.csatBad),
     presence: memberPresence(workspaceId, m.id)
   }))
 })

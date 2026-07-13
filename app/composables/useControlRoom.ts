@@ -8,8 +8,14 @@ export interface InboxItem {
   lastMessageAt: string
   createdAt: string
   preview: string
+  tags: { id: string, name: string }[]
   unread: boolean
   visitor: { id: string, name: string | null, email: string | null, visitorId: string }
+}
+
+export interface WorkspaceTag {
+  id: string
+  name: string
 }
 
 export interface TeamMember {
@@ -65,6 +71,8 @@ let listSeq = 0
 let threadSeq = 0
 // pending upload fns survive navigation so failed image sends stay retryable
 const uploadFns = new Map<string, () => Promise<{ url: string, type: string }>>()
+// @mention targets per optimistic send — module scope so retries keep them
+const mentionMeta = new Map<string, string[]>()
 
 export function useControlRoom() {
   const { currentWorkspace } = useAuth()
@@ -76,6 +84,8 @@ export function useControlRoom() {
   const activeId = useState<string | null>('inbox:activeId', () => null)
   const messages = useState<Array<MessageDTO & { pending?: boolean, failed?: boolean }>>('cr:messages', () => [])
   const filter = useState<InboxFilter>('cr:filter', () => 'all')
+  const tagFilter = useState<string | null>('cr:tagFilter', () => null)
+  const workspaceTags = useState<WorkspaceTag[]>('cr:tags', () => [])
   const loadingList = ref(false)
   const loadingThread = ref(false)
   const visitorTyping = ref(false)
@@ -127,9 +137,12 @@ export function useControlRoom() {
     const seq = ++listSeq
     if (showLoader) loadingList.value = true
     try {
-      const query = filter.value === 'all' ? '' : `?status=${filter.value}`
+      const params = new URLSearchParams()
+      if (filter.value !== 'all') params.set('status', filter.value)
+      if (tagFilter.value) params.set('tag', tagFilter.value)
+      const qs = params.size ? `?${params}` : ''
       const data = await $fetch<{ items: InboxItem[], has_more: boolean }>(
-        `/api/workspaces/${workspaceId.value}/conversations${query}`
+        `/api/workspaces/${workspaceId.value}/conversations${qs}`
       )
       if (seq !== listSeq) return // a newer load superseded this one
       conversations.value = data.items
@@ -145,9 +158,11 @@ export function useControlRoom() {
     const seq = listSeq
     loadingMore.value = true
     try {
-      const status = filter.value === 'all' ? '' : `&status=${filter.value}`
+      const params = new URLSearchParams({ before: last.id })
+      if (filter.value !== 'all') params.set('status', filter.value)
+      if (tagFilter.value) params.set('tag', tagFilter.value)
       const data = await $fetch<{ items: InboxItem[], has_more: boolean }>(
-        `/api/workspaces/${workspaceId.value}/conversations?before=${last.id}${status}`
+        `/api/workspaces/${workspaceId.value}/conversations?${params}`
       )
       if (seq !== listSeq) return // list was reloaded while we fetched
       const known = new Set(conversations.value.map(c => c.id))
@@ -272,7 +287,8 @@ export function useControlRoom() {
           content: temp.content,
           attachment_url: temp.attachment_url ?? undefined,
           attachment_type: temp.attachment_type ?? undefined,
-          is_internal_note: temp.is_internal_note
+          is_internal_note: temp.is_internal_note,
+          mentioned_member_ids: mentionMeta.get(tempId)
         }
       })
       // reconcile in place (the WS echo, if it arrives first, dedups by id)
@@ -285,6 +301,7 @@ export function useControlRoom() {
         messages.value.push(message)
       }
       uploadFns.delete(tempId)
+      mentionMeta.delete(tempId)
     } catch {
       const failedMsg = messages.value.find(m => m.id === tempId)
       if (failedMsg) {
@@ -294,10 +311,12 @@ export function useControlRoom() {
     }
   }
 
-  async function sendReply(content: string, isInternalNote = false, attachment?: { url: string, type: string }) {
+  async function sendReply(content: string, isInternalNote = false, attachment?: { url: string, type: string }, mentionedMemberIds?: string[]) {
     const text = content.trim()
     if (!activeId.value || (!text && !attachment)) return
-    await performSend(pushTemp(activeId.value, text, isInternalNote, attachment))
+    const tempId = pushTemp(activeId.value, text, isInternalNote, attachment)
+    if (mentionedMemberIds?.length) mentionMeta.set(tempId, mentionedMemberIds)
+    await performSend(tempId)
   }
 
   /** Optimistic image send: the bubble shows a local preview while uploading. */
@@ -422,6 +441,37 @@ export function useControlRoom() {
     }
   }
 
+  /* ── tags ─────────────────────────────────────────────────── */
+  async function loadTags() {
+    if (!workspaceId.value) return
+    workspaceTags.value = await $fetch<WorkspaceTag[]>(`/api/workspaces/${workspaceId.value}/tags`)
+  }
+
+  async function applyTag(conversationId: string, tag: WorkspaceTag) {
+    await $fetch(`/api/conversations/${conversationId}/tags`, { method: 'POST', body: { tag_id: tag.id } })
+    const item = conversations.value.find(c => c.id === conversationId)
+    if (item && !item.tags.some(t => t.id === tag.id)) {
+      item.tags = [...item.tags, tag].sort((a, b) => a.name.localeCompare(b.name))
+    }
+  }
+
+  async function removeTag(conversationId: string, tagId: string) {
+    await $fetch(`/api/conversations/${conversationId}/tags/${tagId}`, { method: 'DELETE' })
+    const item = conversations.value.find(c => c.id === conversationId)
+    if (item) item.tags = item.tags.filter(t => t.id !== tagId)
+  }
+
+  async function createTag(name: string): Promise<WorkspaceTag> {
+    const tag = await $fetch<WorkspaceTag>(`/api/workspaces/${workspaceId.value}/tags`, {
+      method: 'POST',
+      body: { name }
+    })
+    if (!workspaceTags.value.some(t => t.id === tag.id)) {
+      workspaceTags.value = [...workspaceTags.value, tag].sort((a, b) => a.name.localeCompare(b.name))
+    }
+    return tag
+  }
+
   let offReconnect: (() => void) | undefined
   onMounted(() => {
     rt.connect()
@@ -437,6 +487,7 @@ export function useControlRoom() {
       loadCounts()
       loadMembers()
       loadCanned()
+      loadTags()
     }
     // restore the open thread after navigating away and back
     if (activeId.value) {
@@ -472,6 +523,7 @@ export function useControlRoom() {
   })
 
   watch(filter, () => loadConversations({ showLoader: true }))
+  watch(tagFilter, () => loadConversations({ showLoader: true }))
 
   return {
     conversations,
@@ -494,6 +546,11 @@ export function useControlRoom() {
     status: rt.status,
     memberName,
     memberPresence,
+    tagFilter,
+    workspaceTags,
+    applyTag,
+    removeTag,
+    createTag,
     select,
     deselect,
     loadMoreConversations,
