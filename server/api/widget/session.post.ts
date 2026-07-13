@@ -45,11 +45,14 @@ export default defineEventHandler(async (event) => {
     set: { lastSeenAt: now }
   }).returning()
 
-  // resume the visitor's active (non-resolved) conversation
+  // resume the visitor's conversation — active ones first, else their most
+  // recent resolved one (shown with a "closed" divider; replying reopens it)
   const conversation = await db.query.conversations.findFirst({
-    where: and(eq(conversations.visitorRef, visitor!.id), eq(conversations.status, 'open'))
-  }) ?? await db.query.conversations.findFirst({
-    where: and(eq(conversations.visitorRef, visitor!.id), eq(conversations.status, 'unassigned'))
+    where: eq(conversations.visitorRef, visitor!.id),
+    orderBy: [
+      sql`case when ${conversations.status} = 'open' then 0 when ${conversations.status} = 'unassigned' then 1 else 2 end`,
+      desc(conversations.lastMessageAt)
+    ]
   })
 
   let thread: MessageDTO[] = []
@@ -96,8 +99,10 @@ export default defineEventHandler(async (event) => {
     agent: agentName ? { name: agentName } : null,
     visitor: { name: visitor!.name, email: visitor!.email },
     business_online: isBusinessOnline(workspace.id) && withinHours,
+    business_state: withinHours ? businessPresence(workspace.id) : 'offline' as const,
     within_hours: withinHours,
     away_label: withinHours ? null : nextOpeningLabel(workspace.businessHours, workspace.timezone),
+    conversation_status: conversation?.status ?? null,
     conversation_id: conversation?.id ?? null,
     agent_last_read_at: agentLastReadAt,
     messages: thread,

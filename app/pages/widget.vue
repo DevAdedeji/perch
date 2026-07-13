@@ -8,12 +8,21 @@ const perchUrl = useRequestURL().origin
 
 const widget = useWidget(siteId.value)
 const {
-  workspace, agentName, businessOnline, awayLabel, conversationId, messages, status, agentTyping, visitorName, agentReadAt
+  workspace, agentName, businessOnline, businessState, awayLabel, conversationId, conversationStatus, messages, status, agentTyping, visitorName, agentReadAt
 } = widget
+
+const DOT_COLORS = { online: '#22c55e', away: '#f59e0b', offline: '#94a3b8' } as const
+const dotColor = computed(() => DOT_COLORS[businessState.value])
 
 // "Away — back Monday at 9 AM" when a schedule says so; generic otherwise
 const awayLine = computed(() =>
   awayLabel.value ? `Away — ${awayLabel.value}` : 'Away — we\u2019ll reply as soon as we\u2019re back')
+
+const headerStatusLine = computed(() => {
+  if (businessState.value === 'online') return 'Online · replies in seconds'
+  if (businessState.value === 'away') return 'Stepped away — replies may take a little longer'
+  return awayLine.value
+})
 
 function isSeen(m: { sender_type: string, created_at: string }) {
   return m.sender_type === 'visitor' && !!agentReadAt.value && m.created_at <= agentReadAt.value
@@ -344,7 +353,7 @@ onBeforeUnmount(() => {
         <span
           class="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full"
           :class="businessOnline && 'pulse-dot'"
-          :style="{ background: businessOnline ? '#22c55e' : '#94a3b8', border: '2px solid var(--ui-bg-elevated)' }"
+          :style="{ background: dotColor, border: '2px solid var(--ui-bg-elevated)' }"
         />
       </span>
       <div class="min-w-0 flex-1">
@@ -356,7 +365,7 @@ onBeforeUnmount(() => {
             from {{ workspace?.name }}
           </template>
           <template v-else>
-            {{ businessOnline ? 'Online · replies in seconds' : awayLine }}
+            {{ headerStatusLine }}
           </template>
         </p>
       </div>
@@ -730,6 +739,22 @@ onBeforeUnmount(() => {
             </p>
           </div>
         </template>
+
+        <!-- conversation closed divider (replying below reopens it) -->
+        <div
+          v-if="conversationStatus === 'resolved' && messages.length"
+          class="flex items-center gap-3 my-5"
+        >
+          <span class="h-px flex-1 bg-default" />
+          <span class="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-dimmed">
+            <UIcon
+              name="i-lucide-check-check"
+              class="size-3.5"
+            />
+            Conversation closed
+          </span>
+          <span class="h-px flex-1 bg-default" />
+        </div>
 
         <!-- agent typing -->
         <div

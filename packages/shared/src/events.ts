@@ -100,6 +100,8 @@ export interface PresencePayload {
 
 export interface BusinessPresencePayload {
   online: boolean
+  /** online = someone's actively here · away = connected but stepped away · offline = nobody */
+  state: Presence
 }
 
 export interface ConversationReadReceiptPayload {

@@ -1,4 +1,4 @@
-import { and, conversations, eq, inArray, messages, sql, visitors } from '@perch/db'
+import { and, conversations, desc, eq, messages, sql, visitors } from '@perch/db'
 import type { Conversation, Message } from '@perch/db'
 import { channels } from '@perch/shared'
 import type { ConversationDTO, MessageDTO } from '@perch/shared'
@@ -72,24 +72,33 @@ export async function ingestVisitorMessage(input: IncomingVisitorMessage) {
     }
   }).returning()
 
-  // resume an existing non-resolved conversation (open preferred), else open
-  // a new one — a single lookup instead of two sequential ones
+  // resume the visitor's conversation: active ones first, else their most
+  // recent resolved one — replying to a closed chat REOPENS it (the standard
+  // live-chat model: Intercom/Crisp/Chatwoot all thread this way)
   const existing = await db.query.conversations.findFirst({
-    where: and(
-      eq(conversations.visitorRef, visitor!.id),
-      inArray(conversations.status, ['open', 'unassigned'])
-    ),
-    orderBy: sql`case when ${conversations.status} = 'open' then 0 else 1 end`
+    where: eq(conversations.visitorRef, visitor!.id),
+    orderBy: [
+      sql`case when ${conversations.status} = 'open' then 0 when ${conversations.status} = 'unassigned' then 1 else 2 end`,
+      desc(conversations.lastMessageAt)
+    ]
   })
 
   let conversation: Conversation
   let message: Message
   let isNew = false
+  const reopened = existing?.status === 'resolved'
   if (existing) {
-    // the bump and the insert are independent — run them in one round trip
+    // the bump (and reopen, when resolved) and the insert are independent —
+    // one round trip. Reopens keep the assignee: they have the context.
     const [[updated], [inserted]] = await Promise.all([
       db.update(conversations)
-        .set({ lastMessageAt: now, updatedAt: now })
+        .set({
+          lastMessageAt: now,
+          updatedAt: now,
+          ...(reopened
+            ? { status: existing.assignedAgentId ? 'open' as const : 'unassigned' as const, resolvedAt: null }
+            : {})
+        })
         .where(eq(conversations.id, existing.id))
         .returning(),
       db.insert(messages).values({

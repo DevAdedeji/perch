@@ -47,12 +47,25 @@ export function workspacePresences(workspaceId: string): Record<string, Presence
 }
 
 export function isBusinessOnline(workspaceId: string): boolean {
+  return businessPresence(workspaceId) === 'online'
+}
+
+/**
+ * The team's presence as the visitor widget shows it: `online` when anyone is
+ * actively here, `away` when people are connected but all stepped away,
+ * `offline` when nobody is connected at all.
+ */
+export function businessPresence(workspaceId: string): Presence {
   const e = store.get(workspaceId)
-  if (!e) return false
+  if (!e) return 'offline'
+  let anyConnected = false
   for (const m of e.members.values()) {
-    if (m.peers.size > 0 && !m.away) return true
+    if (m.peers.size > 0) {
+      if (!m.away) return 'online'
+      anyConnected = true
+    }
   }
-  return false
+  return anyConnected ? 'away' : 'offline'
 }
 
 function announceMember(workspaceId: string, memberId: string) {
@@ -63,9 +76,10 @@ function announceMember(workspaceId: string, memberId: string) {
 }
 
 function announceBusiness(workspaceId: string) {
+  const state = businessPresence(workspaceId)
   publish(presenceChannel(workspaceId), {
     type: 'business.presence',
-    payload: { online: isBusinessOnline(workspaceId) }
+    payload: { online: state === 'online', state }
   })
 }
 

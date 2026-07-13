@@ -14,9 +14,11 @@ interface SessionResponse {
   agent: { name: string } | null
   visitor: { name: string | null, email: string | null }
   business_online: boolean
+  business_state: 'online' | 'away' | 'offline'
   within_hours: boolean
   away_label: string | null
   conversation_id: string | null
+  conversation_status: 'open' | 'unassigned' | 'resolved' | null
   agent_last_read_at: string | null
   messages: MessageDTO[]
   ws_ticket: string
@@ -32,9 +34,12 @@ export function useWidget(siteId: string) {
   const workspace = ref<WidgetWorkspace | null>(null)
   const agentName = ref<string | null>(null)
   const businessOnline = ref(false)
+  const businessState = ref<'online' | 'away' | 'offline'>('offline')
   // business-hours schedule state (fixed per session; refreshed on reconnect)
   const withinHours = ref(true)
   const awayLabel = ref<string | null>(null)
+  // resolved threads render a "closed" divider; replying reopens server-side
+  const conversationStatus = ref<'open' | 'unassigned' | 'resolved' | null>(null)
   const conversationId = ref<string | null>(null)
   const messages = ref<Array<MessageDTO & { pending?: boolean, failed?: boolean }>>([])
   const status = ref<'loading' | 'ready' | 'error'>('loading')
@@ -75,9 +80,11 @@ export function useWidget(siteId: string) {
     workspace.value = res.workspace
     agentName.value = res.agent?.name ?? null
     businessOnline.value = res.business_online
+    businessState.value = res.business_state ?? (res.business_online ? 'online' : 'offline')
     withinHours.value = res.within_hours ?? true
     awayLabel.value = res.away_label ?? null
     conversationId.value = res.conversation_id
+    conversationStatus.value = res.conversation_status ?? null
     messages.value = res.messages
     visitorName.value = res.visitor.name
     visitorEmail.value = res.visitor.email
@@ -171,6 +178,7 @@ export function useWidget(siteId: string) {
             messages.value.push(ev.payload)
             if (ev.payload.sender_type === 'agent') agentTyping.value = false
           }
+          if (conversationStatus.value === 'resolved') conversationStatus.value = 'open'
         }
         break
       case 'typing':
@@ -179,12 +187,16 @@ export function useWidget(siteId: string) {
         }
         break
       case 'conversation.updated':
-        // an agent claimed/was reassigned — refresh who's handling the chat
-        if (ev.payload.id === conversationId.value) refreshAgent()
+        // an agent claimed/was reassigned/resolved — track status + who's handling it
+        if (ev.payload.id === conversationId.value) {
+          conversationStatus.value = ev.payload.status
+          refreshAgent()
+        }
         break
       case 'business.presence':
-        // outside scheduled hours the business is away no matter who's online
+        // outside scheduled hours the business is offline no matter who's here
         businessOnline.value = ev.payload.online && withinHours.value
+        businessState.value = withinHours.value ? (ev.payload.state ?? (ev.payload.online ? 'online' : 'offline')) : 'offline'
         break
       case 'conversation.read':
         if (ev.payload.conversation_id === conversationId.value) {
@@ -318,6 +330,10 @@ export function useWidget(siteId: string) {
           conversationId.value = res.conversation_id
           subscribeConversation()
         }
+        // replying to a resolved thread reopens it server-side — reflect that
+        if (conversationStatus.value === 'resolved' || conversationStatus.value === null) {
+          conversationStatus.value = 'open'
+        }
         if (identity?.name) visitorName.value = identity.name
         if (identity?.email) visitorEmail.value = identity.email
         // reconcile in place — replacing (not filter + push) keeps send order
@@ -383,7 +399,9 @@ export function useWidget(siteId: string) {
     agentReadAt,
     agentName,
     businessOnline,
+    businessState,
     awayLabel,
+    conversationStatus,
     conversationId,
     messages,
     status,
