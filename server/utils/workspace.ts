@@ -71,6 +71,8 @@ export function serializeWorkspace(w: Workspace) {
     widgetPrimaryColor: w.widgetPrimaryColor,
     autoAssignEnabled: w.autoAssignEnabled,
     prechatFormEnabled: w.prechatFormEnabled,
-    allowedDomains: w.allowedDomains
+    allowedDomains: w.allowedDomains,
+    businessHours: w.businessHours,
+    timezone: w.timezone
   }
 }

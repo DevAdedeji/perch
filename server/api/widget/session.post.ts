@@ -83,6 +83,8 @@ export default defineEventHandler(async (event) => {
     columns: { id: true }
   })
 
+  const withinHours = isWithinBusinessHours(workspace.businessHours, workspace.timezone)
+
   return {
     workspace: {
       name: workspace.name,
@@ -93,7 +95,9 @@ export default defineEventHandler(async (event) => {
     },
     agent: agentName ? { name: agentName } : null,
     visitor: { name: visitor!.name, email: visitor!.email },
-    business_online: isBusinessOnline(workspace.id),
+    business_online: isBusinessOnline(workspace.id) && withinHours,
+    within_hours: withinHours,
+    away_label: withinHours ? null : nextOpeningLabel(workspace.businessHours, workspace.timezone),
     conversation_id: conversation?.id ?? null,
     agent_last_read_at: agentLastReadAt,
     messages: thread,

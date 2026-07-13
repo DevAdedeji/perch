@@ -8,8 +8,12 @@ const perchUrl = useRequestURL().origin
 
 const widget = useWidget(siteId.value)
 const {
-  workspace, agentName, businessOnline, conversationId, messages, status, agentTyping, visitorName, agentReadAt
+  workspace, agentName, businessOnline, awayLabel, conversationId, messages, status, agentTyping, visitorName, agentReadAt
 } = widget
+
+// "Away — back Monday at 9 AM" when a schedule says so; generic otherwise
+const awayLine = computed(() =>
+  awayLabel.value ? `Away — ${awayLabel.value}` : 'Away — we\u2019ll reply as soon as we\u2019re back')
 
 function isSeen(m: { sender_type: string, created_at: string }) {
   return m.sender_type === 'visitor' && !!agentReadAt.value && m.created_at <= agentReadAt.value
@@ -199,13 +203,24 @@ function autogrow() {
 }
 
 let typingTimer: ReturnType<typeof setTimeout> | undefined
+let previewTimer: ReturnType<typeof setTimeout> | undefined
 let typingOn = false
+let lastPreviewAt = 0
+
+// sneak-peek: agents see the draft live — throttled to ~3 sends/sec with a
+// trailing flush so the final keystrokes always arrive
+function pushPreview() {
+  lastPreviewAt = Date.now()
+  typingOn = true
+  widget.sendTyping(true, draft.value)
+}
+
 function onInput() {
   autogrow()
-  if (!typingOn) {
-    typingOn = true
-    widget.sendTyping(true)
-  }
+  clearTimeout(previewTimer)
+  const elapsed = Date.now() - lastPreviewAt
+  if (elapsed >= 300) pushPreview()
+  else previewTimer = setTimeout(pushPreview, 300 - elapsed)
   clearTimeout(typingTimer)
   typingTimer = setTimeout(() => {
     typingOn = false
@@ -214,6 +229,7 @@ function onInput() {
 }
 function stopTyping() {
   clearTimeout(typingTimer)
+  clearTimeout(previewTimer)
   if (typingOn) {
     typingOn = false
     widget.sendTyping(false)
@@ -340,7 +356,7 @@ onBeforeUnmount(() => {
             from {{ workspace?.name }}
           </template>
           <template v-else>
-            {{ businessOnline ? 'Online · replies in seconds' : 'Away — we’ll reply as soon as we’re back' }}
+            {{ businessOnline ? 'Online · replies in seconds' : awayLine }}
           </template>
         </p>
       </div>
@@ -609,7 +625,9 @@ onBeforeUnmount(() => {
           <p class="text-sm text-muted max-w-60">
             {{ businessOnline
               ? 'Ask us anything — we’re online and typically reply in a few minutes.'
-              : 'We’re away right now, but leave a message and we’ll get back to you.' }}
+              : awayLabel
+                ? `We’re away right now — ${awayLabel}. Leave a message and we’ll reply then.`
+                : 'We’re away right now, but leave a message and we’ll get back to you.' }}
           </p>
         </div>
 
@@ -736,7 +754,7 @@ onBeforeUnmount(() => {
           v-if="!businessOnline && messages.length"
           class="pb-2 text-[11px] text-dimmed text-center"
         >
-          We’re away right now — we’ll reply as soon as we’re back.
+          {{ awayLabel ? `We’re away right now — ${awayLabel}.` : 'We’re away right now — we’ll reply as soon as we’re back.' }}
         </p>
         <p
           v-if="uploadError"

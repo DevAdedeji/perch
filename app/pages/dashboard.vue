@@ -133,6 +133,15 @@ watch(() => cr.messages.value[cr.messages.value.length - 1]?.id ?? null, (id) =>
   lastMessageId = id
 })
 
+// keep the sneak-peek ghost bubble in view while the visitor types — but only
+// when the agent is already near the bottom (never yank them off history)
+watch(() => cr.visitorDraft.value, () => {
+  const el = threadEl.value
+  if (!el) return
+  const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 160
+  if (nearBottom) nextTick(() => el.scrollTo({ top: el.scrollHeight }))
+})
+
 async function onLoadOlder() {
   const el = threadEl.value
   const previousHeight = el?.scrollHeight ?? 0
@@ -726,12 +735,27 @@ const statusBadge = {
                 </div>
               </template>
 
-              <!-- visitor typing -->
+              <!-- visitor typing — with the live draft when the widget shares it -->
               <div
                 v-if="cr.visitorTyping.value"
                 class="flex items-end gap-2 mt-2.5"
               >
-                <div class="flex items-center gap-1 rounded-2xl rounded-bl-md bg-default ring-1 ring-default px-3.5 py-3">
+                <!-- sneak-peek ghost bubble: what they've typed so far, pre-send -->
+                <div
+                  v-if="cr.visitorDraft.value"
+                  class="max-w-[70%] rounded-2xl rounded-bl-md bg-default ring-1 ring-dashed ring-accented px-3.5 py-2"
+                >
+                  <p class="text-sm leading-snug text-muted italic whitespace-pre-wrap wrap-break-word">
+                    {{ cr.visitorDraft.value }}<span class="sneak-caret" />
+                  </p>
+                  <p class="mt-0.5 text-[10px] text-dimmed">
+                    typing…
+                  </p>
+                </div>
+                <div
+                  v-else
+                  class="flex items-center gap-1 rounded-2xl rounded-bl-md bg-default ring-1 ring-default px-3.5 py-3"
+                >
                   <span class="size-1.5 rounded-full bg-dimmed animate-bounce [animation-delay:-0.3s]" />
                   <span class="size-1.5 rounded-full bg-dimmed animate-bounce [animation-delay:-0.15s]" />
                   <span class="size-1.5 rounded-full bg-dimmed animate-bounce" />
@@ -856,3 +880,28 @@ const statusBadge = {
     </div>
   </div>
 </template>
+
+<style scoped>
+/* blinking caret at the end of the sneak-peek draft */
+.sneak-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  background: currentcolor;
+  animation: sneak-blink 1s step-end infinite;
+}
+
+@keyframes sneak-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sneak-caret {
+    animation: none;
+  }
+}
+</style>

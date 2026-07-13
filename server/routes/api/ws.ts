@@ -130,12 +130,19 @@ export default defineWebSocketHandler({
       case 'typing.stop': {
         const conversationId = msg.payload?.conversation_id
         if (!conversationId) break
+        // sneak-peek: relay the visitor's draft to agents — WS-only, never stored.
+        // strictly one-directional: an agent's draft must never reach the visitor.
+        const rawPreview = (msg.payload as { preview?: unknown } | undefined)?.preview
+        const preview = ctx.role === 'visitor' && msg.type === 'typing.start' && typeof rawPreview === 'string'
+          ? rawPreview.slice(0, 500)
+          : null
         publish(channels.conversation(conversationId), {
           type: 'typing',
           payload: {
             conversation_id: conversationId,
             actor: ctx.role === 'visitor' ? 'visitor' : 'agent',
-            is_typing: msg.type === 'typing.start'
+            is_typing: msg.type === 'typing.start',
+            preview
           }
         })
         break

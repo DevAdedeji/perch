@@ -79,6 +79,8 @@ export function useControlRoom() {
   const loadingList = ref(false)
   const loadingThread = ref(false)
   const visitorTyping = ref(false)
+  // sneak-peek: the visitor's live draft (WS-only — never rendered after send)
+  const visitorDraft = ref('')
 
   // per-status counts for the tabs — fetched independently of the active filter
   const counts = useState('cr:counts', () => ({ unassigned: 0, open: 0, resolved: 0 }))
@@ -179,6 +181,7 @@ export function useControlRoom() {
     activeId.value = id
     rt.subscribe(channels.conversation(id))
     visitorTyping.value = false
+    visitorDraft.value = ''
     messages.value = [] // clear the previous thread immediately so it can't linger
     context.value = null
     loadingThread.value = true
@@ -372,12 +375,14 @@ export function useControlRoom() {
         if (m.conversation_id === activeId.value && !messages.value.some(x => x.id === m.id)) {
           messages.value.push(m)
           visitorTyping.value = false
+          visitorDraft.value = ''
         }
         break
       }
       case 'typing':
         if (ev.payload.conversation_id === activeId.value && ev.payload.actor === 'visitor') {
           visitorTyping.value = ev.payload.is_typing
+          visitorDraft.value = ev.payload.is_typing ? (ev.payload.preview ?? '') : ''
         }
         break
       case 'presence': {
@@ -478,6 +483,7 @@ export function useControlRoom() {
     loadingList,
     loadingThread,
     visitorTyping,
+    visitorDraft,
     counts,
     canned,
     context,

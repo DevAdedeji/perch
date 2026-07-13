@@ -56,7 +56,7 @@ export interface PresenceUpdatePayload {
 /** Discriminated union of everything a client may send. */
 export type ClientEvent = | { type: 'visitor.hello', payload: VisitorHelloPayload }
   | { type: 'message.send', payload: MessageSendPayload }
-  | { type: 'typing.start', payload: ConversationRefPayload }
+  | { type: 'typing.start', payload: ConversationRefPayload & { preview?: string } }
   | { type: 'typing.stop', payload: ConversationRefPayload }
   | { type: 'conversation.claim', payload: ConversationRefPayload }
   | { type: 'conversation.assign', payload: ConversationAssignPayload }
@@ -89,6 +89,8 @@ export interface TypingPayload {
   conversation_id: string
   actor: 'visitor' | 'agent'
   is_typing: boolean
+  /** Sneak-peek: the visitor's in-progress draft. Visitor→agent only, never persisted. */
+  preview?: string | null
 }
 
 export interface PresencePayload {

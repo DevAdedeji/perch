@@ -1,13 +1,28 @@
 import { eq, workspaces } from '@perch/db'
 import { z } from 'zod'
 
+const dayHours = z.object({
+  open: z.string().regex(TIME_RE, 'Times must be HH:MM'),
+  close: z.string().regex(TIME_RE, 'Times must be HH:MM')
+}).refine(d => d.open < d.close, { message: 'Closing time must be after opening time' }).nullable()
+
 const schema = z.object({
   name: z.string().trim().min(1).max(80).optional(),
   prechatFormEnabled: z.boolean().optional(),
   identityVerificationEnabled: z.boolean().optional(),
   widgetPrimaryColor: hexColor.optional(),
   allowedDomains: z.array(z.string().trim().min(1).max(253)).max(20).optional(),
-  logoUrl: z.string().url().max(500).nullable().optional()
+  logoUrl: z.string().url().max(500).nullable().optional(),
+  businessHours: z.object({
+    sun: dayHours.optional(),
+    mon: dayHours.optional(),
+    tue: dayHours.optional(),
+    wed: dayHours.optional(),
+    thu: dayHours.optional(),
+    fri: dayHours.optional(),
+    sat: dayHours.optional()
+  }).nullable().optional(),
+  timezone: z.string().max(64).refine(isValidTimezone, 'Unknown timezone').nullable().optional()
 })
 
 /** Update workspace settings (admin only). */
@@ -38,6 +53,14 @@ export default defineEventHandler(async (event) => {
     }
     patch.allowedDomains = normalized
   }
+  // a schedule is meaningless without a timezone to evaluate it in
+  if (patch.businessHours && !patch.timezone) {
+    const current = await db.query.workspaces.findFirst({ where: eq(workspaces.id, workspaceId) })
+    if (!current?.timezone) {
+      throw createError({ statusCode: 400, statusMessage: 'Pick a timezone for your business hours' })
+    }
+  }
+
   const [workspace] = Object.keys(patch).length
     ? await db.update(workspaces).set(patch).where(eq(workspaces.id, workspaceId)).returning()
     : [await db.query.workspaces.findFirst({ where: eq(workspaces.id, workspaceId) })]

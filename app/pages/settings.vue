@@ -2,6 +2,12 @@
 definePageMeta({ layout: 'dashboard' })
 useHead({ title: 'Settings · Perch' })
 
+interface DayHours {
+  open: string
+  close: string
+}
+type BusinessHoursMap = Partial<Record<string, DayHours | null>>
+
 interface WorkspaceDetail {
   id: string
   name: string
@@ -12,6 +18,8 @@ interface WorkspaceDetail {
   identityVerificationEnabled: boolean
   identitySecret: string | null
   allowedDomains: string[]
+  businessHours: BusinessHoursMap | null
+  timezone: string | null
   role: 'admin' | 'agent'
 }
 
@@ -89,6 +97,62 @@ async function setColor(color: string) {
     await patchWorkspace({ widgetPrimaryColor: color })
   } catch {
     toast.add({ title: 'Could not update', color: 'error' })
+  }
+}
+
+/* ── business hours ───────────────────────── */
+const DAY_ORDER = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const
+const DAY_NAMES: Record<string, string> = {
+  mon: 'Monday',
+  tue: 'Tuesday',
+  wed: 'Wednesday',
+  thu: 'Thursday',
+  fri: 'Friday',
+  sat: 'Saturday',
+  sun: 'Sunday'
+}
+
+const hoursEnabled = ref(false)
+const tz = ref('')
+const timezones = Intl.supportedValuesOf('timeZone')
+const dayRows = reactive(Object.fromEntries(
+  DAY_ORDER.map(d => [d, { on: false, open: '09:00', close: '17:00' }])
+) as Record<string, { on: boolean, open: string, close: string }>)
+const savingHours = ref(false)
+
+// hydrate the editor whenever the workspace loads/switches
+watch(workspace, (w) => {
+  if (!w) return
+  hoursEnabled.value = !!w.businessHours
+  tz.value = w.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone
+  for (const d of DAY_ORDER) {
+    const range = w.businessHours?.[d]
+    dayRows[d]!.on = !!range
+    if (range) {
+      dayRows[d]!.open = range.open
+      dayRows[d]!.close = range.close
+    }
+  }
+}, { immediate: true })
+
+async function saveHours() {
+  if (savingHours.value) return
+  savingHours.value = true
+  try {
+    const businessHours = hoursEnabled.value
+      ? Object.fromEntries(DAY_ORDER.map(d => [
+          d,
+          dayRows[d]!.on ? { open: dayRows[d]!.open, close: dayRows[d]!.close } : null
+        ]))
+      : null
+    await patchWorkspace(
+      { businessHours, timezone: hoursEnabled.value ? tz.value : workspace.value?.timezone ?? null },
+      hoursEnabled.value ? 'Business hours saved' : 'Business hours turned off — always available'
+    )
+  } catch (e) {
+    toast.add({ title: getErrorMessage(e, 'Could not save business hours'), color: 'error' })
+  } finally {
+    savingHours.value = false
   }
 }
 
@@ -316,6 +380,89 @@ async function removeLogo() {
               </div>
             </div>
           </div>
+        </section>
+
+        <!-- Business hours -->
+        <section class="rounded-2xl border-glow bg-elevated/30 p-5 sm:p-6">
+          <div class="flex items-center justify-between gap-4">
+            <div>
+              <h2 class="font-display font-semibold text-highlighted">
+                Business hours
+              </h2>
+              <p class="text-sm text-muted mt-0.5">
+                Outside these hours the widget shows visitors when you'll be back —
+                even if someone from the team is online.
+              </p>
+            </div>
+            <USwitch
+              v-model="hoursEnabled"
+              :disabled="!isAdmin"
+            />
+          </div>
+
+          <div
+            v-if="hoursEnabled"
+            class="mt-5 space-y-4"
+          >
+            <UFormField label="Timezone">
+              <USelectMenu
+                v-model="tz"
+                :items="timezones"
+                :disabled="!isAdmin"
+                size="lg"
+                class="w-full sm:w-80"
+              />
+            </UFormField>
+
+            <div class="rounded-xl ring-1 ring-default divide-y divide-default/60 overflow-hidden">
+              <div
+                v-for="d in DAY_ORDER"
+                :key="d"
+                class="flex items-center gap-3 px-3.5 py-2.5 bg-default"
+              >
+                <USwitch
+                  v-model="dayRows[d]!.on"
+                  :disabled="!isAdmin"
+                  size="sm"
+                />
+                <span
+                  class="w-24 text-sm"
+                  :class="dayRows[d]!.on ? 'font-medium text-highlighted' : 'text-dimmed'"
+                >{{ DAY_NAMES[d] }}</span>
+                <template v-if="dayRows[d]!.on">
+                  <UInput
+                    v-model="dayRows[d]!.open"
+                    type="time"
+                    size="sm"
+                    :disabled="!isAdmin"
+                    class="w-28"
+                  />
+                  <span class="text-xs text-dimmed">to</span>
+                  <UInput
+                    v-model="dayRows[d]!.close"
+                    type="time"
+                    size="sm"
+                    :disabled="!isAdmin"
+                    class="w-28"
+                  />
+                </template>
+                <span
+                  v-else
+                  class="text-xs text-dimmed"
+                >Closed</span>
+              </div>
+            </div>
+          </div>
+
+          <UButton
+            v-if="isAdmin"
+            class="mt-4"
+            color="neutral"
+            :loading="savingHours"
+            @click="saveHours"
+          >
+            Save hours
+          </UButton>
         </section>
 
         <!-- Canned replies -->

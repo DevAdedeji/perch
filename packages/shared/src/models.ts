@@ -75,3 +75,17 @@ export interface MessageDTO {
   is_internal_note: boolean
   created_at: string
 }
+
+/** "HH:MM" 24h strings; a day maps to one open range, or null when closed. */
+export interface DayHours {
+  open: string
+  close: string
+}
+
+export type BusinessDay = 'sun' | 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat'
+
+/**
+ * Weekly business-hours schedule. `null`/absent workspace value = always
+ * available (presence alone decides, today's behavior).
+ */
+export type BusinessHours = Partial<Record<BusinessDay, DayHours | null>>

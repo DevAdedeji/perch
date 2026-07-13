@@ -14,6 +14,8 @@ interface SessionResponse {
   agent: { name: string } | null
   visitor: { name: string | null, email: string | null }
   business_online: boolean
+  within_hours: boolean
+  away_label: string | null
   conversation_id: string | null
   agent_last_read_at: string | null
   messages: MessageDTO[]
@@ -30,6 +32,9 @@ export function useWidget(siteId: string) {
   const workspace = ref<WidgetWorkspace | null>(null)
   const agentName = ref<string | null>(null)
   const businessOnline = ref(false)
+  // business-hours schedule state (fixed per session; refreshed on reconnect)
+  const withinHours = ref(true)
+  const awayLabel = ref<string | null>(null)
   const conversationId = ref<string | null>(null)
   const messages = ref<Array<MessageDTO & { pending?: boolean, failed?: boolean }>>([])
   const status = ref<'loading' | 'ready' | 'error'>('loading')
@@ -70,6 +75,8 @@ export function useWidget(siteId: string) {
     workspace.value = res.workspace
     agentName.value = res.agent?.name ?? null
     businessOnline.value = res.business_online
+    withinHours.value = res.within_hours ?? true
+    awayLabel.value = res.away_label ?? null
     conversationId.value = res.conversation_id
     messages.value = res.messages
     visitorName.value = res.visitor.name
@@ -176,7 +183,8 @@ export function useWidget(siteId: string) {
         if (ev.payload.id === conversationId.value) refreshAgent()
         break
       case 'business.presence':
-        businessOnline.value = ev.payload.online
+        // outside scheduled hours the business is away no matter who's online
+        businessOnline.value = ev.payload.online && withinHours.value
         break
       case 'conversation.read':
         if (ev.payload.conversation_id === conversationId.value) {
@@ -355,9 +363,11 @@ export function useWidget(siteId: string) {
     return performSend(tempId).catch(() => {})
   }
 
-  function sendTyping(isTyping: boolean) {
+  function sendTyping(isTyping: boolean, preview?: string) {
     if (!conversationId.value) return
-    send({ type: isTyping ? 'typing.start' : 'typing.stop', payload: { conversation_id: conversationId.value } })
+    send(isTyping
+      ? { type: 'typing.start', payload: { conversation_id: conversationId.value, preview: preview?.slice(0, 500) } }
+      : { type: 'typing.stop', payload: { conversation_id: conversationId.value } })
   }
 
   function stop() {
@@ -373,6 +383,7 @@ export function useWidget(siteId: string) {
     agentReadAt,
     agentName,
     businessOnline,
+    awayLabel,
     conversationId,
     messages,
     status,

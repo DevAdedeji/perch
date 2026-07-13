@@ -18,7 +18,7 @@ import {
   uniqueIndex,
   uuid
 } from 'drizzle-orm/pg-core'
-import type { VisitorMetadata } from '@perch/shared'
+import type { BusinessHours, VisitorMetadata } from '@perch/shared'
 
 /* ── Enums (mirror @perch/shared) ───────────────────────────────── */
 
@@ -55,6 +55,10 @@ export const workspaces = pgTable('workspaces', {
   identityVerificationEnabled: boolean('identity_verification_enabled').default(false).notNull(),
   // hostnames allowed to embed the widget; empty = any site (see isDomainAllowed)
   allowedDomains: text('allowed_domains').array().default([]).notNull(),
+  // weekly schedule ("mon": {open,close} | null); NULL column = always available
+  businessHours: jsonb('business_hours').$type<BusinessHours>(),
+  // IANA timezone the schedule is evaluated in (required when hours are set)
+  timezone: text('timezone'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull()
 })
 
