@@ -37,6 +37,7 @@ async function load() {
   try {
     workspace.value = await $fetch<WorkspaceDetail>(`/api/workspaces/${wid.value}`)
     loadAudit()
+    loadWebhooks()
   } finally {
     loading.value = false
   }
@@ -135,6 +136,145 @@ async function rotateIdentitySecret() {
   }
 }
 
+/* ── outbound webhooks ── */
+interface WebhookRow {
+  id: string
+  url: string
+  secret_hint: string
+  events: string[]
+  enabled: boolean
+  created_at: string
+}
+
+interface DeliveryRow {
+  id: string
+  event: string
+  ok: boolean
+  http_status: number | null
+  duration_ms: number
+  attempt: number
+  error: string | null
+  created_at: string
+}
+
+const WEBHOOK_EVENT_OPTIONS = [
+  { value: 'conversation.created', label: 'conversation.created', hint: 'a new conversation started' },
+  { value: 'message.created', label: 'message.created', hint: 'a message was sent (notes excluded)' },
+  { value: 'conversation.resolved', label: 'conversation.resolved', hint: 'a conversation was resolved' }
+]
+
+const webhooks = ref<WebhookRow[]>([])
+const webhookUrl = ref('')
+const webhookEvents = ref<string[]>(['conversation.created'])
+const webhookSaving = ref(false)
+// the full secret is shown exactly once, right after creation
+const newSecret = ref<string | null>(null)
+const expandedWebhook = ref<string | null>(null)
+const deliveries = ref<DeliveryRow[]>([])
+const deliveriesLoading = ref(false)
+const testingWebhook = ref<string | null>(null)
+
+async function loadWebhooks() {
+  if (!wid.value || !isAdmin.value) return
+  try {
+    webhooks.value = await $fetch<WebhookRow[]>(`/api/workspaces/${wid.value}/webhooks`)
+  } catch {
+    // section renders empty; the rest of the page still works
+  }
+}
+
+function toggleEvent(name: string) {
+  webhookEvents.value = webhookEvents.value.includes(name)
+    ? webhookEvents.value.filter(e => e !== name)
+    : [...webhookEvents.value, name]
+}
+
+async function addWebhook() {
+  const url = webhookUrl.value.trim()
+  if (!url || !webhookEvents.value.length || webhookSaving.value) return
+  webhookSaving.value = true
+  try {
+    const row = await $fetch<WebhookRow & { secret: string }>(`/api/workspaces/${wid.value}/webhooks`, {
+      method: 'POST',
+      body: { url, events: webhookEvents.value }
+    })
+    webhooks.value = [{ ...row, secret_hint: `whsec_…${row.secret.slice(-4)}` }, ...webhooks.value]
+    newSecret.value = row.secret
+    webhookUrl.value = ''
+    webhookEvents.value = ['conversation.created']
+    loadAudit()
+  } catch (e) {
+    toast.add({ title: getErrorMessage(e, 'Could not add the webhook'), color: 'error' })
+  } finally {
+    webhookSaving.value = false
+  }
+}
+
+async function toggleWebhook(w: WebhookRow, enabled: boolean) {
+  const prev = w.enabled
+  w.enabled = enabled // optimistic
+  try {
+    await $fetch(`/api/workspaces/${wid.value}/webhooks/${w.id}`, {
+      method: 'PATCH',
+      body: { enabled }
+    })
+    loadAudit()
+  } catch (e) {
+    w.enabled = prev
+    toast.add({ title: getErrorMessage(e, 'Could not update the webhook'), color: 'error' })
+  }
+}
+
+async function removeWebhook(w: WebhookRow) {
+  try {
+    await $fetch(`/api/workspaces/${wid.value}/webhooks/${w.id}`, { method: 'DELETE' })
+    webhooks.value = webhooks.value.filter(x => x.id !== w.id)
+    if (expandedWebhook.value === w.id) expandedWebhook.value = null
+    loadAudit()
+  } catch (e) {
+    toast.add({ title: getErrorMessage(e, 'Could not delete'), color: 'error' })
+  }
+}
+
+async function toggleDeliveries(w: WebhookRow) {
+  if (expandedWebhook.value === w.id) {
+    expandedWebhook.value = null
+    return
+  }
+  expandedWebhook.value = w.id
+  deliveries.value = []
+  deliveriesLoading.value = true
+  try {
+    const res = await $fetch<{ deliveries: DeliveryRow[] }>(`/api/workspaces/${wid.value}/webhooks/${w.id}/deliveries`)
+    deliveries.value = res.deliveries
+  } catch {
+    // list stays empty
+  } finally {
+    deliveriesLoading.value = false
+  }
+}
+
+async function sendTestWebhook(w: WebhookRow) {
+  testingWebhook.value = w.id
+  try {
+    const res = await $fetch<{ ok: boolean, http_status: number | null, duration_ms: number, error: string | null }>(
+      `/api/workspaces/${wid.value}/webhooks/${w.id}/test`,
+      { method: 'POST' }
+    )
+    toast.add(res.ok
+      ? { title: `Delivered — HTTP ${res.http_status} in ${res.duration_ms}ms`, icon: 'i-lucide-check', color: 'success' }
+      : { title: `Failed${res.http_status ? ` — HTTP ${res.http_status}` : ''}`, description: res.error ?? undefined, color: 'error' })
+    if (expandedWebhook.value === w.id) {
+      expandedWebhook.value = null
+      toggleDeliveries(w)
+    }
+  } catch (e) {
+    toast.add({ title: getErrorMessage(e, 'Test failed'), color: 'error' })
+  } finally {
+    testingWebhook.value = null
+  }
+}
+
 /* ── audit log ── */
 interface AuditRow {
   id: string
@@ -153,7 +293,13 @@ const AUDIT_LABELS: Record<string, string> = {
   'member.removed': 'removed a member',
   'member.joined': 'joined the workspace',
   'invite.sent': 'sent invites',
-  'identity_secret.rotated': 'rotated the identity secret'
+  'identity_secret.rotated': 'rotated the identity secret',
+  'trigger.created': 'created a proactive trigger',
+  'trigger.updated': 'updated a proactive trigger',
+  'trigger.deleted': 'deleted a proactive trigger',
+  'webhook.created': 'added a webhook endpoint',
+  'webhook.updated': 'updated a webhook endpoint',
+  'webhook.deleted': 'deleted a webhook endpoint'
 }
 
 function auditLabel(row: AuditRow) {
@@ -168,6 +314,12 @@ function auditDetail(row: AuditRow) {
     case 'member.removed': return `${d.member} (${d.role})`
     case 'member.joined': return `as ${d.role}`
     case 'invite.sent': return (d.invites as { email: string }[] | undefined)?.map(i => i.email).join(', ') ?? ''
+    case 'trigger.created':
+    case 'trigger.updated':
+    case 'trigger.deleted': return (d.name as string | undefined) ?? ''
+    case 'webhook.created':
+    case 'webhook.updated':
+    case 'webhook.deleted': return (d.url as string | undefined) ?? ''
     default: return ''
   }
 }
@@ -397,6 +549,188 @@ async function deleteWorkspace() {
               </div>
             </template>
           </div>
+        </section>
+
+        <!-- Webhooks -->
+        <section class="rounded-2xl border-glow bg-elevated/30 p-5 sm:p-6">
+          <h2 class="font-display font-semibold text-highlighted">
+            Webhooks
+          </h2>
+          <p class="text-sm text-muted mt-0.5">
+            POST signed events to your own systems. Verify each request with the
+            <span class="font-mono text-xs">X-Perch-Signature</span> header
+            (HMAC-SHA256 of <span class="font-mono text-xs">t.body</span> with your endpoint secret).
+          </p>
+
+          <!-- secret shown once -->
+          <div
+            v-if="newSecret"
+            class="mt-4 rounded-xl ring-1 ring-amber-500/40 bg-amber-500/8 px-4 py-3"
+          >
+            <p class="text-xs font-medium text-amber-700 dark:text-amber-400">
+              Signing secret — copy it now, it won't be shown again
+            </p>
+            <div class="mt-1.5 flex items-center gap-2">
+              <code class="min-w-0 flex-1 truncate font-mono text-xs text-highlighted">{{ newSecret }}</code>
+              <UButton
+                size="xs"
+                color="neutral"
+                variant="ghost"
+                icon="i-lucide-copy"
+                @click="copy(newSecret, 'Secret copied')"
+              />
+              <UButton
+                size="xs"
+                color="neutral"
+                variant="ghost"
+                icon="i-lucide-x"
+                aria-label="Dismiss"
+                @click="newSecret = null"
+              />
+            </div>
+          </div>
+
+          <ul
+            v-if="webhooks.length"
+            class="mt-4 divide-y divide-default/60 rounded-xl ring-1 ring-default overflow-hidden"
+          >
+            <li
+              v-for="w in webhooks"
+              :key="w.id"
+              class="bg-default"
+              :class="{ 'opacity-60': !w.enabled }"
+            >
+              <div class="group flex items-center gap-3 px-3.5 py-2.5">
+                <div class="min-w-0 flex-1">
+                  <p class="text-sm font-mono text-highlighted truncate">
+                    {{ w.url }}
+                  </p>
+                  <p class="text-xs text-dimmed mt-0.5 truncate">
+                    {{ w.events.join(' · ') }} <span class="ml-1">{{ w.secret_hint }}</span>
+                  </p>
+                </div>
+                <UButton
+                  size="xs"
+                  color="neutral"
+                  variant="ghost"
+                  icon="i-lucide-flask-conical"
+                  :loading="testingWebhook === w.id"
+                  @click="sendTestWebhook(w)"
+                >
+                  Test
+                </UButton>
+                <UButton
+                  size="xs"
+                  color="neutral"
+                  variant="ghost"
+                  :icon="expandedWebhook === w.id ? 'i-lucide-chevron-up' : 'i-lucide-history'"
+                  aria-label="Recent deliveries"
+                  @click="toggleDeliveries(w)"
+                />
+                <USwitch
+                  :model-value="w.enabled"
+                  :aria-label="w.enabled ? 'Disable webhook' : 'Enable webhook'"
+                  @update:model-value="(v: boolean) => toggleWebhook(w, v)"
+                />
+                <UButton
+                  class="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
+                  size="xs"
+                  color="error"
+                  variant="ghost"
+                  icon="i-lucide-trash-2"
+                  aria-label="Delete webhook"
+                  @click="removeWebhook(w)"
+                />
+              </div>
+
+              <!-- recent deliveries -->
+              <div
+                v-if="expandedWebhook === w.id"
+                class="border-t border-default/60 bg-elevated/30 px-3.5 py-2.5"
+              >
+                <p
+                  v-if="deliveriesLoading"
+                  class="text-xs text-dimmed"
+                >
+                  Loading deliveries…
+                </p>
+                <p
+                  v-else-if="!deliveries.length"
+                  class="text-xs text-dimmed"
+                >
+                  No deliveries yet — send a test or wait for the first event.
+                </p>
+                <ul
+                  v-else
+                  class="space-y-1"
+                >
+                  <li
+                    v-for="d in deliveries"
+                    :key="d.id"
+                    class="flex items-center gap-2 text-xs"
+                  >
+                    <span
+                      class="size-1.5 shrink-0 rounded-full"
+                      :class="d.ok ? 'bg-green-500' : 'bg-red-500'"
+                    />
+                    <span class="font-mono text-muted">{{ d.event }}</span>
+                    <span class="text-dimmed">{{ d.http_status ?? '—' }} · {{ d.duration_ms }}ms<template v-if="d.attempt > 1"> · try {{ d.attempt }}</template></span>
+                    <span
+                      v-if="d.error"
+                      class="min-w-0 truncate text-red-500/80"
+                      :title="d.error"
+                    >{{ d.error }}</span>
+                    <span class="ml-auto shrink-0 text-dimmed">{{ auditWhen(d.created_at) }}</span>
+                  </li>
+                </ul>
+              </div>
+            </li>
+          </ul>
+          <p
+            v-else
+            class="mt-4 rounded-xl ring-1 ring-default bg-default px-4 py-3 text-xs text-dimmed"
+          >
+            No webhooks yet — add an endpoint below to stream events into your own tools.
+          </p>
+
+          <form
+            class="mt-4 space-y-2.5"
+            @submit.prevent="addWebhook"
+          >
+            <div class="flex gap-2">
+              <UInput
+                v-model="webhookUrl"
+                placeholder="https://example.com/hooks/perch"
+                size="lg"
+                class="flex-1 font-mono"
+                type="url"
+              />
+              <UButton
+                type="submit"
+                color="primary"
+                size="lg"
+                icon="i-lucide-plus"
+                :loading="webhookSaving"
+                :disabled="!webhookUrl.trim() || !webhookEvents.length"
+              >
+                Add
+              </UButton>
+            </div>
+            <div class="flex flex-wrap gap-x-4 gap-y-1.5">
+              <label
+                v-for="opt in WEBHOOK_EVENT_OPTIONS"
+                :key="opt.value"
+                class="flex items-center gap-1.5 cursor-pointer select-none"
+                :title="opt.hint"
+              >
+                <UCheckbox
+                  :model-value="webhookEvents.includes(opt.value)"
+                  @update:model-value="() => toggleEvent(opt.value)"
+                />
+                <span class="font-mono text-xs text-muted">{{ opt.label }}</span>
+              </label>
+            </div>
+          </form>
         </section>
 
         <!-- Audit log -->

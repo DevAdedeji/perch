@@ -348,8 +348,16 @@ function onParentMessage(e: MessageEvent) {
   } else if (data.perch === 'identify') {
     // the host site told us who its signed-in user is — skip pre-chat
     widget.identify({ user_id: data.user_id, name: data.name, email: data.email, hash: data.hash })
+  } else if (data.perch === 'page') {
+    // the loader reporting the host page (SPA-aware) — for the live roster
+    if (typeof data.url === 'string') widget.updatePage(data.url)
   }
 }
+
+// a proactive trigger fired — ask the loader to open the panel
+watch(widget.openRequested, () => {
+  if (!isOpen.value) post({ perch: 'open' })
+})
 
 onMounted(async () => {
   window.addEventListener('message', onParentMessage)

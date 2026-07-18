@@ -56,6 +56,13 @@ export function useWidget(siteId: string) {
   const visitorIdRef = ref('')
   let ticket = ''
   let presenceChan = ''
+  // the host page we're embedded on (loader-reported; referrer until then)
+  let currentPage = ''
+  // a proactive trigger fired and hasn't been answered yet — the first reply
+  // carries this id so the server can thread the trigger text into the convo
+  let pendingTriggerId: string | null = null
+  // bumped when the widget wants the loader to open the panel (trigger fired)
+  const openRequested = ref(0)
   let socket: WebSocket | null = null
   let alive = true
   let reconnectTimer: ReturnType<typeof setTimeout> | undefined
@@ -116,6 +123,10 @@ export function useWidget(siteId: string) {
     ws.onopen = () => {
       if (presenceChan) send({ type: 'subscribe', channel: presenceChan })
       if (conversationId.value) send({ type: 'subscribe', channel: channels.conversation(conversationId.value) })
+      // report the host page for the live roster (re-sent on every connect —
+      // the server registry is rebuilt per socket)
+      const page = currentPage || document.referrer
+      if (page) send({ type: 'visitor.page', payload: { page_url: page } })
 
       lastActivity = Date.now()
       clearInterval(pingTimer)
@@ -206,7 +217,47 @@ export function useWidget(siteId: string) {
           agentReadAt.value = ev.payload.last_read_at
         }
         break
+      case 'conversation.started':
+        // an agent reached out first (live roster) — adopt the new thread
+        if (ev.payload.conversation.id !== conversationId.value) {
+          conversationId.value = ev.payload.conversation.id
+          conversationStatus.value = 'open'
+          subscribeConversation()
+          if (!messages.value.some(m => m.id === ev.payload.message.id)) {
+            messages.value.push(ev.payload.message)
+          }
+          refreshAgent()
+        }
+        break
+      case 'trigger.fire': {
+        // proactive trigger — show an ephemeral bubble (never persisted; the
+        // server threads the real text in if the visitor replies) + auto-open
+        const localId = `trigger:${ev.payload.trigger_id}`
+        if (!messages.value.some(m => m.id === localId)) {
+          messages.value.push({
+            id: localId,
+            conversation_id: conversationId.value ?? 'pending',
+            sender_type: 'agent',
+            sender_id: null,
+            content: ev.payload.message,
+            attachment_url: null,
+            attachment_type: null,
+            is_internal_note: false,
+            created_at: new Date().toISOString()
+          })
+          pendingTriggerId = ev.payload.trigger_id
+          openRequested.value++
+        }
+        break
+      }
     }
+  }
+
+  /** Loader-reported host page (SPA-aware) — relayed to the live roster. */
+  function updatePage(url: string) {
+    if (!url || url === currentPage) return
+    currentPage = url
+    send({ type: 'visitor.page', payload: { page_url: url } })
   }
 
   /* ── host-site identity (Perch.identify) ─────────────── */
@@ -317,6 +368,8 @@ export function useWidget(siteId: string) {
       }
 
       await queuePost(async () => {
+        // a pending trigger threads its message into the newly-created convo
+        const triggerId = !conversationId.value && pendingTriggerId ? pendingTriggerId : undefined
         const res = await $fetch<{ conversation_id: string, message: MessageDTO }>('/api/widget/messages', {
           method: 'POST',
           body: {
@@ -325,10 +378,12 @@ export function useWidget(siteId: string) {
             content: temp.content,
             attachment_url: temp.attachment_url ?? undefined,
             attachment_type: temp.attachment_type ?? undefined,
-            page_url: document.referrer,
+            page_url: currentPage || document.referrer,
+            trigger_id: triggerId,
             ...identity
           }
         })
+        if (triggerId) pendingTriggerId = null
         if (!conversationId.value) {
           conversationId.value = res.conversation_id
           subscribeConversation()
@@ -431,6 +486,8 @@ export function useWidget(siteId: string) {
     start,
     stop,
     identify,
+    updatePage,
+    openRequested,
     sendMessage,
     sendAttachment,
     retrySend,

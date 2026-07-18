@@ -264,6 +264,69 @@ export const cannedResponses = pgTable('canned_responses', {
   uniqueIndex('canned_responses_workspace_shortcut_uq').on(t.workspaceId, t.shortcut)
 ])
 
+/**
+ * Proactive trigger rules ("on /pricing for 30s → open the widget with a
+ * message"). Evaluated server-side against the live visitor presence registry.
+ */
+export const triggers = pgTable('triggers', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  // case-insensitive substring matched against the visitor's page URL; '' = every page
+  urlMatch: text('url_match').default('').notNull(),
+  dwellSeconds: integer('dwell_seconds').notNull(),
+  message: text('message').notNull(),
+  enabled: boolean('enabled').default(true).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull()
+}, t => [
+  index('triggers_workspace_idx').on(t.workspaceId)
+])
+
+/**
+ * One row per (trigger, visitor) fire — the unique index IS the
+ * "fires at most once per visitor per rule" guarantee (§6.4-style atomic guard).
+ */
+export const triggerFires = pgTable('trigger_fires', {
+  triggerId: uuid('trigger_id').notNull().references(() => triggers.id, { onDelete: 'cascade' }),
+  visitorRef: uuid('visitor_ref').notNull().references(() => visitors.id, { onDelete: 'cascade' }),
+  firedAt: timestamp('fired_at', { withTimezone: true }).defaultNow().notNull()
+}, t => [
+  uniqueIndex('trigger_fires_uq').on(t.triggerId, t.visitorRef),
+  index('trigger_fires_visitor_idx').on(t.visitorRef)
+])
+
+/**
+ * Outbound webhook endpoints: HMAC-signed POSTs on conversation/message events.
+ * The secret is shown in full once at creation, masked afterwards.
+ */
+export const webhookEndpoints = pgTable('webhook_endpoints', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  url: text('url').notNull(),
+  secret: text('secret').notNull(),
+  // subscribed event names ('conversation.created', 'message.created', …)
+  events: text('events').array().default([]).notNull(),
+  enabled: boolean('enabled').default(true).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull()
+}, t => [
+  index('webhook_endpoints_workspace_idx').on(t.workspaceId)
+])
+
+/** Recent delivery attempts per endpoint (capped — pruned on insert). */
+export const webhookDeliveries = pgTable('webhook_deliveries', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  endpointId: uuid('endpoint_id').notNull().references(() => webhookEndpoints.id, { onDelete: 'cascade' }),
+  event: text('event').notNull(),
+  ok: boolean('ok').notNull(),
+  httpStatus: integer('http_status'),
+  durationMs: integer('duration_ms').notNull(),
+  attempt: integer('attempt').notNull(),
+  error: text('error'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull()
+}, t => [
+  index('webhook_deliveries_endpoint_recency_idx').on(t.endpointId, t.createdAt)
+])
+
 /* ── Inferred row types ─────────────────────────────────────────── */
 
 export type User = typeof users.$inferSelect
@@ -288,3 +351,9 @@ export type PasswordResetToken = typeof passwordResetTokens.$inferSelect
 export type NewPasswordResetToken = typeof passwordResetTokens.$inferInsert
 export type EmailVerificationToken = typeof emailVerificationTokens.$inferSelect
 export type NewEmailVerificationToken = typeof emailVerificationTokens.$inferInsert
+export type Trigger = typeof triggers.$inferSelect
+export type NewTrigger = typeof triggers.$inferInsert
+export type WebhookEndpoint = typeof webhookEndpoints.$inferSelect
+export type NewWebhookEndpoint = typeof webhookEndpoints.$inferInsert
+export type WebhookDelivery = typeof webhookDeliveries.$inferSelect
+export type NewWebhookDelivery = typeof webhookDeliveries.$inferInsert

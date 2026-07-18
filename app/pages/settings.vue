@@ -214,6 +214,81 @@ async function removeCanned(c: Canned) {
   }
 }
 
+/* ── proactive triggers ───────────────────────── */
+interface TriggerRule {
+  id: string
+  name: string
+  url_match: string
+  dwell_seconds: number
+  message: string
+  enabled: boolean
+}
+
+const triggerRules = ref<TriggerRule[]>([])
+const trigName = ref('')
+const trigUrl = ref('')
+const trigDwell = ref<number>(30)
+const trigMessage = ref('')
+const trigSaving = ref(false)
+
+async function loadTriggers() {
+  if (!wid.value) return
+  triggerRules.value = await $fetch<TriggerRule[]>(`/api/workspaces/${wid.value}/triggers`)
+}
+onMounted(loadTriggers)
+watch(wid, loadTriggers)
+
+async function addTrigger() {
+  const name = trigName.value.trim()
+  const message = trigMessage.value.trim()
+  if (!name || !message || trigSaving.value) return
+  trigSaving.value = true
+  try {
+    const row = await $fetch<TriggerRule>(`/api/workspaces/${wid.value}/triggers`, {
+      method: 'POST',
+      body: {
+        name,
+        url_match: trigUrl.value.trim(),
+        dwell_seconds: Math.max(3, Math.round(Number(trigDwell.value) || 30)),
+        message
+      }
+    })
+    triggerRules.value = [row, ...triggerRules.value]
+    trigName.value = ''
+    trigUrl.value = ''
+    trigDwell.value = 30
+    trigMessage.value = ''
+    toast.add({ title: `“${row.name}” is live`, icon: 'i-lucide-check', color: 'success' })
+  } catch (e) {
+    toast.add({ title: getErrorMessage(e, 'Could not save the trigger'), color: 'error' })
+  } finally {
+    trigSaving.value = false
+  }
+}
+
+async function toggleTrigger(t: TriggerRule, enabled: boolean) {
+  const prev = t.enabled
+  t.enabled = enabled // optimistic
+  try {
+    await $fetch(`/api/workspaces/${wid.value}/triggers/${t.id}`, {
+      method: 'PATCH',
+      body: { enabled }
+    })
+  } catch (e) {
+    t.enabled = prev
+    toast.add({ title: getErrorMessage(e, 'Could not update the trigger'), color: 'error' })
+  }
+}
+
+async function removeTrigger(t: TriggerRule) {
+  try {
+    await $fetch(`/api/workspaces/${wid.value}/triggers/${t.id}`, { method: 'DELETE' })
+    triggerRules.value = triggerRules.value.filter(x => x.id !== t.id)
+  } catch (e) {
+    toast.add({ title: getErrorMessage(e, 'Could not delete'), color: 'error' })
+  }
+}
+
 /* -- logo --------------------------------------- */
 const { uploading: logoUploading, uploadImage } = useImageUpload()
 const logoEl = ref<HTMLInputElement | null>(null)
@@ -537,6 +612,121 @@ async function removeLogo() {
                 icon="i-lucide-plus"
                 :loading="cannedSaving"
                 :disabled="!cannedShortcut.trim() || !cannedContent.trim()"
+              >
+                Add
+              </UButton>
+            </div>
+          </form>
+        </section>
+
+        <!-- Proactive triggers -->
+        <section class="rounded-2xl border-glow bg-elevated/30 p-5 sm:p-6">
+          <h2 class="font-display font-semibold text-highlighted">
+            Proactive triggers
+          </h2>
+          <p class="text-sm text-muted mt-0.5">
+            Reach out first — auto-open the widget with a message when a visitor
+            lingers on a page. Each rule fires at most once per visitor.
+          </p>
+
+          <ul
+            v-if="triggerRules.length"
+            class="mt-4 divide-y divide-default/60 rounded-xl ring-1 ring-default overflow-hidden"
+          >
+            <li
+              v-for="t in triggerRules"
+              :key="t.id"
+              class="group flex items-start gap-3 px-3.5 py-2.5 bg-default"
+              :class="{ 'opacity-60': !t.enabled }"
+            >
+              <div class="min-w-0 flex-1">
+                <p class="text-sm font-medium text-highlighted truncate">
+                  {{ t.name }}
+                </p>
+                <p class="text-xs text-dimmed mt-0.5">
+                  <span
+                    v-if="t.url_match"
+                    class="font-mono"
+                  >URL contains “{{ t.url_match }}”</span>
+                  <span v-else>any page</span>
+                  · after {{ t.dwell_seconds }}s
+                </p>
+                <p class="text-xs text-muted mt-1 line-clamp-2">
+                  “{{ t.message }}”
+                </p>
+              </div>
+              <USwitch
+                :model-value="t.enabled"
+                :disabled="!isAdmin"
+                :aria-label="t.enabled ? 'Disable trigger' : 'Enable trigger'"
+                @update:model-value="(v: boolean) => toggleTrigger(t, v)"
+              />
+              <UButton
+                v-if="isAdmin"
+                class="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
+                size="xs"
+                color="error"
+                variant="ghost"
+                icon="i-lucide-trash-2"
+                :aria-label="`Delete ${t.name}`"
+                @click="removeTrigger(t)"
+              />
+            </li>
+          </ul>
+          <p
+            v-else
+            class="mt-4 rounded-xl ring-1 ring-default bg-default px-4 py-3 text-xs text-dimmed"
+          >
+            No triggers yet. Try: URL contains <span class="font-mono">/pricing</span>,
+            30 seconds, “Questions about plans? I'm right here.”
+          </p>
+
+          <form
+            v-if="isAdmin"
+            class="mt-4 space-y-2"
+            @submit.prevent="addTrigger"
+          >
+            <div class="flex gap-2">
+              <UInput
+                v-model="trigName"
+                placeholder="Name (e.g. Pricing nudge)"
+                size="lg"
+                class="w-52"
+              />
+              <UInput
+                v-model="trigUrl"
+                placeholder="URL contains… (empty = any page)"
+                size="lg"
+                class="flex-1 font-mono"
+              />
+              <UInput
+                v-model.number="trigDwell"
+                type="number"
+                :min="3"
+                :max="3600"
+                size="lg"
+                class="w-24"
+                aria-label="Seconds on page before firing"
+              >
+                <template #trailing>
+                  <span class="text-xs text-dimmed">s</span>
+                </template>
+              </UInput>
+            </div>
+            <div class="flex gap-2">
+              <UInput
+                v-model="trigMessage"
+                placeholder="The message that pops up…"
+                size="lg"
+                class="flex-1"
+              />
+              <UButton
+                type="submit"
+                color="primary"
+                size="lg"
+                icon="i-lucide-plus"
+                :loading="trigSaving"
+                :disabled="!trigName.trim() || !trigMessage.trim()"
               >
                 Add
               </UButton>

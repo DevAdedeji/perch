@@ -1,4 +1,4 @@
-import { and, conversations, eq, workspaceMembers } from '@perch/db'
+import { and, conversations, eq, visitors, workspaceMembers } from '@perch/db'
 import type { WorkspaceMember } from '@perch/db'
 import { channels } from '@perch/shared'
 
@@ -54,6 +54,9 @@ async function handleSubscribe(peer: import('crossws').Peer, channel: unknown) {
       }
     } else if (kind === 'conversation') {
       allowed = await agentCanAccessConversation(ctx.userId as string, id)
+    } else if (kind === 'visitors') {
+      // live-roster deltas — any member of the workspace may watch
+      allowed = !!(await getMember(ctx.userId as string, id))
     }
   } else if (ctx.role === 'visitor') {
     if (kind === 'conversation') allowed = await visitorCanAccessConversation(ctx.wid as string, ctx.vid as string, id)
@@ -86,6 +89,23 @@ export default defineWebSocketHandler({
       peer.context.role = 'visitor'
       peer.context.wid = subject.wid
       peer.context.vid = subject.vid
+      // register on the roster SYNCHRONOUSLY — the widget's first
+      // `visitor.page` can arrive before an awaited DB fetch resolves, and it
+      // must not find an unregistered visitor. wid/vid come from the signed
+      // ticket, so registration needs no lookup; the identity snapshot
+      // backfills async (and re-announces as an upsert).
+      visitorConnected(subject.wid, subject.vid, peer, { name: null, email: null, verified: false })
+      useDb().query.visitors.findFirst({ where: eq(visitors.id, subject.vid) })
+        .then((visitor) => {
+          if (visitor && visitor.workspaceId === subject.wid && (visitor.name || visitor.email || visitor.identityVerified)) {
+            visitorIdentified(subject.wid, subject.vid, {
+              name: visitor.name,
+              email: visitor.email,
+              verified: visitor.identityVerified
+            })
+          }
+        })
+        .catch(() => {})
     }
     peer.send(JSON.stringify({ type: 'connected' }))
   },
@@ -126,6 +146,14 @@ export default defineWebSocketHandler({
           agentSetAway(ctx.wid as string, ctx.memberId as string, msg.payload?.presence === 'away')
         }
         break
+      case 'visitor.page': {
+        // the widget reporting the host page it's on (roster + trigger dwell)
+        const pageUrl = (msg.payload as { page_url?: unknown } | undefined)?.page_url
+        if (ctx.role === 'visitor' && typeof pageUrl === 'string' && pageUrl) {
+          visitorPageUpdate(ctx.wid as string, ctx.vid as string, pageUrl.slice(0, 2000))
+        }
+        break
+      }
       case 'typing.start':
       case 'typing.stop': {
         const conversationId = msg.payload?.conversation_id
@@ -152,11 +180,13 @@ export default defineWebSocketHandler({
 
   close(peer) {
     presencePeerGone(peer)
+    visitorPeerGone(peer)
     unsubscribeAll(peer)
   },
 
   error(peer) {
     presencePeerGone(peer)
+    visitorPeerGone(peer)
     unsubscribeAll(peer)
   }
 })
