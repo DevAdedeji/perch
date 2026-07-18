@@ -134,6 +134,32 @@ function init() {
     }
   }
 
+  // ── host page tracking ──
+  // The iframe can't see SPA route changes (document.referrer is frozen at
+  // load), so the loader reports location.href — on frame ready and on every
+  // history change — for the live roster + proactive triggers.
+  let lastPage = ''
+
+  function sendPage() {
+    if (location.href === lastPage) return
+    lastPage = location.href
+    iframe?.contentWindow?.postMessage({ source: 'perch-host', perch: 'page', url: location.href }, '*')
+  }
+
+  function trackNavigation() {
+    const wrap = (method: 'pushState' | 'replaceState') => {
+      const original = history[method].bind(history)
+      history[method] = (...args: Parameters<History['pushState']>) => {
+        original(...args)
+        sendPage()
+      }
+    }
+    wrap('pushState')
+    wrap('replaceState')
+    window.addEventListener('popstate', sendPage)
+    window.addEventListener('hashchange', sendPage)
+  }
+
   const api: PerchApi = {
     identify(traits) {
       if (!traits || typeof traits !== 'object') return
@@ -169,10 +195,15 @@ function init() {
       }
     } else if (d.perch === 'close') {
       setOpen(false)
+    } else if (d.perch === 'open') {
+      // the widget asked to open itself (proactive trigger fired)
+      setOpen(true)
     } else if (d.perch === 'ready') {
-      // frame (re)mounted — resync open state + identity in case a message was missed
+      // frame (re)mounted — resync open state + identity + page in case a message was missed
       iframe?.contentWindow?.postMessage({ source: 'perch-host', perch: open ? 'open' : 'close' }, '*')
       sendIdentity()
+      lastPage = ''
+      sendPage()
     } else if (d.perch === 'config') {
       // adopt the workspace's brand color on the launcher
       if (typeof d.color === 'string' && HEX.test(d.color)) {
@@ -184,6 +215,7 @@ function init() {
 
   document.body.appendChild(bubble)
   ensureIframe()
+  trackNavigation()
 }
 
 if (document.readyState === 'loading') {

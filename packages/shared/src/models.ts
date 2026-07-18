@@ -76,6 +76,24 @@ export interface MessageDTO {
   created_at: string
 }
 
+/**
+ * A visitor currently connected via the widget — served from the in-memory
+ * visitor-presence registry (never the DB), so timestamps are epoch millis.
+ */
+export interface LiveVisitorDTO {
+  /** visitors.id (the DB row uuid — what conversations reference) */
+  visitor_ref: string
+  name: string | null
+  email: string | null
+  identity_verified: boolean
+  /** the host page they're on right now; null until the first page report */
+  page_url: string | null
+  /** epoch ms they landed on the current page (dwell = now - page_since) */
+  page_since: number
+  /** epoch ms their first live socket connected */
+  connected_at: number
+}
+
 /** "HH:MM" 24h strings; a day maps to one open range, or null when closed. */
 export interface DayHours {
   open: string

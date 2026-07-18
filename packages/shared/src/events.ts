@@ -8,7 +8,7 @@
  */
 
 import type { ConversationStatus, Presence, SettablePresence } from './enums'
-import type { ConversationDTO, MessageDTO } from './models'
+import type { ConversationDTO, LiveVisitorDTO, MessageDTO } from './models'
 
 /* ── §6.1 Channels ──────────────────────────────────────────────── */
 
@@ -16,12 +16,15 @@ export const channels = {
   /** Inbox-level events for all online agents in a workspace. */
   workspace: (workspaceId: string) => `workspace:${workspaceId}` as const,
   /** Message stream + typing + read receipts for one conversation. */
-  conversation: (conversationId: string) => `conversation:${conversationId}` as const
+  conversation: (conversationId: string) => `conversation:${conversationId}` as const,
+  /** Live visitor roster deltas — agents only, subscribed by the /visitors page. */
+  visitors: (workspaceId: string) => `visitors:${workspaceId}` as const
 }
 
 export type WorkspaceChannel = ReturnType<typeof channels.workspace>
 export type ConversationChannel = ReturnType<typeof channels.conversation>
-export type Channel = WorkspaceChannel | ConversationChannel
+export type VisitorsChannel = ReturnType<typeof channels.visitors>
+export type Channel = WorkspaceChannel | ConversationChannel | VisitorsChannel
 
 /* ── §6.2 Client → Server ───────────────────────────────────────── */
 
@@ -53,8 +56,14 @@ export interface PresenceUpdatePayload {
   presence: SettablePresence
 }
 
+/** The widget reporting the host page it's embedded on (sent on connect + SPA nav). */
+export interface VisitorPagePayload {
+  page_url: string
+}
+
 /** Discriminated union of everything a client may send. */
 export type ClientEvent = | { type: 'visitor.hello', payload: VisitorHelloPayload }
+  | { type: 'visitor.page', payload: VisitorPagePayload }
   | { type: 'message.send', payload: MessageSendPayload }
   | { type: 'typing.start', payload: ConversationRefPayload & { preview?: string } }
   | { type: 'typing.stop', payload: ConversationRefPayload }
@@ -128,6 +137,29 @@ export interface ConversationReadReceiptPayload {
   last_read_at: string
 }
 
+export interface VisitorOfflinePayload {
+  visitor_ref: string
+}
+
+export interface VisitorPageChangedPayload {
+  visitor_ref: string
+  page_url: string
+  /** epoch ms they landed on this page */
+  page_since: number
+}
+
+/** A proactive trigger fired for this visitor — ephemeral, never persisted. */
+export interface TriggerFirePayload {
+  trigger_id: string
+  message: string
+}
+
+/** An agent started a conversation with this visitor (roster → widget). */
+export interface ConversationStartedPayload {
+  conversation: ConversationDTO
+  message: MessageDTO
+}
+
 /** Discriminated union of everything the server may broadcast. */
 export type ServerEvent = | { type: 'message.new', payload: MessageDTO }
   | { type: 'conversation.new', payload: ConversationDTO }
@@ -140,6 +172,11 @@ export type ServerEvent = | { type: 'message.new', payload: MessageDTO }
   | { type: 'conversation.read', payload: ConversationReadReceiptPayload }
   | { type: 'team.message', payload: TeamMessagePayload }
   | { type: 'mention', payload: MentionPayload }
+  | { type: 'visitor.online', payload: LiveVisitorDTO }
+  | { type: 'visitor.offline', payload: VisitorOfflinePayload }
+  | { type: 'visitor.page', payload: VisitorPageChangedPayload }
+  | { type: 'trigger.fire', payload: TriggerFirePayload }
+  | { type: 'conversation.started', payload: ConversationStartedPayload }
 
 export type ServerEventType = ServerEvent['type']
 

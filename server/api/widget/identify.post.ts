@@ -55,7 +55,7 @@ export default defineEventHandler(async (event) => {
   }
 
   const now = new Date()
-  await db.insert(visitors).values({
+  const [visitor] = await db.insert(visitors).values({
     workspaceId: workspace.id,
     visitorId: visitor_id,
     externalId: user_id ?? null,
@@ -73,7 +73,16 @@ export default defineEventHandler(async (event) => {
       ...(name ? { name } : {}),
       ...(email ? { email } : {})
     }
-  })
+  }).returning()
+
+  // keep the live roster's identity snapshot fresh
+  if (visitor) {
+    visitorIdentified(workspace.id, visitor.id, {
+      name: visitor.name,
+      email: visitor.email,
+      verified: visitor.identityVerified
+    })
+  }
 
   return { ok: true, verified }
 })

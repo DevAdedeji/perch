@@ -1,4 +1,4 @@
-import { and, conversations, desc, eq, messages, sql, visitors } from '@perch/db'
+import { and, conversations, desc, eq, messages, ne, sql, triggerFires, triggers, visitors } from '@perch/db'
 import type { Conversation, Message } from '@perch/db'
 import { channels } from '@perch/shared'
 import type { ConversationDTO, MessageDTO } from '@perch/shared'
@@ -44,6 +44,8 @@ interface IncomingVisitorMessage {
   attachmentUrl?: string | null
   attachmentType?: string | null
   pageUrl?: string
+  /** the proactive trigger this message answers — its text is threaded in as a system line */
+  triggerId?: string
 }
 
 /**
@@ -120,6 +122,29 @@ export async function ingestVisitorMessage(input: IncomingVisitorMessage) {
     }).returning()
     conversation = created!
     isNew = true
+
+    // a reply to a proactive trigger threads the trigger's text in first, as a
+    // system line — verified against trigger_fires so the id can't be spoofed
+    if (input.triggerId) {
+      const [rule, fire] = await Promise.all([
+        db.query.triggers.findFirst({
+          where: and(eq(triggers.id, input.triggerId), eq(triggers.workspaceId, input.workspaceId))
+        }),
+        db.query.triggerFires.findFirst({
+          where: and(eq(triggerFires.triggerId, input.triggerId), eq(triggerFires.visitorRef, visitor!.id))
+        })
+      ])
+      if (rule && fire) {
+        await db.insert(messages).values({
+          conversationId: conversation.id,
+          senderType: 'system',
+          content: rule.message,
+          // backdated so the trigger line always sorts above the reply
+          createdAt: new Date(now.getTime() - 1000)
+        })
+      }
+    }
+
     const [inserted] = await db.insert(messages).values({
       conversationId: conversation.id,
       senderType: 'visitor',
@@ -150,6 +175,15 @@ export async function ingestVisitorMessage(input: IncomingVisitorMessage) {
   // scope the inbox copy so agents don't receive chats assigned to someone else
   publishFiltered(wsChannel, msgEvent, inboxScope(conversation.assignedAgentId))
   publish(convChannel, msgEvent)
+
+  // outbound webhooks (fire-and-forget, after the committed writes)
+  if (isNew) {
+    dispatchWebhooks(input.workspaceId, 'conversation.created', {
+      conversation: serializeConversation(conversation),
+      visitor: { id: visitor!.id, name: visitor!.name, email: visitor!.email }
+    })
+  }
+  dispatchWebhooks(input.workspaceId, 'message.created', { message: serializeMessage(message) })
 
   return { visitor: visitor!, conversation, message }
 }
@@ -201,7 +235,89 @@ export async function addAgentMessage(input: AgentMessageInput) {
   // on the shared conversation channel, keep internal notes away from the visitor (§4)
   publish(channels.conversation(input.conversationId), event, { agentsOnly: message!.isInternalNote })
 
+  // internal notes never leave the building — not even as webhooks
+  if (!message!.isInternalNote) {
+    dispatchWebhooks(input.workspaceId, 'message.created', { message: serializeMessage(message!) })
+  }
+
   return message!
+}
+
+/* ── agent-initiated conversations (live roster outreach) ────────── */
+
+interface StartConversationInput {
+  workspaceId: string
+  visitorRef: string
+  memberId: string
+  content: string
+}
+
+/**
+ * An agent reaches out first (from the live visitor roster). Reuses the
+ * visitor's active thread when one exists (claiming it for the sender if
+ * unassigned); otherwise creates an `open` conversation pre-assigned to the
+ * sender. The visitor's live widget is told via `conversation.started`.
+ */
+export async function startAgentConversation(input: StartConversationInput) {
+  const db = useDb()
+  const now = new Date()
+
+  const existing = await db.query.conversations.findFirst({
+    where: and(eq(conversations.visitorRef, input.visitorRef), ne(conversations.status, 'resolved')),
+    orderBy: [desc(conversations.lastMessageAt)]
+  })
+
+  let conversation: Conversation
+  let message: Message
+  if (existing) {
+    // an active thread already exists — message into it (claim if unowned)
+    conversation = existing.assignedAgentId
+      ? existing
+      : (await assignConversation(existing.id, input.memberId)) ?? existing
+    message = await addAgentMessage({
+      conversationId: conversation.id,
+      workspaceId: input.workspaceId,
+      senderMemberId: input.memberId,
+      content: input.content
+    })
+  } else {
+    const [created] = await db.insert(conversations).values({
+      workspaceId: input.workspaceId,
+      visitorRef: input.visitorRef,
+      assignedAgentId: input.memberId,
+      status: 'open',
+      lastMessageAt: now
+    }).returning()
+    conversation = created!
+    const [inserted] = await db.insert(messages).values({
+      conversationId: conversation.id,
+      senderType: 'agent',
+      senderId: input.memberId,
+      content: input.content
+    }).returning()
+    message = inserted!
+
+    const msgEvent = { type: 'message.new' as const, payload: serializeMessage(message) }
+    publish(channels.workspace(input.workspaceId), { type: 'conversation.new', payload: serializeConversation(conversation) })
+    publishFiltered(channels.workspace(input.workspaceId), msgEvent, inboxScope(conversation.assignedAgentId))
+    publish(channels.conversation(conversation.id), msgEvent)
+
+    // webhooks (the existing-thread branch dispatches inside addAgentMessage)
+    const visitor = await db.query.visitors.findFirst({ where: eq(visitors.id, input.visitorRef) })
+    dispatchWebhooks(input.workspaceId, 'conversation.created', {
+      conversation: serializeConversation(conversation),
+      visitor: { id: input.visitorRef, name: visitor?.name ?? null, email: visitor?.email ?? null }
+    })
+    dispatchWebhooks(input.workspaceId, 'message.created', { message: serializeMessage(message) })
+  }
+
+  // tell the visitor's live widget to adopt the thread (no-op if they left)
+  sendToVisitor(input.workspaceId, input.visitorRef, {
+    type: 'conversation.started',
+    payload: { conversation: serializeConversation(conversation), message: serializeMessage(message) }
+  })
+
+  return { conversation, message }
 }
 
 /* ── assignment (§6.4 claim race) ────────────────────────────────── */
@@ -251,7 +367,14 @@ export async function setConversationStatus(conversationId: string, status: 'ope
     .set({ status, resolvedAt: status === 'resolved' ? new Date() : null, updatedAt: new Date() })
     .where(eq(conversations.id, conversationId))
     .returning()
-  if (conversation) publishConversationUpdate(conversation)
+  if (conversation) {
+    publishConversationUpdate(conversation)
+    if (status === 'resolved') {
+      dispatchWebhooks(conversation.workspaceId, 'conversation.resolved', {
+        conversation: serializeConversation(conversation)
+      })
+    }
+  }
   return conversation ?? null
 }
 
