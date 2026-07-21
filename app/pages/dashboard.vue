@@ -20,7 +20,7 @@ const filters: { label: string, value: InboxFilter }[] = [
 const reply = ref('')
 const internalNote = ref(false)
 
-/* ── inbox search (visitor name/email or message text) ── */
+/* inbox search (visitor name/email or message text) */
 interface SearchResult {
   id: string
   status: 'open' | 'unassigned' | 'resolved'
@@ -64,7 +64,7 @@ function openSearchResult(id: string) {
   cr.select(id, { force: true })
 }
 
-/* ── @mentions in internal notes ── */
+/* @mentions in internal notes */
 const mentionIndex = ref(0)
 // what the picker inserted → the member it stands for (validated again on send)
 const pickedMentions = new Map<string, string>()
@@ -128,7 +128,7 @@ function initials(name: string | null, fallback = 'V') {
   return (name ?? fallback).trim().split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase() || fallback
 }
 
-/* ── thread rows: grouping + day dividers (mirrors the widget) ── */
+/* thread rows: grouping + day dividers (mirrors the widget) */
 type ThreadMsg = MessageDTO & { pending?: boolean, failed?: boolean }
 interface MsgRow { kind: 'msg', m: ThreadMsg, first: boolean, last: boolean }
 interface NoteRow { kind: 'note', m: ThreadMsg }
@@ -230,7 +230,7 @@ watch(() => cr.loadingThread.value, (loading) => {
   }
 })
 
-/* ── canned responses: type "/" to search templates ── */
+/* canned responses: type "/" to search templates */
 const composerEl = ref<{ textareaRef?: HTMLTextAreaElement } | null>(null)
 const cannedDismissed = ref(false)
 const cannedIndex = ref(0)
@@ -301,7 +301,7 @@ function onComposerKeydown(e: KeyboardEvent) {
   }
 }
 
-/* ── actions ── */
+/* actions */
 async function onSend() {
   const text = reply.value.trim()
   if (!text) return
@@ -371,7 +371,7 @@ watch(pendingSelect, (id) => {
   }
 }, { immediate: true })
 
-/* ── conversation tagging ── */
+/* conversation tagging */
 const tagPickerOpen = ref(false)
 const tagInput = ref('')
 const addingTag = ref(false)
@@ -422,7 +422,7 @@ const statusBadge = {
 
 <template>
   <div class="flex h-full">
-    <!-- ── inbox list (full-width on mobile; hidden once a chat is open) ── -->
+    <!-- inbox list (full-width on mobile; hidden once a chat is open) -->
     <div
       class="w-full md:w-80 lg:w-88 shrink-0 flex-col border-r border-default bg-default"
       :class="cr.activeId.value ? 'hidden md:flex' : 'flex'"
@@ -681,7 +681,7 @@ const statusBadge = {
       </div>
     </div>
 
-    <!-- ── conversation pane (full-screen on mobile when a chat is open) ── -->
+    <!-- conversation pane (full-screen on mobile when a chat is open) -->
     <div
       class="flex-1 flex-col min-w-0 bg-elevated/10"
       :class="cr.activeId.value ? 'flex' : 'hidden md:flex'"

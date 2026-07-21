@@ -5,7 +5,7 @@ useHead({ title: 'Account · Perch' })
 const { user, refresh } = useAuth()
 const toast = useToast()
 
-/* ── profile name ── */
+/* profile name */
 const name = ref(user.value?.name ?? '')
 watch(user, (u) => {
   if (u && !name.value) name.value = u.name
@@ -27,7 +27,7 @@ async function saveName() {
   }
 }
 
-/* ── email verification / change ── */
+/* email verification / change */
 const resending = ref(false)
 async function resendVerification() {
   if (resending.value) return
@@ -70,7 +70,7 @@ async function changeEmail() {
   }
 }
 
-/* ── active sessions ── */
+/* active sessions */
 interface SessionRow {
   id: string
   user_agent: string | null
@@ -159,11 +159,11 @@ async function revokeOthers() {
   }
 }
 
-/* ── password change ── */
+/* password change */
 const passwordForm = reactive({ current: '', next: '', confirm: '' })
 const changingPassword = ref(false)
 
-/* ── danger zone: delete account ── */
+/* danger zone: delete account */
 const deleteAccountOpen = ref(false)
 const deleteAccountPassword = ref('')
 const deletingAccount = ref(false)

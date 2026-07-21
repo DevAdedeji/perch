@@ -100,7 +100,7 @@ async function setColor(color: string) {
   }
 }
 
-/* ── business hours ───────────────────────── */
+/* business hours */
 const DAY_ORDER = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const
 const DAY_NAMES: Record<string, string> = {
   mon: 'Monday',
@@ -165,7 +165,7 @@ async function copy(text: string, label = 'Copied') {
   }
 }
 
-/* ── canned replies ───────────────────────────── */
+/* canned replies */
 interface Canned {
   id: string
   shortcut: string
@@ -214,7 +214,7 @@ async function removeCanned(c: Canned) {
   }
 }
 
-/* ── proactive triggers ───────────────────────── */
+/* proactive triggers */
 interface TriggerRule {
   id: string
   name: string

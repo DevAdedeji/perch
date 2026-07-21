@@ -60,7 +60,7 @@ async function copy(text: string, label = 'Copied') {
   }
 }
 
-/* ── allowed domains ── */
+/* allowed domains */
 const domainInput = ref('')
 const domainSaving = ref(false)
 
@@ -89,7 +89,7 @@ async function removeDomain(domain: string) {
   }
 }
 
-/* ── identity verification ── */
+/* identity verification */
 async function toggleIdentityVerification(value: boolean) {
   try {
     await patchWorkspace(
@@ -102,7 +102,7 @@ async function toggleIdentityVerification(value: boolean) {
   }
 }
 
-/* ── identity secret rotation (arm-then-confirm, no modal) ── */
+/* identity secret rotation (arm-then-confirm, no modal) */
 const rotatingSecret = ref(false)
 const rotateArmed = ref(false)
 let disarmTimer: ReturnType<typeof setTimeout> | undefined
@@ -136,7 +136,7 @@ async function rotateIdentitySecret() {
   }
 }
 
-/* ── outbound webhooks ── */
+/* outbound webhooks */
 interface WebhookRow {
   id: string
   url: string
@@ -275,7 +275,7 @@ async function sendTestWebhook(w: WebhookRow) {
   }
 }
 
-/* ── audit log ── */
+/* audit log */
 interface AuditRow {
   id: string
   actor_name: string
@@ -344,7 +344,7 @@ async function loadAudit() {
   }
 }
 
-/* ── danger zone: workspace delete ── */
+/* danger zone: workspace delete */
 const deleteWsOpen = ref(false)
 const deleteWsConfirm = ref('')
 const deletingWs = ref(false)

@@ -47,7 +47,7 @@ function init() {
 
   const Z = 2147483000
 
-  // ── styles ──
+  // styles
   // Desktop/tablet: floating 380×600 panel that springs up from the launcher.
   // Mobile (≤480px): an inset sheet with a top gap + safe-area margins; the
   // launcher hides while open (the frame's own close button takes over).
@@ -70,7 +70,7 @@ function init() {
 `
   document.head.appendChild(style)
 
-  // ── launcher bubble ──
+  // launcher bubble
   const bubble = document.createElement('button')
   bubble.className = 'perch-bubble'
   bubble.setAttribute('aria-label', 'Open chat')
@@ -84,7 +84,7 @@ function init() {
   badge.className = 'perch-badge'
   bubble.appendChild(badge)
 
-  // ── iframe panel (created immediately, revealed on open) ──
+  // iframe panel (created immediately, revealed on open)
   let iframe: HTMLIFrameElement | null = null
   let open = false
 
@@ -123,7 +123,7 @@ function init() {
 
   bubble.addEventListener('click', () => setOpen(!open))
 
-  // ── public API: window.Perch.identify({ name, email }) ──
+  // public API: window.Perch.identify({ name, email })
   // Lets the host site pass its signed-in user so the widget can skip the
   // pre-chat form. Resent on frame (re)mount so call order doesn't matter.
   let identity: Identity | null = null
@@ -134,7 +134,7 @@ function init() {
     }
   }
 
-  // ── host page tracking ──
+  // host page tracking
   // The iframe can't see SPA route changes (document.referrer is frozen at
   // load), so the loader reports location.href — on frame ready and on every
   // history change — for the live roster + proactive triggers.

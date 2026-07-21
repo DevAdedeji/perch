@@ -109,7 +109,7 @@ onBeforeUnmount(() => {
 <template>
   <div class="relative">
     <div class="grid lg:grid-cols-[minmax(300px,360px)_5rem_1fr] gap-6 lg:gap-0 items-stretch">
-      <!-- ── the visitor's widget ── -->
+      <!-- the visitor's widget -->
       <div class="relative rounded-2xl border-glow glass shadow-2xl shadow-black/20 overflow-hidden flex flex-col h-105 min-w-0">
         <div class="flex items-center gap-3 px-4 py-3 border-b border-default bg-elevated/50 shrink-0">
           <span class="grid place-items-center size-9 rounded-xl bg-amber-500/15 ring-1 ring-amber-500/30">
@@ -190,7 +190,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <!-- ── the wire between them ── -->
+      <!-- the wire between them -->
       <div class="hidden lg:flex flex-col items-center justify-center gap-3 px-3">
         <div class="relative w-full">
           <div class="h-px w-full border-t border-dashed border-accented" />
@@ -206,7 +206,7 @@ onBeforeUnmount(() => {
         />
       </div>
 
-      <!-- ── the Control Room ── -->
+      <!-- the Control Room -->
       <div class="relative rounded-2xl border-glow glass shadow-2xl shadow-black/20 overflow-hidden flex flex-col h-105 min-w-0">
         <!-- chrome -->
         <div class="flex items-center gap-2 px-4 h-10 border-b border-default bg-elevated/60 shrink-0">

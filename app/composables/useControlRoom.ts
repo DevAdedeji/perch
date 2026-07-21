@@ -129,7 +129,7 @@ export function useControlRoom() {
     conversations.value.sort((a, b) => b.lastMessageAt.localeCompare(a.lastMessageAt))
   }
 
-  /* ── loaders ─────────────────────────────────────────────── */
+  /* loaders */
   // `showLoader` is used for user-driven loads (tab switch, workspace change);
   // live-event refreshes pass nothing so the list updates without flashing skeletons.
   async function loadConversations({ showLoader = false } = {}) {
@@ -247,7 +247,7 @@ export function useControlRoom() {
     context.value = null
   }
 
-  /* ── actions ─────────────────────────────────────────────── */
+  /* actions */
   function pushTemp(conversationId: string, content: string, isInternalNote: boolean, attachment?: { url: string, type: string }) {
     const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`
     messages.value.push({
@@ -345,7 +345,7 @@ export function useControlRoom() {
     await $fetch(`/api/conversations/${id}/reopen`, { method: 'POST' })
   }
 
-  /* ── live events ─────────────────────────────────────────── */
+  /* live events */
   function applyEvent(ev: ServerEvent) {
     switch (ev.type) {
       case 'conversation.new':
@@ -412,7 +412,7 @@ export function useControlRoom() {
     }
   }
 
-  /* ── lifecycle ───────────────────────────────────────────── */
+  /* lifecycle */
   let off: (() => void) | undefined
 
   function loadAll() {
@@ -441,7 +441,7 @@ export function useControlRoom() {
     }
   }
 
-  /* ── tags ─────────────────────────────────────────────────── */
+  /* tags */
   async function loadTags() {
     if (!workspaceId.value) return
     workspaceTags.value = await $fetch<WorkspaceTag[]>(`/api/workspaces/${workspaceId.value}/tags`)

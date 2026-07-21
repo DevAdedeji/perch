@@ -9,7 +9,7 @@ const origin = useRequestURL().origin
 const steps = ['Workspace', 'Invite team', 'You’re live'] as const
 const step = ref(0)
 
-/* ── step 1: workspace ─────────────────────────────── */
+/* step 1: workspace */
 const swatches = ['#8b5cf6', '#6366f1', '#f43f5e', '#ec4899', '#f59e0b', '#f97316', '#0ea5e9', '#10b981']
 const form = reactive({ name: '', color: '#8b5cf6' })
 const creating = ref(false)
@@ -43,7 +43,7 @@ async function createWorkspace() {
   }
 }
 
-/* ── step 2: invites ───────────────────────────────── */
+/* step 2: invites */
 const roleItems = ['agent', 'admin']
 const inviteRows = reactive<Array<{ email: string, role: 'agent' | 'admin' }>>([{ email: '', role: 'agent' }])
 const sending = ref(false)
@@ -79,7 +79,7 @@ async function sendInvites() {
   }
 }
 
-/* ── step 3: embed ─────────────────────────────────── */
+/* step 3: embed */
 // closing tag split so it doesn't terminate this SFC <script> block
 const closeScript = '</' + 'script>'
 const snippet = computed(() =>

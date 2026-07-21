@@ -16,7 +16,7 @@ export function matchesTriggerUrl(pattern: string, url: string): boolean {
   return url.toLowerCase().includes(p)
 }
 
-/* ── enabled-rules cache (the sweep runs every ~5s; don't query each pass) ── */
+/* enabled-rules cache (the sweep runs every ~5s; don't query each pass) */
 
 interface CacheEntry { at: number, rules: Trigger[] }
 

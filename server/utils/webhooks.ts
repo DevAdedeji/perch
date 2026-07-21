@@ -17,7 +17,7 @@ const TIMEOUT_MS = 5_000
 const RETRY_DELAYS_MS = [0, 5_000, 25_000]
 const KEEP_DELIVERIES = 50
 
-/* ── pure helpers (unit-tested in test/webhooks.test.ts) ────────── */
+/* pure helpers (unit-tested in test/webhooks.test.ts) */
 
 /** Sign a payload Stripe-style: hex HMAC-SHA256 over `${timestamp}.${body}`. */
 export function signWebhook(secret: string, timestamp: number, body: string): string {
@@ -44,7 +44,7 @@ export function isSafeWebhookUrl(url: string): boolean {
   return true
 }
 
-/* ── endpoint cache (dispatch runs on hot message paths) ────────── */
+/* endpoint cache (dispatch runs on hot message paths) */
 
 interface CacheEntry { at: number, endpoints: WebhookEndpoint[] }
 
@@ -67,7 +67,7 @@ export function invalidateWebhookCache(workspaceId: string) {
   cache.delete(workspaceId)
 }
 
-/* ── delivery ───────────────────────────────────────────────────── */
+/* delivery */
 
 export interface DeliveryResult {
   ok: boolean
@@ -169,7 +169,7 @@ export function dispatchWebhooks(workspaceId: string, event: WebhookEventName, d
   })().catch(e => console.error('[webhooks] dispatch failed:', e))
 }
 
-/* ── deliveries listing (admin UI) ──────────────────────────────── */
+/* deliveries listing (admin UI) */
 
 export async function recentDeliveries(endpointId: string, limit = 25) {
   const rows = await useDb().query.webhookDeliveries.findMany({

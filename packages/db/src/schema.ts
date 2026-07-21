@@ -20,7 +20,7 @@ import {
 } from 'drizzle-orm/pg-core'
 import type { BusinessHours, VisitorMetadata } from '@perch/shared'
 
-/* ── Enums (mirror @perch/shared) ───────────────────────────────── */
+/* Enums (mirror @perch/shared) */
 
 export const roleEnum = pgEnum('role', ['admin', 'agent'])
 export const presenceEnum = pgEnum('presence', ['online', 'offline', 'away'])
@@ -28,7 +28,7 @@ export const inviteStatusEnum = pgEnum('invite_status', ['pending', 'accepted', 
 export const conversationStatusEnum = pgEnum('conversation_status', ['unassigned', 'open', 'resolved'])
 export const senderTypeEnum = pgEnum('sender_type', ['visitor', 'agent', 'system'])
 
-/* ── Tables ─────────────────────────────────────────────────────── */
+/* Tables */
 
 export const users = pgTable('users', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -327,7 +327,7 @@ export const webhookDeliveries = pgTable('webhook_deliveries', {
   index('webhook_deliveries_endpoint_recency_idx').on(t.endpointId, t.createdAt)
 ])
 
-/* ── Inferred row types ─────────────────────────────────────────── */
+/* Inferred row types */
 
 export type User = typeof users.$inferSelect
 export type NewUser = typeof users.$inferInsert

@@ -3,7 +3,7 @@ import type { Conversation, Message } from '@perch/db'
 import { channels } from '@perch/shared'
 import type { ConversationDTO, MessageDTO } from '@perch/shared'
 
-/* ── serialization (rows → §6 wire DTOs) ─────────────────────────── */
+/* serialization (rows → §6 wire DTOs) */
 
 export function serializeConversation(c: Conversation): ConversationDTO {
   return {
@@ -33,7 +33,7 @@ export function serializeMessage(m: Message): MessageDTO {
   }
 }
 
-/* ── visitor → business (used by the embed widget) ─────────────────── */
+/* visitor → business (used by the embed widget) */
 
 interface IncomingVisitorMessage {
   workspaceId: string
@@ -197,7 +197,7 @@ export function inboxScope(assignedAgentId: string | null) {
     ctx.memberRole === 'admin' || assignedAgentId == null || ctx.memberId === assignedAgentId
 }
 
-/* ── agent → visitor ─────────────────────────────────────────────── */
+/* agent → visitor */
 
 interface AgentMessageInput {
   conversationId: string
@@ -243,7 +243,7 @@ export async function addAgentMessage(input: AgentMessageInput) {
   return message!
 }
 
-/* ── agent-initiated conversations (live roster outreach) ────────── */
+/* agent-initiated conversations (live roster outreach) */
 
 interface StartConversationInput {
   workspaceId: string
@@ -320,7 +320,7 @@ export async function startAgentConversation(input: StartConversationInput) {
   return { conversation, message }
 }
 
-/* ── assignment (§6.4 claim race) ────────────────────────────────── */
+/* assignment (§6.4 claim race) */
 
 interface ClaimResult {
   ok: boolean

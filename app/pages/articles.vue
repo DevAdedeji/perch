@@ -39,7 +39,7 @@ async function load() {
 onMounted(load)
 watch(wid, load)
 
-/* ── group create / edit ── */
+/* group create / edit */
 const groupModalOpen = ref(false)
 const groupSaving = ref(false)
 const editingGroup = ref<Group | null>(null)
@@ -109,7 +109,7 @@ async function moveGroup(group: Group, dir: -1 | 1) {
   }
 }
 
-/* ── article create / edit ── */
+/* article create / edit */
 const articleModalOpen = ref(false)
 const articleSaving = ref(false)
 const editingArticle = ref<Article | null>(null)

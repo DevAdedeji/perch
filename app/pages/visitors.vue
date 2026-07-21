@@ -72,7 +72,7 @@ watch(wid, (next, prev) => {
   load()
 })
 
-/* ── display helpers ── */
+/* display helpers */
 function displayName(v: LiveVisitorDTO) {
   return v.name || v.email || 'Anonymous'
 }
@@ -100,7 +100,7 @@ function since(epochMs: number) {
   return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`
 }
 
-/* ── start a conversation ── */
+/* start a conversation */
 const pendingSelect = useState<string | null>('inbox:pendingSelect', () => null)
 const composeFor = ref<LiveVisitorDTO | null>(null)
 const composeText = ref('')

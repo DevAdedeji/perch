@@ -10,7 +10,7 @@
 import type { ConversationStatus, Presence, SettablePresence } from './enums'
 import type { ConversationDTO, LiveVisitorDTO, MessageDTO } from './models'
 
-/* ── §6.1 Channels ──────────────────────────────────────────────── */
+/* §6.1 Channels */
 
 export const channels = {
   /** Inbox-level events for all online agents in a workspace. */
@@ -26,7 +26,7 @@ export type ConversationChannel = ReturnType<typeof channels.conversation>
 export type VisitorsChannel = ReturnType<typeof channels.visitors>
 export type Channel = WorkspaceChannel | ConversationChannel | VisitorsChannel
 
-/* ── §6.2 Client → Server ───────────────────────────────────────── */
+/* §6.2 Client → Server */
 
 export interface VisitorHelloPayload {
   site_id: string
@@ -76,7 +76,7 @@ export type ClientEvent = | { type: 'visitor.hello', payload: VisitorHelloPayloa
 
 export type ClientEventType = ClientEvent['type']
 
-/* ── §6.3 Server → Client ───────────────────────────────────────── */
+/* §6.3 Server → Client */
 
 export interface ConversationUpdatedPayload {
   id: string
@@ -186,7 +186,7 @@ export type ServerEventType = ServerEvent['type']
  */
 export type WsEvent = ServerEvent
 
-/* ── Narrowing helpers ──────────────────────────────────────────── */
+/* Narrowing helpers */
 
 /** Type guard so `if (isClientEvent(msg, 'message.send'))` narrows `payload`. */
 export function isClientEvent<T extends ClientEventType>(

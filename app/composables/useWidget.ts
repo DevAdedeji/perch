@@ -260,7 +260,7 @@ export function useWidget(siteId: string) {
     send({ type: 'visitor.page', payload: { page_url: url } })
   }
 
-  /* ── host-site identity (Perch.identify) ─────────────── */
+  /* host-site identity (Perch.identify) */
   interface IdentityTraits {
     user_id?: string
     name?: string

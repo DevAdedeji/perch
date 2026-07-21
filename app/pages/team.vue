@@ -29,7 +29,7 @@ const loading = ref(false)
 
 const onlineCount = computed(() => members.value.filter(m => m.presence === 'online').length)
 
-/* ── invite modal ─────────────────────────────── */
+/* invite modal */
 const inviteEmail = ref('')
 const inviteRole = ref<'agent' | 'admin'>('agent')
 const inviting = ref(false)
@@ -66,7 +66,7 @@ async function createInvite() {
   }
 }
 
-/* ── data + live presence ─────────────────────── */
+/* data + live presence */
 async function load() {
   if (!wid.value) return
   // stale-while-revalidate: render cached members instantly, refresh silently
@@ -95,7 +95,7 @@ onMounted(() => {
 onBeforeUnmount(() => off?.())
 watch(wid, load)
 
-/* ── actions ──────────────────────────────────── */
+/* actions */
 async function changeRole(m: Member, role: 'admin' | 'agent') {
   try {
     await $fetch(`/api/workspaces/${wid.value}/members/${m.id}`, { method: 'PATCH', body: { role } })

@@ -19,7 +19,7 @@ function openDrawer() {
   drawerOpen.value = true
 }
 
-/* ── unverified-email nudge (dismisses for the session, not forever) ── */
+/* unverified-email nudge (dismisses for the session, not forever) */
 const verifyDismissed = useState('verify:dismissed', () => false)
 const showVerifyBanner = computed(() =>
   !!user.value && !user.value.emailVerified && !verifyDismissed.value
@@ -44,7 +44,7 @@ watch(() => route.fullPath, () => {
   drawerOpen.value = false
 })
 
-/* ── team presence for the window chrome (mirrors the landing mock) ── */
+/* team presence for the window chrome (mirrors the landing mock) */
 interface ChromeMember {
   id: string
   name: string

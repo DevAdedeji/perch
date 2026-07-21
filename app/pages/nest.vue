@@ -112,7 +112,7 @@ watch(wid, () => {
   loadPresence()
 })
 
-/* ── rows: day dividers + grouping (same rhythm as the inbox thread) ── */
+/* rows: day dividers + grouping (same rhythm as the inbox thread) */
 interface MsgRow { kind: 'msg', m: NestMessage, first: boolean }
 interface DayRow { kind: 'day', id: string, label: string }
 

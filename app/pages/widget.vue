@@ -11,7 +11,7 @@ const {
   workspace, agentName, businessOnline, businessState, awayLabel, conversationId, conversationStatus, csatRating, messages, status, agentTyping, visitorName, agentReadAt
 } = widget
 
-/* ── CSAT: quick thumbs after a conversation closes ── */
+/* CSAT: quick thumbs after a conversation closes */
 const csatComment = ref('')
 const csatCommentSent = ref(false)
 const csatSaving = ref(false)
@@ -86,7 +86,7 @@ async function onFilePicked(e: Event) {
   setTimeout(() => (uploadError.value = ''), 4000)
 }
 
-/* ── help tab (only rendered when the workspace has published articles) ── */
+/* help tab (only rendered when the workspace has published articles) */
 interface HelpArticle {
   id: string
   title: string
@@ -158,7 +158,7 @@ const showPrechat = computed(() =>
   && !visitorName.value
 )
 
-/* ── theming: everything derives from the workspace accent ── */
+/* theming: everything derives from the workspace accent */
 const accent = computed(() => workspace.value?.color || '#0f172a')
 const onAccent = computed(() => {
   const c = accent.value.replace('#', '')
@@ -179,7 +179,7 @@ watch(workspace, (w) => {
   if (w) post({ perch: 'config', color: accent.value, fg: onAccent.value })
 }, { immediate: true })
 
-/* ── message grouping: consecutive same-sender messages within 5 min ── */
+/* message grouping: consecutive same-sender messages within 5 min */
 interface MsgRow { kind: 'msg', m: ChatMessage, first: boolean, last: boolean }
 interface DayRow { kind: 'day', id: string, label: string }
 
@@ -233,7 +233,7 @@ async function scrollToBottom(smooth = false) {
   threadEl.value?.scrollTo({ top: threadEl.value.scrollHeight, behavior: smooth ? 'smooth' : 'auto' })
 }
 
-/* ── composer ───────────────────────────── */
+/* composer */
 function autogrow() {
   const el = composerEl.value
   if (!el) return
@@ -279,7 +279,7 @@ function onComposerBlur() {
   stopTyping()
 }
 
-/* ── send ───────────────────────────────── */
+/* send */
 async function onSend() {
   const text = draft.value.trim()
   if (!text) return
@@ -316,7 +316,7 @@ function close() {
   post({ perch: 'close' })
 }
 
-/* ── unread badge + open/close from the loader ── */
+/* unread badge + open/close from the loader */
 watch(() => messages.value.length, () => {
   scrollToBottom(true)
   const last = messages.value[messages.value.length - 1]
