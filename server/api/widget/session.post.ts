@@ -4,7 +4,8 @@ import { z } from 'zod'
 
 const schema = z.object({
   site_id: z.string().min(1),
-  visitor_id: z.string().min(8).max(128),
+  embed_ticket: z.string().min(1).max(2048),
+  visitor_session: z.string().max(2048).optional(),
   page_url: z.string().max(2000).optional(),
   ua: z.string().max(500).optional()
 })
@@ -21,29 +22,33 @@ export default defineEventHandler(async (event) => {
   if (!result.success) {
     throw createError({ statusCode: 400, statusMessage: 'Invalid input' })
   }
-  const { site_id, visitor_id, page_url } = result.data
+  const { site_id, embed_ticket, visitor_session, page_url, ua } = result.data
+  requireEmbedTicket(event, site_id, embed_ticket)
 
   const db = useDb()
   const workspace = await db.query.workspaces.findFirst({ where: eq(workspaces.siteId, site_id) })
   if (!workspace) {
     throw createError({ statusCode: 404, statusMessage: 'Unknown site' })
   }
-  // anyone can copy a site_id out of page source — the domain allowlist is
-  // what stops strangers from mounting this workspace's chat on their site
-  if (!isDomainAllowed(page_url, workspace.allowedDomains)) {
-    throw createError({ statusCode: 403, statusMessage: 'This site is not allowed to embed this chat' })
-  }
-
   const now = new Date()
-  const [visitor] = await db.insert(visitors).values({
-    workspaceId: workspace.id,
-    visitorId: visitor_id,
-    lastSeenAt: now,
-    metadata: page_url ? { page_url } : {}
-  }).onConflictDoUpdate({
-    target: [visitors.workspaceId, visitors.visitorId],
-    set: { lastSeenAt: now }
-  }).returning()
+  const metadata = { ...(page_url ? { page_url } : {}), ...(ua ? { ua } : {}) }
+  let visitor
+  if (visitor_session) {
+    const resolved = await requireVisitorSession(event, site_id, visitor_session)
+    visitor = resolved.visitor
+    const [updated] = await db.update(visitors).set({
+      lastSeenAt: now,
+      metadata: sql`coalesce(${visitors.metadata}, '{}'::jsonb) || ${JSON.stringify(metadata)}::jsonb`
+    }).where(eq(visitors.id, visitor.id)).returning()
+    visitor = updated ?? visitor
+  } else {
+    [visitor] = await db.insert(visitors).values({
+      workspaceId: workspace.id,
+      visitorId: generateVisitorId(),
+      lastSeenAt: now,
+      metadata
+    }).returning()
+  }
 
   // resume the visitor's conversation — active ones first, else their most
   // recent resolved one (shown with a "closed" divider; replying reopens it)
@@ -107,6 +112,8 @@ export default defineEventHandler(async (event) => {
     conversation_id: conversation?.id ?? null,
     agent_last_read_at: agentLastReadAt,
     messages: thread,
+    visitor_id: visitor!.visitorId,
+    visitor_session: issueVisitorSession(event, workspace.id, visitor!.id),
     ws_ticket: wsTicket,
     presence_channel: presenceChannel(workspace.id)
   }

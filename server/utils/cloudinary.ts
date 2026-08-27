@@ -1,10 +1,9 @@
 import { createHash } from 'node:crypto'
 
 /**
- * Cloudinary signed uploads (PRD §5.3). The API secret never leaves the
- * server: clients ask /api/attachments/sign for a signature, upload straight
- * to Cloudinary with it, and send the returned secure_url as the message
- * attachment. Pure helpers unit-tested in test/cloudinary.test.ts.
+ * Cloudinary upload helpers (PRD §5.3). The API secret never leaves the
+ * server: Perch authenticates the caller and enforces the byte cap before
+ * forwarding a short-lived signed upload. Pure helpers are unit-tested.
  */
 
 export const ATTACHMENT_MAX_BYTES = 1024 * 1024 // 1 MB

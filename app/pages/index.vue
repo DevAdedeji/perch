@@ -16,8 +16,7 @@ useHead({
 // client-side navigation — without this, the demo bubble floats over the
 // dashboard. Tear it down on leave; resetting the guard lets "/" re-init.
 onBeforeUnmount(() => {
-  document.querySelectorAll('.perch-bubble, .perch-frame').forEach(el => el.remove())
-  ;(window as Window & { __perchLoaded?: boolean }).__perchLoaded = false
+  ;(window as Window & { Perch?: { destroy?: () => void } }).Perch?.destroy?.()
 })
 
 // closing tag split so it doesn't terminate this SFC <script> block
@@ -251,7 +250,7 @@ const claimSql = 'UPDATE conversations\nSET assigned_agent_id = $me, status = \'
                 @click="copySnippet"
               />
             </div>
-            <pre class="p-5 text-sm font-mono leading-relaxed overflow-x-auto"><code><span class="text-dimmed">&lt;</span><span class="text-highlighted">script</span> <span class="text-highlighted">src</span>=<span class="text-muted">"https://perch.app/widget.js"</span> <span class="text-highlighted">data-site-id</span>=<span class="text-amber-600 dark:text-amber-400">"ws_abc123"</span> <span class="text-highlighted">async</span><span class="text-dimmed">&gt;&lt;/</span><span class="text-highlighted">script</span><span class="text-dimmed">&gt;</span></code></pre>
+            <pre class="p-5 text-sm font-mono leading-relaxed overflow-x-auto"><code><span class="text-dimmed">&lt;</span><span class="text-highlighted">script</span> <span class="text-highlighted">src</span>=<span class="text-muted">"https://perch.adedeji.xyz/widget.js"</span> <span class="text-highlighted">data-site-id</span>=<span class="text-amber-600 dark:text-amber-400">"ws_abc123"</span> <span class="text-highlighted">async</span><span class="text-dimmed">&gt;&lt;/</span><span class="text-highlighted">script</span><span class="text-dimmed">&gt;</span></code></pre>
           </div>
           <p class="mt-5 text-center text-sm text-muted">
             Works on any website — Shopify, WordPress, Webflow, plain HTML.

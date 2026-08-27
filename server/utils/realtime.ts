@@ -41,6 +41,18 @@ export function unsubscribeAll(peer: Peer): void {
   }
 }
 
+export function isSubscribed(channel: string, peer: Peer): boolean {
+  return registry.channels.get(channel)?.has(peer) ?? false
+}
+
+export function subscriptionCount(peer: Peer): number {
+  let count = 0
+  for (const set of registry.channels.values()) {
+    if (set.has(peer)) count++
+  }
+  return count
+}
+
 /**
  * Fan a typed server event out to every peer subscribed to `channel`.
  * `agentsOnly` skips visitor peers — used so internal notes never reach the
@@ -81,6 +93,22 @@ export function publishFiltered(
       // peer gone
     }
   }
+}
+
+/** Fan out a conversation event using the current assignee at send time. */
+export function publishConversationEvent(
+  channel: string,
+  event: WsEvent,
+  assignedAgentId: string | null,
+  opts?: { agentsOnly?: boolean }
+): void {
+  publishFiltered(channel, event, (context) => {
+    if (context.role === 'visitor') return !opts?.agentsOnly
+    if (context.role !== 'agent') return false
+    return context.memberRole === 'admin'
+      || assignedAgentId === null
+      || context.memberId === assignedAgentId
+  })
 }
 
 /** Number of peers on a channel — used for `business.presence` (any agent online?). */

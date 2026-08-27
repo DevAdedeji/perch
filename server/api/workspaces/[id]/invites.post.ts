@@ -26,7 +26,7 @@ export default defineEventHandler(async (event) => {
     invites: created.map(i => ({ email: i.email, role: i.role }))
   })
 
-  const origin = getRequestURL(event, { xForwardedHost: true, xForwardedProto: true }).origin
+  const origin = publicOrigin(event)
   const workspace = await db.query.workspaces.findFirst({ where: eq(workspaces.id, workspaceId) })
   const workspaceName = workspace?.name ?? 'a Perch workspace'
 
@@ -38,7 +38,7 @@ export default defineEventHandler(async (event) => {
       subject: `You’ve been invited to ${workspaceName} on Perch`,
       html: emailLayout({
         title: `Join ${workspaceName}`,
-        body: `<p>You’ve been invited to join <strong>${workspaceName}</strong> as ${inv.role === 'admin' ? 'an admin' : 'an agent'} on Perch — real-time support chat.</p><p>This invite expires in 7 days.</p>`,
+        body: `<p>You’ve been invited to join <strong>${escapeHtml(workspaceName)}</strong> as ${inv.role === 'admin' ? 'an admin' : 'an agent'} on Perch — real-time support chat.</p><p>This invite expires in 7 days.</p>`,
         ctaLabel: 'Accept the invite',
         ctaUrl: url
       })

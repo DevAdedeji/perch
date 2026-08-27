@@ -24,7 +24,7 @@ export async function sendVerificationEmail(
     expiresAt: new Date(Date.now() + TOKEN_TTL_MS)
   })
 
-  const origin = getRequestURL(event, { xForwardedHost: true, xForwardedProto: true }).origin
+  const origin = publicOrigin(event)
   const verifyUrl = `${origin}/verify-email?token=${token}`
 
   const sent = await sendEmail({
@@ -33,8 +33,8 @@ export async function sendVerificationEmail(
     html: emailLayout({
       title: opts.isChange ? 'Confirm your new email' : 'Verify your email',
       body: opts.isChange
-        ? `<p>Hi ${opts.name},</p><p>Click below to confirm <strong>${opts.email}</strong> as the new email for your Perch account. The link is valid for 24 hours.</p><p>If you didn’t request this change, you can safely ignore this email.</p>`
-        : `<p>Hi ${opts.name},</p><p>Welcome to Perch! Click below to verify your email address. The link is valid for 24 hours.</p>`,
+        ? `<p>Hi ${escapeHtml(opts.name)},</p><p>Click below to confirm <strong>${escapeHtml(opts.email)}</strong> as the new email for your Perch account. The link is valid for 24 hours.</p><p>If you didn’t request this change, you can safely ignore this email.</p>`
+        : `<p>Hi ${escapeHtml(opts.name)},</p><p>Welcome to Perch! Click below to verify your email address. The link is valid for 24 hours.</p>`,
       ctaLabel: opts.isChange ? 'Confirm new email' : 'Verify email',
       ctaUrl: verifyUrl
     })

@@ -35,7 +35,7 @@ export default defineEventHandler(async (event) => {
       expiresAt: new Date(Date.now() + TOKEN_TTL_MS)
     })
 
-    const origin = getRequestURL(event, { xForwardedHost: true, xForwardedProto: true }).origin
+    const origin = publicOrigin(event)
     const resetUrl = `${origin}/reset-password?token=${token}`
 
     const sent = await sendEmail({
@@ -43,7 +43,7 @@ export default defineEventHandler(async (event) => {
       subject: 'Reset your Perch password',
       html: emailLayout({
         title: 'Reset your password',
-        body: `<p>Hi ${user.name},</p><p>Someone (hopefully you) asked to reset the password for this account. The link below is valid for 30 minutes and can be used once.</p><p>If this wasn’t you, you can safely ignore this email — your password is unchanged.</p>`,
+        body: `<p>Hi ${escapeHtml(user.name)},</p><p>Someone (hopefully you) asked to reset the password for this account. The link below is valid for 30 minutes and can be used once.</p><p>If this wasn’t you, you can safely ignore this email — your password is unchanged.</p>`,
         ctaLabel: 'Choose a new password',
         ctaUrl: resetUrl
       })

@@ -1,9 +1,8 @@
-import { eq, workspaces } from '@perch/db'
 import { z } from 'zod'
 
 const schema = z.object({
   site_id: z.string().min(1),
-  visitor_id: z.string().min(8).max(128),
+  visitor_session: z.string().min(1).max(2048),
   content: z.string().trim().max(5000).default(''),
   attachment_url: z.string().url().max(500).optional(),
   attachment_type: z.string().regex(/^image\//).max(100).optional(),
@@ -22,23 +21,18 @@ export default defineEventHandler(async (event) => {
   if (!result.success) {
     throw createError({ statusCode: 400, statusMessage: 'Invalid input', data: result.error.flatten() })
   }
-  const { site_id, visitor_id, content, attachment_url, attachment_type, name, email, page_url, trigger_id } = result.data
+  const { site_id, visitor_session, content, attachment_url, attachment_type, name, email, page_url, trigger_id } = result.data
 
   // attachments must live on OUR Cloudinary image path — no arbitrary hotlinks
   if (attachment_url && !isOwnCloudinaryImageUrl(attachment_url, cloudinaryConfig().cloudName)) {
     throw createError({ statusCode: 400, statusMessage: 'Invalid attachment' })
   }
-  assertRateLimit('widget-msg:visitor', visitor_id, { max: 20, windowMs: 60 * 1000 })
-
-  const db = useDb()
-  const workspace = await db.query.workspaces.findFirst({ where: eq(workspaces.siteId, site_id) })
-  if (!workspace) {
-    throw createError({ statusCode: 404, statusMessage: 'Unknown site' })
-  }
+  const { workspace, visitor } = await requireVisitorSession(event, site_id, visitor_session)
+  assertRateLimit('widget-msg:visitor', visitor.id, { max: 20, windowMs: 60 * 1000 })
 
   const { conversation, message } = await ingestVisitorMessage({
     workspaceId: workspace.id,
-    visitorId: visitor_id,
+    visitorId: visitor.visitorId,
     name,
     email,
     content,

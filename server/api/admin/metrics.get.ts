@@ -7,7 +7,7 @@ import { conversations, messages, sql, users, workspaces } from '@perch/db'
  */
 export default defineEventHandler(async (event) => {
   const user = await requireUser(event)
-  const allowed = (useRuntimeConfig(event).adminEmails ?? '')
+  const allowed = (useRuntimeConfig(event).adminEmails || process.env.PERCH_ADMIN_EMAILS || '')
     .split(',').map((e: string) => e.trim().toLowerCase()).filter(Boolean)
   if (!allowed.includes(user.email.toLowerCase())) {
     throw createError({ statusCode: 404, statusMessage: 'Not found' }) // don't advertise the panel

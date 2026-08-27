@@ -78,7 +78,7 @@ const year = new Date().getFullYear()
         </p>
         <p class="flex items-center gap-2 text-sm text-dimmed">
           <span class="size-2 rounded-full bg-green-500" />
-          All systems operational
+          Live service status
         </p>
       </div>
     </UContainer>

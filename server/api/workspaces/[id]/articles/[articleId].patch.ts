@@ -21,6 +21,17 @@ export default defineEventHandler(async (event) => {
   }
 
   const db = useDb()
+  const existing = await db.query.articles.findFirst({
+    where: and(eq(articles.id, articleId), eq(articles.workspaceId, workspaceId))
+  })
+  if (!existing) throw createError({ statusCode: 404, statusMessage: 'Article not found' })
+
+  const resultingBody = result.data.body ?? existing.body
+  const resultingUrl = result.data.url === undefined ? existing.url : (result.data.url || null)
+  if (!resultingBody && !resultingUrl) {
+    throw createError({ statusCode: 400, statusMessage: 'An article needs a body or a link' })
+  }
+
   const patch: Record<string, unknown> = { updatedAt: new Date() }
   if (result.data.title !== undefined) patch.title = result.data.title
   if (result.data.body !== undefined) patch.body = result.data.body
@@ -40,12 +51,7 @@ export default defineEventHandler(async (event) => {
     .set(patch)
     .where(and(eq(articles.id, articleId), eq(articles.workspaceId, workspaceId)))
     .returning()
-  if (!updated) {
-    throw createError({ statusCode: 404, statusMessage: 'Article not found' })
-  }
-  if (!updated.body && !updated.url) {
-    throw createError({ statusCode: 400, statusMessage: 'An article needs a body or a link' })
-  }
+  if (!updated) throw createError({ statusCode: 404, statusMessage: 'Article not found' })
   return {
     id: updated.id,
     group_id: updated.groupId,

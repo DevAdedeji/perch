@@ -16,12 +16,22 @@ export default defineEventHandler(async (event) => {
   let workspace: Workspace | undefined
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
-      const [row] = await db.insert(workspaces).values({
-        name,
-        siteId: generateSiteId(),
-        widgetPrimaryColor: widgetPrimaryColor ?? undefined,
-        logoUrl: logoUrl ?? null
-      }).returning()
+      const row = await db.transaction(async (tx) => {
+        const [created] = await tx.insert(workspaces).values({
+          name,
+          siteId: generateSiteId(),
+          widgetPrimaryColor: widgetPrimaryColor ?? undefined,
+          logoUrl: logoUrl ?? null
+        }).returning()
+        await tx.insert(workspaceMembers).values({
+          workspaceId: created!.id,
+          userId: user.id,
+          role: 'admin',
+          presence: 'online',
+          lastSeenAt: new Date()
+        })
+        return created
+      })
       workspace = row
       break
     } catch (err) {
@@ -33,15 +43,6 @@ export default defineEventHandler(async (event) => {
   if (!workspace) {
     throw createError({ statusCode: 500, statusMessage: 'Could not create workspace' })
   }
-
-  // the creator becomes the workspace admin/owner, and is online right now
-  await db.insert(workspaceMembers).values({
-    workspaceId: workspace.id,
-    userId: user.id,
-    role: 'admin',
-    presence: 'online',
-    lastSeenAt: new Date()
-  })
 
   setResponseStatus(event, 201)
   return { workspace: serializeWorkspace(workspace) }

@@ -22,16 +22,18 @@ interface SessionResponse {
   csat_rating: 'good' | 'bad' | null
   agent_last_read_at: string | null
   messages: MessageDTO[]
+  visitor_id: string
+  visitor_session: string
   ws_ticket: string
   presence_channel: string
 }
 
 /**
  * Visitor-side widget client (runs inside the iframe frame). Persists a
- * per-site `visitor_id`, handshakes, then holds a WS scoped to its own
+ * per-site signed session, handshakes, then holds a WS scoped to its own
  * conversation. Messages go over REST; agent replies + typing arrive over WS.
  */
-export function useWidget(siteId: string) {
+export function useWidget(siteId: string, embedTicket: string) {
   const workspace = ref<WidgetWorkspace | null>(null)
   const agentName = ref<string | null>(null)
   const businessOnline = ref(false)
@@ -52,8 +54,10 @@ export function useWidget(siteId: string) {
   const agentReadAt = ref<string | null>(null)
 
   let visitorId = ''
+  let visitorSession = ''
   // exposed so the composer can sign attachment uploads for this visitor
   const visitorIdRef = ref('')
+  const visitorSessionRef = ref('')
   let ticket = ''
   let presenceChan = ''
   // the host page we're embedded on (loader-reported; referrer until then)
@@ -70,22 +74,48 @@ export function useWidget(siteId: string) {
   let pingTimer: ReturnType<typeof setInterval> | undefined
   let lastActivity = 0
 
-  function ensureVisitorId() {
-    const key = `perch:visitor:${siteId}`
-    let id = localStorage.getItem(key)
-    if (!id) {
-      id = (crypto.randomUUID?.() ?? `v_${Date.now()}_${Math.random().toString(36).slice(2)}`)
-      localStorage.setItem(key, id)
+  function loadVisitorSession() {
+    try {
+      visitorSession = localStorage.getItem(`perch:session:${siteId}`) ?? ''
+    } catch {
+      visitorSession = ''
     }
-    visitorId = id
-    visitorIdRef.value = id
   }
 
   async function handshake() {
-    const res = await $fetch<SessionResponse>('/api/widget/session', {
-      method: 'POST',
-      body: { site_id: siteId, visitor_id: visitorId, page_url: document.referrer, ua: navigator.userAgent }
+    const body = () => ({
+      site_id: siteId,
+      embed_ticket: embedTicket,
+      visitor_session: visitorSession || undefined,
+      page_url: document.referrer,
+      ua: navigator.userAgent
     })
+    let res: SessionResponse
+    try {
+      res = await $fetch<SessionResponse>('/api/widget/session', { method: 'POST', body: body() })
+    } catch (error) {
+      const statusCode = (error as { statusCode?: number, status?: number }).statusCode
+        ?? (error as { status?: number }).status
+      if (!visitorSession || statusCode !== 401) throw error
+      // Expired/revoked local sessions should recover to a fresh visitor
+      // instead of leaving the widget permanently stuck for this browser.
+      visitorSession = ''
+      try {
+        localStorage.removeItem(`perch:session:${siteId}`)
+      } catch {
+        // Some third-party-cookie policies disable iframe storage.
+      }
+      res = await $fetch<SessionResponse>('/api/widget/session', { method: 'POST', body: body() })
+    }
+    visitorId = res.visitor_id
+    visitorIdRef.value = visitorId
+    visitorSession = res.visitor_session
+    visitorSessionRef.value = visitorSession
+    try {
+      localStorage.setItem(`perch:session:${siteId}`, visitorSession)
+    } catch {
+      // The in-memory session still works for the current page.
+    }
     workspace.value = res.workspace
     agentName.value = res.agent?.name ?? null
     businessOnline.value = res.business_online
@@ -107,7 +137,7 @@ export function useWidget(siteId: string) {
     try {
       const res = await $fetch<{ agent: { name: string } | null }>('/api/widget/agent', {
         method: 'POST',
-        body: { site_id: siteId, visitor_id: visitorId }
+        body: { site_id: siteId, visitor_session: visitorSession }
       })
       agentName.value = res.agent?.name ?? null
     } catch {
@@ -277,7 +307,7 @@ export function useWidget(siteId: string) {
     try {
       await $fetch('/api/widget/identify', {
         method: 'POST',
-        body: { site_id: siteId, visitor_id: visitorId, ...traits }
+        body: { site_id: siteId, visitor_session: visitorSession, ...traits }
       })
     } catch {
       // identity is best-effort from the widget's side; the session still works
@@ -303,7 +333,7 @@ export function useWidget(siteId: string) {
   }
 
   async function start() {
-    ensureVisitorId()
+    loadVisitorSession()
     try {
       await handshake()
       connectWs()
@@ -374,7 +404,7 @@ export function useWidget(siteId: string) {
           method: 'POST',
           body: {
             site_id: siteId,
-            visitor_id: visitorId,
+            visitor_session: visitorSession,
             content: temp.content,
             attachment_url: temp.attachment_url ?? undefined,
             attachment_type: temp.attachment_type ?? undefined,
@@ -444,7 +474,7 @@ export function useWidget(siteId: string) {
       method: 'POST',
       body: {
         site_id: siteId,
-        visitor_id: visitorId,
+        visitor_session: visitorSession,
         conversation_id: conversationId.value,
         rating,
         comment: comment?.trim() || undefined
@@ -469,6 +499,7 @@ export function useWidget(siteId: string) {
   return {
     workspace,
     visitorId: visitorIdRef,
+    visitorSession: visitorSessionRef,
     agentReadAt,
     agentName,
     businessOnline,

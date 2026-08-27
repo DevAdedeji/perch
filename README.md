@@ -207,6 +207,7 @@ Useful scripts: `pnpm build` (production Nitro bundle), `pnpm preview`, `pnpm li
 | `RESEND_FROM` | *(optional)* from address, e.g. `Perch <no-reply@yourdomain.com>` |
 | `SENTRY_DSN` | *(optional)* server-side error tracking; the client DSN lives in `sentry.client.config.ts` |
 | `CLOUDINARY_CLOUD_NAME` / `CLOUDINARY_API_KEY` / `CLOUDINARY_API_SECRET` | *(optional)* signed image attachments; the secret never leaves the server |
+| `PERCH_PUBLIC_URL` | `https://perch.adedeji.xyz` in production | canonical origin used in password, verification, and invite links |
 
 > Nuxt only auto-maps `NUXT_`-prefixed env at runtime, so the server also reads these two names
 > directly from `process.env` — set them as plain environment variables in production.
@@ -248,7 +249,7 @@ management · the embeddable widget with pre-chat, typing, and presence · notif
 canned responses · visitor context panel · `Perch.identify()` with HMAC verification · password
 reset & invite emails (Resend) · rate limiting · per-workspace domain allowlist · Sentry +
 `/api/health` · cursor pagination · workspace & account deletion · Vitest security suite ·
-image attachments (signed direct-to-Cloudinary uploads, images only, ≤ 1 MB) · email verification ·
+image attachments (authenticated server-gated Cloudinary uploads, images only, ≤ 1 MB) · email verification ·
 account management (name, email change with confirm-on-new-address, password change) · security
 headers · migrations-on-deploy · privacy & terms pages · nightly backup script · revocable
 sessions (server-side registry, per-device sign-out, "sign out everywhere else").

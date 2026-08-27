@@ -36,12 +36,26 @@ export function assertRateLimit(
   opts: { max: number, windowMs: number }
 ): void {
   const now = Date.now()
-  if (buckets.size > MAX_BUCKETS) sweep()
-
   const id = `${name}:${key}`
-  const bucket = buckets.get(id)
+  let bucket = buckets.get(id)
 
-  if (!bucket || bucket.resetAt <= now) {
+  if (bucket?.resetAt && bucket.resetAt <= now) {
+    buckets.delete(id)
+    bucket = undefined
+  }
+  if (!bucket && buckets.size >= MAX_BUCKETS) {
+    sweep()
+    // Map preserves insertion order. Expired buckets are removed first; if a
+    // botnet still fills the cap, evict the oldest live bucket instead of
+    // allowing attacker-controlled keys to grow memory without bound.
+    while (buckets.size >= MAX_BUCKETS) {
+      const oldest = buckets.keys().next().value
+      if (oldest === undefined) break
+      buckets.delete(oldest)
+    }
+  }
+
+  if (!bucket) {
     buckets.set(id, { count: 1, resetAt: now + opts.windowMs })
     return
   }

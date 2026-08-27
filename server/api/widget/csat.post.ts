@@ -1,9 +1,9 @@
-import { and, conversations, eq, visitors, workspaces } from '@perch/db'
+import { and, conversations, eq } from '@perch/db'
 import { z } from 'zod'
 
 const schema = z.object({
   site_id: z.string().min(1),
-  visitor_id: z.string().min(8).max(128),
+  visitor_session: z.string().min(1).max(2048),
   conversation_id: z.string().uuid(),
   rating: z.enum(['good', 'bad']),
   comment: z.string().trim().max(500).optional()
@@ -20,21 +20,13 @@ export default defineEventHandler(async (event) => {
   if (!result.success) {
     throw createError({ statusCode: 400, statusMessage: 'Invalid input' })
   }
-  const { site_id, visitor_id, conversation_id, rating, comment } = result.data
+  const { site_id, visitor_session, conversation_id, rating, comment } = result.data
 
   const db = useDb()
-  const workspace = await db.query.workspaces.findFirst({ where: eq(workspaces.siteId, site_id) })
-  if (!workspace) {
-    throw createError({ statusCode: 404, statusMessage: 'Unknown site' })
-  }
-  const visitor = await db.query.visitors.findFirst({
-    where: and(eq(visitors.workspaceId, workspace.id), eq(visitors.visitorId, visitor_id))
+  const { visitor } = await requireVisitorSession(event, site_id, visitor_session)
+  const conversation = await db.query.conversations.findFirst({
+    where: and(eq(conversations.id, conversation_id), eq(conversations.visitorRef, visitor.id))
   })
-  const conversation = visitor
-    ? await db.query.conversations.findFirst({
-        where: and(eq(conversations.id, conversation_id), eq(conversations.visitorRef, visitor.id))
-      })
-    : null
   if (!conversation) {
     throw createError({ statusCode: 404, statusMessage: 'Conversation not found' })
   }

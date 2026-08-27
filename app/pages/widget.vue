@@ -5,8 +5,10 @@ useHead({ title: 'Chat', meta: [{ name: 'robots', content: 'noindex' }] })
 const route = useRoute()
 const siteId = computed(() => (route.query.site_id as string) || '')
 const perchUrl = useRequestURL().origin
+const embedTicket = useState<string>('perch-embed-ticket', () =>
+  (useRequestEvent()?.context.perchEmbedTicket as string | undefined) ?? '')
 
-const widget = useWidget(siteId.value)
+const widget = useWidget(siteId.value, embedTicket.value)
 const {
   workspace, agentName, businessOnline, businessState, awayLabel, conversationId, conversationStatus, csatRating, messages, status, agentTyping, visitorName, agentReadAt
 } = widget
@@ -80,7 +82,7 @@ async function onFilePicked(e: Event) {
   } else if (file.size > 1024 * 1024) {
     uploadError.value = 'Images must be smaller than 1 MB'
   } else {
-    await widget.sendAttachment(file, () => uploadImage(file, { site_id: siteId.value, visitor_id: widget.visitorId.value }))
+    await widget.sendAttachment(file, () => uploadImage(file, { site_id: siteId.value, visitor_session: widget.visitorSession.value }))
     return
   }
   setTimeout(() => (uploadError.value = ''), 4000)
@@ -170,8 +172,9 @@ function initial(name: string | null | undefined) {
   return (name || 'A').charAt(0).toUpperCase()
 }
 
+let hostOrigin = ''
 function post(msg: Record<string, unknown>) {
-  window.parent?.postMessage({ source: 'perch-widget', ...msg }, '*')
+  window.parent?.postMessage({ source: 'perch-widget', ...msg }, hostOrigin || '*')
 }
 
 // hand the brand color to the loader so the launcher bubble matches
@@ -334,6 +337,7 @@ watch(agentTyping, (v) => {
 })
 
 function onParentMessage(e: MessageEvent) {
+  if (e.source !== window.parent || (hostOrigin && e.origin !== hostOrigin)) return
   const data = e.data
   if (!data || data.source !== 'perch-host') return
   if (data.perch === 'open') {
@@ -360,6 +364,11 @@ watch(widget.openRequested, () => {
 })
 
 onMounted(async () => {
+  try {
+    hostOrigin = document.referrer ? new URL(document.referrer).origin : ''
+  } catch {
+    hostOrigin = ''
+  }
   window.addEventListener('message', onParentMessage)
   await widget.start()
   post({ perch: 'ready' })

@@ -3,21 +3,11 @@ export interface UploadedImage {
   type: string
 }
 
-interface SignResponse {
-  cloud_name: string
-  api_key: string
-  timestamp: number
-  folder: string
-  allowed_formats: string
-  signature: string
-  max_bytes: number
-}
-
-const MAX_BYTES = 1024 * 1024 // 1 MB — mirrored server-side in the sign endpoint
+const MAX_BYTES = 1024 * 1024 // fast client feedback; the server enforces it too
 
 /**
- * Direct-to-Cloudinary image upload (PRD §5.3): ask our server for a
- * signature, POST the file straight to Cloudinary, hand back the secure URL.
+ * Size-bounded image upload through Perch, which authenticates the caller and
+ * then forwards to Cloudinary without exposing a reusable upload signature.
  * Used by both the widget composer and the Control Room composer.
  */
 export function useImageUpload() {
@@ -34,21 +24,10 @@ export function useImageUpload() {
 
     uploading.value = true
     try {
-      const sig = await $fetch<SignResponse>('/api/attachments/sign', { method: 'POST', body: signBody })
-
       const form = new FormData()
       form.append('file', file)
-      form.append('api_key', sig.api_key)
-      form.append('timestamp', String(sig.timestamp))
-      form.append('folder', sig.folder)
-      form.append('allowed_formats', sig.allowed_formats)
-      form.append('signature', sig.signature)
-
-      const res = await $fetch<{ secure_url: string }>(
-        `https://api.cloudinary.com/v1_1/${sig.cloud_name}/image/upload`,
-        { method: 'POST', body: form }
-      )
-      return { url: res.secure_url, type: file.type }
+      for (const [key, value] of Object.entries(signBody)) form.append(key, value)
+      return await $fetch<UploadedImage>('/api/attachments/upload', { method: 'POST', body: form })
     } finally {
       uploading.value = false
     }

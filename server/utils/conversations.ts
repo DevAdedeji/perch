@@ -56,104 +56,87 @@ interface IncomingVisitorMessage {
 export async function ingestVisitorMessage(input: IncomingVisitorMessage) {
   const db = useDb()
   const now = new Date()
-
-  // upsert the visitor (unique on workspace_id + visitor_id)
-  const [visitor] = await db.insert(visitors).values({
-    workspaceId: input.workspaceId,
-    visitorId: input.visitorId,
-    name: input.name ?? null,
-    email: input.email ?? null,
-    lastSeenAt: now,
-    metadata: input.pageUrl ? { page_url: input.pageUrl } : {}
-  }).onConflictDoUpdate({
-    target: [visitors.workspaceId, visitors.visitorId],
-    set: {
-      lastSeenAt: now,
-      ...(input.name ? { name: input.name } : {}),
-      ...(input.email ? { email: input.email } : {})
-    }
-  }).returning()
-
-  // resume the visitor's conversation: active ones first, else their most
-  // recent resolved one — replying to a closed chat REOPENS it (the standard
-  // live-chat model: Intercom/Crisp/Chatwoot all thread this way)
-  const existing = await db.query.conversations.findFirst({
-    where: eq(conversations.visitorRef, visitor!.id),
-    orderBy: [
-      sql`case when ${conversations.status} = 'open' then 0 when ${conversations.status} = 'unassigned' then 1 else 2 end`,
-      desc(conversations.lastMessageAt)
-    ]
-  })
-
-  let conversation: Conversation
-  let message: Message
-  let isNew = false
-  const reopened = existing?.status === 'resolved'
-  if (existing) {
-    // the bump (and reopen, when resolved) and the insert are independent —
-    // one round trip. Reopens keep the assignee: they have the context.
-    const [[updated], [inserted]] = await Promise.all([
-      db.update(conversations)
-        .set({
-          lastMessageAt: now,
-          updatedAt: now,
-          ...(reopened
-            ? { status: existing.assignedAgentId ? 'open' as const : 'unassigned' as const, resolvedAt: null }
-            : {})
-        })
-        .where(eq(conversations.id, existing.id))
-        .returning(),
-      db.insert(messages).values({
-        conversationId: existing.id,
-        senderType: 'visitor',
-        content: input.content,
-        attachmentUrl: input.attachmentUrl ?? null,
-        attachmentType: input.attachmentType ?? null
-      }).returning()
-    ])
-    conversation = updated!
-    message = inserted!
-  } else {
-    const [created] = await db.insert(conversations).values({
+  const result = await db.transaction(async (tx) => {
+    // The conflict update locks this visitor row until commit. Concurrent first
+    // messages for one visitor therefore serialize before checking for a chat.
+    const [visitor] = await tx.insert(visitors).values({
       workspaceId: input.workspaceId,
-      visitorRef: visitor!.id,
-      status: 'unassigned',
-      lastMessageAt: now
+      visitorId: input.visitorId,
+      name: input.name ?? null,
+      email: input.email ?? null,
+      lastSeenAt: now,
+      metadata: input.pageUrl ? { page_url: input.pageUrl } : {}
+    }).onConflictDoUpdate({
+      target: [visitors.workspaceId, visitors.visitorId],
+      set: {
+        lastSeenAt: now,
+        ...(input.name ? { name: input.name } : {}),
+        ...(input.email ? { email: input.email } : {}),
+        ...(input.pageUrl
+          ? { metadata: sql`coalesce(${visitors.metadata}, '{}'::jsonb) || ${JSON.stringify({ page_url: input.pageUrl })}::jsonb` }
+          : {})
+      }
     }).returning()
-    conversation = created!
-    isNew = true
 
-    // a reply to a proactive trigger threads the trigger's text in first, as a
-    // system line — verified against trigger_fires so the id can't be spoofed
-    if (input.triggerId) {
-      const [rule, fire] = await Promise.all([
-        db.query.triggers.findFirst({
-          where: and(eq(triggers.id, input.triggerId), eq(triggers.workspaceId, input.workspaceId))
-        }),
-        db.query.triggerFires.findFirst({
-          where: and(eq(triggerFires.triggerId, input.triggerId), eq(triggerFires.visitorRef, visitor!.id))
-        })
-      ])
-      if (rule && fire) {
-        await db.insert(messages).values({
-          conversationId: conversation.id,
-          senderType: 'system',
-          content: rule.message,
-          // backdated so the trigger line always sorts above the reply
-          createdAt: new Date(now.getTime() - 1000)
-        })
+    const existing = await tx.query.conversations.findFirst({
+      where: eq(conversations.visitorRef, visitor!.id),
+      orderBy: [
+        sql`case when ${conversations.status} = 'open' then 0 when ${conversations.status} = 'unassigned' then 1 else 2 end`,
+        desc(conversations.lastMessageAt)
+      ]
+    })
+
+    let conversation: Conversation
+    let isNew = false
+    if (existing) {
+      const [updated] = await tx.update(conversations).set({
+        lastMessageAt: now,
+        updatedAt: now,
+        ...(existing.status === 'resolved'
+          ? { status: existing.assignedAgentId ? 'open' as const : 'unassigned' as const, resolvedAt: null }
+          : {})
+      }).where(eq(conversations.id, existing.id)).returning()
+      conversation = updated!
+    } else {
+      const [created] = await tx.insert(conversations).values({
+        workspaceId: input.workspaceId,
+        visitorRef: visitor!.id,
+        status: 'unassigned',
+        lastMessageAt: now
+      }).returning()
+      conversation = created!
+      isNew = true
+
+      if (input.triggerId) {
+        const [rule, fire] = await Promise.all([
+          tx.query.triggers.findFirst({
+            where: and(eq(triggers.id, input.triggerId), eq(triggers.workspaceId, input.workspaceId))
+          }),
+          tx.query.triggerFires.findFirst({
+            where: and(eq(triggerFires.triggerId, input.triggerId), eq(triggerFires.visitorRef, visitor!.id))
+          })
+        ])
+        if (rule && fire) {
+          await tx.insert(messages).values({
+            conversationId: conversation.id,
+            senderType: 'system',
+            content: rule.message,
+            createdAt: new Date(now.getTime() - 1000)
+          })
+        }
       }
     }
 
-    const [inserted] = await db.insert(messages).values({
+    const [message] = await tx.insert(messages).values({
       conversationId: conversation.id,
       senderType: 'visitor',
       content: input.content,
       attachmentUrl: input.attachmentUrl ?? null,
       attachmentType: input.attachmentType ?? null
     }).returning()
-    message = inserted!
-  }
+    return { visitor: visitor!, conversation, message: message!, isNew }
+  })
+  const { visitor, conversation, message, isNew } = result
 
   // broadcast
   const wsChannel = channels.workspace(input.workspaceId)
@@ -174,18 +157,18 @@ export async function ingestVisitorMessage(input: IncomingVisitorMessage) {
   const msgEvent = { type: 'message.new' as const, payload: serializeMessage(message) }
   // scope the inbox copy so agents don't receive chats assigned to someone else
   publishFiltered(wsChannel, msgEvent, inboxScope(conversation.assignedAgentId))
-  publish(convChannel, msgEvent)
+  publishConversationEvent(convChannel, msgEvent, conversation.assignedAgentId)
 
   // outbound webhooks (fire-and-forget, after the committed writes)
   if (isNew) {
     dispatchWebhooks(input.workspaceId, 'conversation.created', {
       conversation: serializeConversation(conversation),
-      visitor: { id: visitor!.id, name: visitor!.name, email: visitor!.email }
+      visitor: { id: visitor.id, name: visitor.name, email: visitor.email }
     })
   }
   dispatchWebhooks(input.workspaceId, 'message.created', { message: serializeMessage(message) })
 
-  return { visitor: visitor!, conversation, message }
+  return { visitor, conversation, message }
 }
 
 /**
@@ -213,8 +196,13 @@ export async function addAgentMessage(input: AgentMessageInput) {
   const db = useDb()
   const now = new Date()
 
-  const [[message], [conv]] = await Promise.all([
-    db.insert(messages).values({
+  const { message, conv } = await db.transaction(async (tx) => {
+    const [conv] = await tx.update(conversations)
+      .set({ lastMessageAt: now, updatedAt: now })
+      .where(eq(conversations.id, input.conversationId))
+      .returning()
+    if (!conv) throw createError({ statusCode: 404, statusMessage: 'Conversation not found' })
+    const [message] = await tx.insert(messages).values({
       conversationId: input.conversationId,
       senderType: 'agent',
       senderId: input.senderMemberId,
@@ -222,25 +210,25 @@ export async function addAgentMessage(input: AgentMessageInput) {
       attachmentUrl: input.attachmentUrl ?? null,
       attachmentType: input.attachmentType ?? null,
       isInternalNote: input.isInternalNote ?? false
-    }).returning(),
-    db.update(conversations)
-      .set({ lastMessageAt: now, updatedAt: now })
-      .where(eq(conversations.id, input.conversationId))
-      .returning()
-  ])
+    }).returning()
+    return { message: message!, conv }
+  })
 
-  const event = { type: 'message.new' as const, payload: serializeMessage(message!) }
+  const event = { type: 'message.new' as const, payload: serializeMessage(message) }
   // inbox copy scoped to the assigned agent + admins
-  publishFiltered(channels.workspace(input.workspaceId), event, inboxScope(conv?.assignedAgentId ?? null))
+  publishFiltered(channels.workspace(input.workspaceId), event, inboxScope(conv.assignedAgentId))
   // on the shared conversation channel, keep internal notes away from the visitor (§4)
-  publish(channels.conversation(input.conversationId), event, { agentsOnly: message!.isInternalNote })
+  publishConversationEvent(
+    channels.conversation(input.conversationId), event, conv.assignedAgentId,
+    { agentsOnly: message.isInternalNote }
+  )
 
   // internal notes never leave the building — not even as webhooks
-  if (!message!.isInternalNote) {
-    dispatchWebhooks(input.workspaceId, 'message.created', { message: serializeMessage(message!) })
+  if (!message.isInternalNote) {
+    dispatchWebhooks(input.workspaceId, 'message.created', { message: serializeMessage(message) })
   }
 
-  return message!
+  return message
 }
 
 /* agent-initiated conversations (live roster outreach) */
@@ -249,6 +237,7 @@ interface StartConversationInput {
   workspaceId: string
   visitorRef: string
   memberId: string
+  memberRole: 'admin' | 'agent'
   content: string
 }
 
@@ -261,55 +250,64 @@ interface StartConversationInput {
 export async function startAgentConversation(input: StartConversationInput) {
   const db = useDb()
   const now = new Date()
+  const result = await db.transaction(async (tx) => {
+    // This row lock serializes agent and visitor starts for one visitor.
+    const [visitor] = await tx.update(visitors).set({ lastSeenAt: now })
+      .where(and(eq(visitors.id, input.visitorRef), eq(visitors.workspaceId, input.workspaceId)))
+      .returning()
+    if (!visitor) throw createError({ statusCode: 404, statusMessage: 'Visitor not found' })
 
-  const existing = await db.query.conversations.findFirst({
-    where: and(eq(conversations.visitorRef, input.visitorRef), ne(conversations.status, 'resolved')),
-    orderBy: [desc(conversations.lastMessageAt)]
-  })
-
-  let conversation: Conversation
-  let message: Message
-  if (existing) {
-    // an active thread already exists — message into it (claim if unowned)
-    conversation = existing.assignedAgentId
-      ? existing
-      : (await assignConversation(existing.id, input.memberId)) ?? existing
-    message = await addAgentMessage({
-      conversationId: conversation.id,
-      workspaceId: input.workspaceId,
-      senderMemberId: input.memberId,
-      content: input.content
+    const existing = await tx.query.conversations.findFirst({
+      where: and(eq(conversations.visitorRef, input.visitorRef), ne(conversations.status, 'resolved')),
+      orderBy: [desc(conversations.lastMessageAt)]
     })
-  } else {
-    const [created] = await db.insert(conversations).values({
-      workspaceId: input.workspaceId,
-      visitorRef: input.visitorRef,
-      assignedAgentId: input.memberId,
-      status: 'open',
-      lastMessageAt: now
-    }).returning()
-    conversation = created!
-    const [inserted] = await db.insert(messages).values({
+    if (existing?.assignedAgentId && existing.assignedAgentId !== input.memberId && input.memberRole !== 'admin') {
+      throw createError({ statusCode: 403, statusMessage: 'This conversation is assigned to another agent' })
+    }
+
+    let conversation: Conversation
+    const isNew = !existing
+    if (existing) {
+      const [updated] = await tx.update(conversations).set({
+        assignedAgentId: existing.assignedAgentId ?? input.memberId,
+        status: 'open',
+        lastMessageAt: now,
+        updatedAt: now
+      }).where(eq(conversations.id, existing.id)).returning()
+      conversation = updated!
+    } else {
+      const [created] = await tx.insert(conversations).values({
+        workspaceId: input.workspaceId,
+        visitorRef: input.visitorRef,
+        assignedAgentId: input.memberId,
+        status: 'open',
+        lastMessageAt: now
+      }).returning()
+      conversation = created!
+    }
+    const [message] = await tx.insert(messages).values({
       conversationId: conversation.id,
       senderType: 'agent',
       senderId: input.memberId,
       content: input.content
     }).returning()
-    message = inserted!
+    return { visitor, conversation, message: message!, isNew }
+  })
+  const { visitor, conversation, message, isNew } = result
 
-    const msgEvent = { type: 'message.new' as const, payload: serializeMessage(message) }
+  const msgEvent = { type: 'message.new' as const, payload: serializeMessage(message) }
+  if (isNew) {
     publish(channels.workspace(input.workspaceId), { type: 'conversation.new', payload: serializeConversation(conversation) })
-    publishFiltered(channels.workspace(input.workspaceId), msgEvent, inboxScope(conversation.assignedAgentId))
-    publish(channels.conversation(conversation.id), msgEvent)
-
-    // webhooks (the existing-thread branch dispatches inside addAgentMessage)
-    const visitor = await db.query.visitors.findFirst({ where: eq(visitors.id, input.visitorRef) })
     dispatchWebhooks(input.workspaceId, 'conversation.created', {
       conversation: serializeConversation(conversation),
-      visitor: { id: input.visitorRef, name: visitor?.name ?? null, email: visitor?.email ?? null }
+      visitor: { id: visitor.id, name: visitor.name, email: visitor.email }
     })
-    dispatchWebhooks(input.workspaceId, 'message.created', { message: serializeMessage(message) })
+  } else {
+    publishConversationUpdate(conversation)
   }
+  publishFiltered(channels.workspace(input.workspaceId), msgEvent, inboxScope(conversation.assignedAgentId))
+  publishConversationEvent(channels.conversation(conversation.id), msgEvent, conversation.assignedAgentId)
+  dispatchWebhooks(input.workspaceId, 'message.created', { message: serializeMessage(message) })
 
   // tell the visitor's live widget to adopt the thread (no-op if they left)
   sendToVisitor(input.workspaceId, input.visitorRef, {
@@ -386,5 +384,5 @@ function publishConversationUpdate(c: Conversation) {
     last_message_at: c.lastMessageAt.toISOString()
   }
   publish(channels.workspace(c.workspaceId), { type: 'conversation.updated', payload })
-  publish(channels.conversation(c.id), { type: 'conversation.updated', payload })
+  publishConversationEvent(channels.conversation(c.id), { type: 'conversation.updated', payload }, c.assignedAgentId)
 }

@@ -17,18 +17,19 @@ export default defineNuxtConfig({
 
   runtimeConfig: {
     // server-only: Neon/Postgres connection string (read from .env)
-    databaseUrl: process.env.NEON_CONNECTION_STRING,
+    databaseUrl: '',
     // HMAC secret for short-lived WebSocket auth tickets (reuse the session secret)
-    realtimeSecret: process.env.NUXT_SESSION_PASSWORD,
+    realtimeSecret: '',
     // transactional email (password reset, invites) — optional; logs in dev without it
-    resendApiKey: process.env.RESEND_API_KEY,
-    emailFrom: process.env.RESEND_FROM,
+    resendApiKey: '',
+    emailFrom: '',
     // signed image uploads (attachments) — optional; endpoint 503s without them
-    cloudinaryCloudName: process.env.CLOUDINARY_CLOUD_NAME,
-    cloudinaryApiKey: process.env.CLOUDINARY_API_KEY,
-    cloudinaryApiSecret: process.env.CLOUDINARY_API_SECRET,
+    cloudinaryCloudName: '',
+    cloudinaryApiKey: '',
+    cloudinaryApiSecret: '',
     // comma-separated emails allowed to view instance metrics at /admin
-    adminEmails: process.env.PERCH_ADMIN_EMAILS,
+    adminEmails: '',
+    publicBaseUrl: '',
     public: {
       // the workspace the landing page's live demo widget talks to (site_ids are public by design)
       demoSiteId: process.env.NUXT_PUBLIC_DEMO_SITE_ID || 'ws_18c6715c14'
@@ -36,7 +37,25 @@ export default defineNuxtConfig({
   },
 
   routeRules: {
-    '/': { prerender: true }
+    '/': {
+      prerender: true,
+      headers: {
+        'x-frame-options': 'DENY',
+        'content-security-policy': 'frame-ancestors \'none\'',
+        'x-content-type-options': 'nosniff',
+        'referrer-policy': 'strict-origin-when-cross-origin',
+        'permissions-policy': 'camera=(), microphone=(), geolocation=()',
+        'strict-transport-security': 'max-age=31536000; includeSubDomains'
+      }
+    },
+    '/widget.js': {
+      headers: {
+        'cache-control': 'public, max-age=300, stale-while-revalidate=86400',
+        'x-content-type-options': 'nosniff',
+        'referrer-policy': 'strict-origin-when-cross-origin',
+        'strict-transport-security': 'max-age=31536000; includeSubDomains'
+      }
+    }
   },
 
   // sourcemaps are the main memory hog in the production build — off keeps the

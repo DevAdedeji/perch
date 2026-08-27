@@ -34,4 +34,4 @@ COPY --from=builder /app/migrate.bundle.mjs ./migrate.bundle.mjs
 COPY --from=builder /app/packages/db/migrations ./migrations
 
 EXPOSE 8000
-CMD ["sh", "-c", "node migrate.bundle.mjs && node .output/server/index.mjs"]
+CMD ["sh", "-c", "node migrate.bundle.mjs && exec node .output/server/index.mjs"]

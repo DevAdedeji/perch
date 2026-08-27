@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { inboxScope } from '../server/utils/conversations'
+import { canMemberAccessConversation } from '../server/utils/workspace'
 
 describe('inboxScope — agent visibility on the workspace channel', () => {
   const admin = { memberRole: 'admin', memberId: 'admin-1' }
@@ -25,5 +26,17 @@ describe('inboxScope — agent visibility on the workspace channel', () => {
 
   it('a peer with no membership context receives nothing assigned', () => {
     expect(inboxScope('agent-a')({})).toBe(false)
+  })
+})
+
+describe('conversation authorization', () => {
+  const member = (id: string, role: 'admin' | 'agent') => ({ id, role }) as Parameters<typeof canMemberAccessConversation>[0]
+  const conversation = (assignedAgentId: string | null) => ({ assignedAgentId }) as Parameters<typeof canMemberAccessConversation>[1]
+
+  it('matches inbox visibility for direct REST and WS access', () => {
+    expect(canMemberAccessConversation(member('admin', 'admin'), conversation('someone-else'))).toBe(true)
+    expect(canMemberAccessConversation(member('agent-a', 'agent'), conversation(null))).toBe(true)
+    expect(canMemberAccessConversation(member('agent-a', 'agent'), conversation('agent-a'))).toBe(true)
+    expect(canMemberAccessConversation(member('agent-a', 'agent'), conversation('agent-b'))).toBe(false)
   })
 })

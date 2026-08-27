@@ -1,9 +1,9 @@
-import { and, conversations, eq, visitors, workspaces } from '@perch/db'
+import { and, conversations, eq } from '@perch/db'
 import { z } from 'zod'
 
 const schema = z.object({
   site_id: z.string().min(1),
-  visitor_id: z.string().min(8).max(128)
+  visitor_session: z.string().min(1).max(2048)
 })
 
 /** Public: the name of the agent currently assigned to this visitor's chat (or null). */
@@ -14,13 +14,7 @@ export default defineEventHandler(async (event) => {
   }
 
   const db = useDb()
-  const workspace = await db.query.workspaces.findFirst({ where: eq(workspaces.siteId, result.data.site_id) })
-  if (!workspace) return { agent: null }
-
-  const visitor = await db.query.visitors.findFirst({
-    where: and(eq(visitors.workspaceId, workspace.id), eq(visitors.visitorId, result.data.visitor_id))
-  })
-  if (!visitor) return { agent: null }
+  const { visitor } = await requireVisitorSession(event, result.data.site_id, result.data.visitor_session)
 
   const conversation = await db.query.conversations.findFirst({
     where: and(eq(conversations.visitorRef, visitor.id), eq(conversations.status, 'open'))

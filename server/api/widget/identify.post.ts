@@ -1,9 +1,9 @@
-import { eq, visitors, workspaces } from '@perch/db'
+import { eq, visitors } from '@perch/db'
 import { z } from 'zod'
 
 const schema = z.object({
   site_id: z.string().min(1),
-  visitor_id: z.string().min(8).max(128),
+  visitor_session: z.string().min(1).max(2048),
   user_id: z.string().trim().min(1).max(128).optional(),
   name: z.string().trim().min(1).max(100).optional(),
   email: z.string().trim().toLowerCase().email().max(200).optional(),
@@ -30,13 +30,10 @@ export default defineEventHandler(async (event) => {
   if (!result.success) {
     throw createError({ statusCode: 400, statusMessage: 'Invalid input' })
   }
-  const { site_id, visitor_id, user_id, name, email, hash } = result.data
+  const { site_id, visitor_session, user_id, name, email, hash } = result.data
 
   const db = useDb()
-  const workspace = await db.query.workspaces.findFirst({ where: eq(workspaces.siteId, site_id) })
-  if (!workspace) {
-    throw createError({ statusCode: 404, statusMessage: 'Unknown site' })
-  }
+  const { workspace, visitor } = await requireVisitorSession(event, site_id, visitor_session)
 
   // the signed subject is the user_id when present, otherwise the email
   const subject = user_id ?? email
@@ -55,32 +52,20 @@ export default defineEventHandler(async (event) => {
   }
 
   const now = new Date()
-  const [visitor] = await db.insert(visitors).values({
-    workspaceId: workspace.id,
-    visitorId: visitor_id,
-    externalId: user_id ?? null,
-    name: name ?? null,
-    email: email ?? null,
+  const [updated] = await db.update(visitors).set({
+    lastSeenAt: now,
     identityVerified: verified,
-    lastSeenAt: now
-  }).onConflictDoUpdate({
-    target: [visitors.workspaceId, visitors.visitorId],
-    set: {
-      lastSeenAt: now,
-      identityVerified: verified,
-      // only overwrite what was provided
-      ...(user_id ? { externalId: user_id } : {}),
-      ...(name ? { name } : {}),
-      ...(email ? { email } : {})
-    }
-  }).returning()
+    ...(user_id ? { externalId: user_id } : {}),
+    ...(name ? { name } : {}),
+    ...(email ? { email } : {})
+  }).where(eq(visitors.id, visitor.id)).returning()
 
   // keep the live roster's identity snapshot fresh
-  if (visitor) {
-    visitorIdentified(workspace.id, visitor.id, {
-      name: visitor.name,
-      email: visitor.email,
-      verified: visitor.identityVerified
+  if (updated) {
+    visitorIdentified(workspace.id, updated.id, {
+      name: updated.name,
+      email: updated.email,
+      verified: updated.identityVerified
     })
   }
 

@@ -37,6 +37,13 @@ export async function requireMembership(
   return { user, member }
 }
 
+/** Agents see the unassigned pool and their own work; admins see the workspace. */
+export function canMemberAccessConversation(member: WorkspaceMember, conversation: Conversation): boolean {
+  return member.role === 'admin'
+    || conversation.assignedAgentId === null
+    || conversation.assignedAgentId === member.id
+}
+
 /**
  * Assert the current user can act on a conversation (is a member of its
  * workspace). Returns the conversation and the caller's membership.
@@ -57,6 +64,9 @@ export async function requireConversationMember(
   })
   if (!member) {
     throw createError({ statusCode: 403, statusMessage: 'You are not a member of this workspace' })
+  }
+  if (!canMemberAccessConversation(member, conversation)) {
+    throw createError({ statusCode: 403, statusMessage: 'This conversation is assigned to another agent' })
   }
   return { user, member, conversation }
 }

@@ -53,12 +53,13 @@ export default defineEventHandler(async (event) => {
     }
     patch.allowedDomains = normalized
   }
-  // a schedule is meaningless without a timezone to evaluate it in
-  if (patch.businessHours && !patch.timezone) {
-    const current = await db.query.workspaces.findFirst({ where: eq(workspaces.id, workspaceId) })
-    if (!current?.timezone) {
-      throw createError({ statusCode: 400, statusMessage: 'Pick a timezone for your business hours' })
-    }
+  // Validate the resulting pair, not just fields present in this PATCH. This
+  // also prevents clearing the timezone while retaining an existing schedule.
+  const current = await db.query.workspaces.findFirst({ where: eq(workspaces.id, workspaceId) })
+  const resultingHours = patch.businessHours === undefined ? current?.businessHours : patch.businessHours
+  const resultingTimezone = patch.timezone === undefined ? current?.timezone : patch.timezone
+  if (resultingHours && !resultingTimezone) {
+    throw createError({ statusCode: 400, statusMessage: 'Pick a timezone for your business hours' })
   }
 
   const [workspace] = Object.keys(patch).length

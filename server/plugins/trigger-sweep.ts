@@ -1,4 +1,4 @@
-import { triggerFires } from '@perch/db'
+import { and, eq, triggerFires } from '@perch/db'
 
 /**
  * Proactive-trigger sweep. Every 5s, look at who's live (visitor-presence
@@ -36,19 +36,28 @@ export default defineNitroPlugin(() => {
             const key = `${rule.id}:${visitor.visitor_ref}`
             if (fired.has(key)) continue
             if (fired.size > 10_000) fired.clear()
-            fired.add(key)
-
             // the unique index decides: a returned row means we won the fire
             const [won] = await useDb().insert(triggerFires)
               .values({ triggerId: rule.id, visitorRef: visitor.visitor_ref })
               .onConflictDoNothing()
               .returning()
             if (won) {
-              sendToVisitor(workspaceId, visitor.visitor_ref, {
+              const delivered = sendToVisitor(workspaceId, visitor.visitor_ref, {
                 type: 'trigger.fire',
                 payload: { trigger_id: rule.id, message: rule.message }
               })
+              if (!delivered) {
+                // The visitor vanished between the roster snapshot and send.
+                // Release the durable claim so a future visit may retry.
+                await useDb().delete(triggerFires).where(and(
+                  eq(triggerFires.triggerId, rule.id),
+                  eq(triggerFires.visitorRef, visitor.visitor_ref)
+                ))
+                continue
+              }
             }
+            // Cache only after the database operation settled successfully.
+            fired.add(key)
           }
         }
       }

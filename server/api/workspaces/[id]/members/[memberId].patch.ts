@@ -1,4 +1,4 @@
-import { and, count, eq, users, workspaceMembers } from '@perch/db'
+import { and, count, eq, sql, users, workspaceMembers } from '@perch/db'
 import { z } from 'zod'
 
 const schema = z.object({ role: z.enum(['admin', 'agent']) })
@@ -15,27 +15,23 @@ export default defineEventHandler(async (event) => {
   }
 
   const db = useDb()
-  const target = await db.query.workspaceMembers.findFirst({
-    where: and(eq(workspaceMembers.id, memberId), eq(workspaceMembers.workspaceId, workspaceId))
-  })
-  if (!target) {
-    throw createError({ statusCode: 404, statusMessage: 'Member not found' })
-  }
-
-  if (target.role === 'admin' && result.data.role === 'agent') {
-    const rows = await db
-      .select({ admins: count() })
-      .from(workspaceMembers)
-      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.role, 'admin')))
-    if ((rows[0]?.admins ?? 0) <= 1) {
-      throw createError({ statusCode: 400, statusMessage: 'The workspace must have at least one admin' })
+  const { target, updated } = await db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${workspaceId}))`)
+    const target = await tx.query.workspaceMembers.findFirst({
+      where: and(eq(workspaceMembers.id, memberId), eq(workspaceMembers.workspaceId, workspaceId))
+    })
+    if (!target) throw createError({ statusCode: 404, statusMessage: 'Member not found' })
+    if (target.role === 'admin' && result.data.role === 'agent') {
+      const rows = await tx.select({ admins: count() }).from(workspaceMembers)
+        .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.role, 'admin')))
+      if ((rows[0]?.admins ?? 0) <= 1) {
+        throw createError({ statusCode: 400, statusMessage: 'The workspace must have at least one admin' })
+      }
     }
-  }
-
-  const [updated] = await db.update(workspaceMembers)
-    .set({ role: result.data.role })
-    .where(eq(workspaceMembers.id, memberId))
-    .returning()
+    const [updated] = await tx.update(workspaceMembers).set({ role: result.data.role })
+      .where(eq(workspaceMembers.id, memberId)).returning()
+    return { target, updated: updated! }
+  })
 
   if (target.role !== result.data.role) {
     const targetUser = await db.query.users.findFirst({ where: eq(users.id, target.userId) })

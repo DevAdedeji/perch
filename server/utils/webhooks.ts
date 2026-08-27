@@ -1,4 +1,8 @@
 import { createHmac, randomUUID } from 'node:crypto'
+import { lookup } from 'node:dns/promises'
+import { request as httpRequest } from 'node:http'
+import { request as httpsRequest } from 'node:https'
+import { isIP } from 'node:net'
 import { and, desc, eq, sql, webhookDeliveries, webhookEndpoints } from '@perch/db'
 import type { WebhookEndpoint } from '@perch/db'
 
@@ -25,8 +29,7 @@ export function signWebhook(secret: string, timestamp: number, body: string): st
 }
 
 /**
- * Basic SSRF guard for endpoint URLs: http(s) only, no loopback/private/link-
- * local hosts. Hostname-level only — DNS-rebinding is out of scope for v1.
+ * Syntactic SSRF guard. Delivery also resolves and pins the target address.
  */
 export function isSafeWebhookUrl(url: string): boolean {
   let u: URL
@@ -36,12 +39,77 @@ export function isSafeWebhookUrl(url: string): boolean {
     return false
   }
   if (u.protocol !== 'https:' && u.protocol !== 'http:') return false
-  const host = u.hostname.toLowerCase()
-  if (!host || host === 'localhost' || host === '0.0.0.0' || host === '[::1]' || host === '::1') return false
+  if (u.username || u.password) return false
+  const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, '')
+  if (!host || host === 'localhost') return false
   if (host.endsWith('.local') || host.endsWith('.internal')) return false
-  if (/^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host) || /^169\.254\./.test(host)) return false
-  if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) return false
+  if (isIP(host) && !isPublicIp(host)) return false
   return true
+}
+
+/** Only globally routable unicast addresses may receive webhooks. */
+export function isPublicIp(input: string): boolean {
+  const address = input.toLowerCase().replace(/^\[|\]$/g, '')
+  const version = isIP(address)
+  if (version === 4) {
+    const octets = address.split('.').map(Number)
+    const [a, b] = octets
+    if (a === undefined || b === undefined) return false
+    return !(a === 0 || a === 10 || a === 127 || a >= 224
+      || (a === 100 && b >= 64 && b <= 127)
+      || (a === 169 && b === 254)
+      || (a === 172 && b >= 16 && b <= 31)
+      || (a === 192 && b === 0)
+      || (a === 192 && b === 168)
+      || (a === 198 && (b === 18 || b === 19)))
+  }
+  if (version === 6) {
+    if (address === '::' || address === '::1') return false
+    if (/^f[cd]/.test(address) || /^fe[89ab]/.test(address) || /^ff/.test(address)) return false
+    const mapped = address.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/)
+    if (mapped?.[1]) return isPublicIp(mapped[1])
+    return true
+  }
+  return false
+}
+
+async function resolvePublicTarget(url: string) {
+  if (!isSafeWebhookUrl(url)) throw new Error('Webhook target is not allowed')
+  const parsed = new URL(url)
+  const hostname = parsed.hostname.replace(/^\[|\]$/g, '')
+  const literalVersion = isIP(hostname)
+  const addresses = literalVersion
+    ? [{ address: hostname, family: literalVersion }]
+    : await lookup(hostname, { all: true, verbatim: true })
+  if (!addresses.length || addresses.some(entry => !isPublicIp(entry.address))) {
+    throw new Error('Webhook target resolves to a non-public address')
+  }
+  return { parsed, target: addresses[0]! }
+}
+
+async function postWebhook(url: string, body: string, headers: Record<string, string>): Promise<number> {
+  const { parsed, target } = await resolvePublicTarget(url)
+  return await new Promise<number>((resolve, reject) => {
+    const request = (parsed.protocol === 'https:' ? httpsRequest : httpRequest)(parsed, {
+      method: 'POST',
+      headers: { ...headers, 'content-length': String(Buffer.byteLength(body)) },
+      lookup: (_hostname, _options, callback) => callback(null, target.address, target.family as 4 | 6)
+    }, (response) => {
+      response.resume()
+      response.once('end', () => {
+        clearTimeout(timer)
+        const status = response.statusCode ?? 0
+        if (status >= 200 && status < 300) resolve(status)
+        else reject(Object.assign(new Error(`Webhook returned HTTP ${status}`), { status }))
+      })
+    })
+    const timer = setTimeout(() => request.destroy(new Error('Webhook delivery timed out')), TIMEOUT_MS)
+    request.once('error', (error) => {
+      clearTimeout(timer)
+      reject(error)
+    })
+    request.end(body)
+  })
 }
 
 /* endpoint cache (dispatch runs on hot message paths) */
@@ -91,24 +159,15 @@ export async function deliverOnce(
   let error: string | null = null
 
   try {
-    const res = await $fetch.raw(endpoint.url, {
-      method: 'POST',
-      body,
-      headers: {
-        'content-type': 'application/json',
-        'x-perch-event': event,
-        'x-perch-signature': `t=${timestamp},v1=${signature}`
-      },
-      timeout: TIMEOUT_MS,
-      retry: 0,
-      // the response body is the customer's business, not ours
-      responseType: 'text'
+    httpStatus = await postWebhook(endpoint.url, body, {
+      'content-type': 'application/json',
+      'x-perch-event': event,
+      'x-perch-signature': `t=${timestamp},v1=${signature}`
     })
-    httpStatus = res.status
     ok = true
   } catch (e) {
-    const fe = e as { response?: { status?: number }, message?: string }
-    httpStatus = fe.response?.status ?? null
+    const fe = e as { status?: number, message?: string }
+    httpStatus = fe.status ?? null
     error = (fe.message ?? 'delivery failed').slice(0, 500)
   }
   const durationMs = Date.now() - started

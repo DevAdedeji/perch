@@ -4,7 +4,7 @@ import { channels } from '@perch/shared'
 /** Mark a conversation read for the current agent (updates unread state). */
 export default defineEventHandler(async (event) => {
   const conversationId = getRouterParam(event, 'id')!
-  const { member } = await requireConversationMember(event, conversationId)
+  const { member, conversation } = await requireConversationMember(event, conversationId)
 
   const db = useDb()
   const now = new Date()
@@ -16,10 +16,10 @@ export default defineEventHandler(async (event) => {
     })
 
   // the visitor's widget shows "Seen" off this
-  publish(channels.conversation(conversationId), {
+  publishConversationEvent(channels.conversation(conversationId), {
     type: 'conversation.read',
     payload: { conversation_id: conversationId, last_read_at: now.toISOString() }
-  })
+  }, conversation.assignedAgentId)
 
   return { ok: true }
 })

@@ -18,6 +18,7 @@ import {
   uniqueIndex,
   uuid
 } from 'drizzle-orm/pg-core'
+import { sql } from 'drizzle-orm'
 import type { BusinessHours, VisitorMetadata } from '@perch/shared'
 
 /* Enums (mirror @perch/shared) */
@@ -117,7 +118,11 @@ export const conversations = pgTable('conversations', {
   csatAt: timestamp('csat_at', { withTimezone: true })
 }, t => [
   // inbox listing + status filters, sorted by recency (§4 design note)
-  index('conversations_workspace_status_recency_idx').on(t.workspaceId, t.status, t.lastMessageAt)
+  index('conversations_workspace_status_recency_idx').on(t.workspaceId, t.status, t.lastMessageAt),
+  // Defense in depth for concurrent widget and agent-initiated starts.
+  uniqueIndex('conversations_visitor_active_uq')
+    .on(t.visitorRef)
+    .where(sql`${t.status} in ('unassigned', 'open')`)
 ])
 
 /** Workspace-defined conversation labels ("billing", "bug", …). */

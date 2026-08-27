@@ -19,11 +19,12 @@ async function getMember(userId: string, workspaceId: string): Promise<Workspace
   })
 }
 
-async function agentCanAccessConversation(userId: string, conversationId: string): Promise<boolean> {
+async function agentConversationMembership(userId: string, conversationId: string): Promise<WorkspaceMember | undefined> {
   const db = useDb()
   const convo = await db.query.conversations.findFirst({ where: eq(conversations.id, conversationId) })
-  if (!convo) return false
-  return !!(await getMember(userId, convo.workspaceId))
+  if (!convo) return undefined
+  const member = await getMember(userId, convo.workspaceId)
+  return member && canMemberAccessConversation(member, convo) ? member : undefined
 }
 
 async function visitorCanAccessConversation(wid: string, vid: string, conversationId: string): Promise<boolean> {
@@ -34,8 +35,14 @@ async function visitorCanAccessConversation(wid: string, vid: string, conversati
 
 async function handleSubscribe(peer: import('crossws').Peer, channel: unknown) {
   if (typeof channel !== 'string') return
-  const [kind, id] = channel.split(':')
-  if (!id) return
+  const parts = channel.split(':')
+  if (parts.length !== 2 || !parts[0] || !parts[1] || channel.length > 128) return
+  const [kind, id] = parts
+
+  if (!isSubscribed(channel, peer) && subscriptionCount(peer) >= 8) {
+    peer.send(JSON.stringify({ type: 'subscribe.error', channel, reason: 'channel limit reached' }))
+    return
+  }
 
   const ctx = peer.context
   let allowed = false
@@ -53,7 +60,12 @@ async function handleSubscribe(peer: import('crossws').Peer, channel: unknown) {
         return
       }
     } else if (kind === 'conversation') {
-      allowed = await agentCanAccessConversation(ctx.userId as string, id)
+      const member = await agentConversationMembership(ctx.userId as string, id)
+      allowed = !!member
+      if (member) {
+        ctx.memberId = member.id
+        ctx.memberRole = member.role
+      }
     } else if (kind === 'visitors') {
       // live-roster deltas — any member of the workspace may watch
       allowed = !!(await getMember(ctx.userId as string, id))
@@ -117,9 +129,31 @@ export default defineWebSocketHandler({
       return
     }
 
+    const raw = message.text()
+    if (raw.length > 8192) {
+      peer.close(1009, 'message too large')
+      return
+    }
+
+    const now = Date.now()
+    const windowStart = typeof ctx.rateWindowStart === 'number' ? ctx.rateWindowStart : now
+    const count = typeof ctx.rateEventCount === 'number' ? ctx.rateEventCount : 0
+    if (now - windowStart >= 60_000) {
+      ctx.rateWindowStart = now
+      ctx.rateEventCount = 1
+    } else {
+      ctx.rateWindowStart = windowStart
+      const nextCount = count + 1
+      ctx.rateEventCount = nextCount
+      if (nextCount > 240) {
+        peer.close(1008, 'rate limit exceeded')
+        return
+      }
+    }
+
     let msg: { type?: string, channel?: unknown, payload?: { conversation_id?: string, presence?: string } }
     try {
-      msg = JSON.parse(message.text())
+      msg = JSON.parse(raw)
     } catch {
       return
     }
@@ -157,14 +191,26 @@ export default defineWebSocketHandler({
       case 'typing.start':
       case 'typing.stop': {
         const conversationId = msg.payload?.conversation_id
-        if (!conversationId) break
+        if (!conversationId || conversationId.length > 64) break
+        const channel = channels.conversation(conversationId)
+        if (!isSubscribed(channel, peer)) break
+        const convo = await useDb().query.conversations.findFirst({ where: eq(conversations.id, conversationId) })
+        if (!convo) break
+        const currentMember = ctx.role === 'agent' ? await getMember(ctx.userId as string, convo.workspaceId) : undefined
+        const stillAllowed = ctx.role === 'agent'
+          ? !!currentMember && canMemberAccessConversation(currentMember, convo)
+          : convo.workspaceId === ctx.wid && convo.visitorRef === ctx.vid
+        if (!stillAllowed) {
+          unsubscribe(channel, peer)
+          break
+        }
         // sneak-peek: relay the visitor's draft to agents — WS-only, never stored.
         // strictly one-directional: an agent's draft must never reach the visitor.
         const rawPreview = (msg.payload as { preview?: unknown } | undefined)?.preview
         const preview = ctx.role === 'visitor' && msg.type === 'typing.start' && typeof rawPreview === 'string'
           ? rawPreview.slice(0, 500)
           : null
-        publish(channels.conversation(conversationId), {
+        publishConversationEvent(channel, {
           type: 'typing',
           payload: {
             conversation_id: conversationId,
@@ -172,7 +218,7 @@ export default defineWebSocketHandler({
             is_typing: msg.type === 'typing.start',
             preview
           }
-        })
+        }, convo.assignedAgentId)
         break
       }
     }

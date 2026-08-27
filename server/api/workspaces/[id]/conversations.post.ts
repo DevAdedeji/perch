@@ -33,6 +33,7 @@ export default defineEventHandler(async (event) => {
     workspaceId,
     visitorRef: visitor.id,
     memberId: member.id,
+    memberRole: member.role,
     content: message
   })
 

@@ -1,6 +1,6 @@
 import { createHmac } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
-import { isSafeWebhookUrl, signWebhook } from '../server/utils/webhooks'
+import { isPublicIp, isSafeWebhookUrl, signWebhook } from '../server/utils/webhooks'
 
 const SECRET = 'whsec_test_secret'
 
@@ -11,6 +11,18 @@ describe('signWebhook', () => {
     const sig = signWebhook(SECRET, t, body)
     const expected = createHmac('sha256', SECRET).update(`${t}.${body}`).digest('hex')
     expect(sig).toBe(expected)
+  })
+
+  it('rejects private and special IPv6 targets', () => {
+    expect(isSafeWebhookUrl('http://[::1]/hook')).toBe(false)
+    expect(isSafeWebhookUrl('http://[fd00::1]/hook')).toBe(false)
+    expect(isSafeWebhookUrl('http://[fe80::1]/hook')).toBe(false)
+    expect(isPublicIp('::ffff:127.0.0.1')).toBe(false)
+    expect(isPublicIp('2606:4700:4700::1111')).toBe(true)
+  })
+
+  it('rejects credentials in webhook URLs', () => {
+    expect(isSafeWebhookUrl('https://user:password@example.com/hook')).toBe(false)
   })
 
   it('changes when the body is tampered with', () => {

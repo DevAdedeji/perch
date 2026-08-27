@@ -17,6 +17,7 @@ interface PerchApi {
   identify: (traits: Identity) => void
   open: () => void
   close: () => void
+  destroy: () => void
 }
 
 type WinFlag = Window & {
@@ -52,6 +53,7 @@ function init() {
   // Mobile (≤480px): an inset sheet with a top gap + safe-area margins; the
   // launcher hides while open (the frame's own close button takes over).
   const style = document.createElement('style')
+  style.dataset.perchStyle = 'true'
   style.textContent = `
 .perch-bubble{position:fixed;bottom:calc(20px + env(safe-area-inset-bottom,0px));right:20px;width:56px;height:56px;border-radius:9999px;background:#0f172a;color:#fff;border:none;cursor:pointer;box-shadow:0 8px 30px rgba(0,0,0,.25);z-index:${Z + 1};display:grid;place-items:center;transition:transform .18s ease,opacity .18s ease,background-color .35s ease,color .35s ease}
 .perch-bubble:hover{transform:scale(1.06)}
@@ -87,6 +89,8 @@ function init() {
   // iframe panel (created immediately, revealed on open)
   let iframe: HTMLIFrameElement | null = null
   let open = false
+  let destroyed = false
+  let iconTimer: ReturnType<typeof setTimeout> | undefined
 
   function ensureIframe(): HTMLIFrameElement {
     if (iframe) return iframe
@@ -95,6 +99,7 @@ function init() {
     f.title = 'Chat'
     f.className = 'perch-frame'
     f.setAttribute('allow', 'clipboard-write')
+    f.setAttribute('sandbox', 'allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-same-origin')
     document.body.appendChild(f)
     iframe = f
     return f
@@ -103,7 +108,9 @@ function init() {
   function swapIcon(nextOpen: boolean) {
     icon.style.transform = 'scale(0) rotate(-90deg)'
     icon.style.opacity = '0'
-    setTimeout(() => {
+    clearTimeout(iconTimer)
+    iconTimer = setTimeout(() => {
+      if (destroyed) return
       icon.innerHTML = nextOpen ? CLOSE_ICON : CHAT_ICON
       icon.style.transform = 'none'
       icon.style.opacity = '1'
@@ -118,10 +125,11 @@ function init() {
     bubble.classList.toggle('perch-hide', next)
     if (next) badge.style.display = 'none'
     swapIcon(next)
-    f.contentWindow?.postMessage({ source: 'perch-host', perch: next ? 'open' : 'close' }, '*')
+    f.contentWindow?.postMessage({ source: 'perch-host', perch: next ? 'open' : 'close' }, origin)
   }
 
-  bubble.addEventListener('click', () => setOpen(!open))
+  const onBubbleClick = () => setOpen(!open)
+  bubble.addEventListener('click', onBubbleClick)
 
   // public API: window.Perch.identify({ name, email })
   // Lets the host site pass its signed-in user so the widget can skip the
@@ -130,7 +138,7 @@ function init() {
 
   function sendIdentity() {
     if (identity) {
-      iframe?.contentWindow?.postMessage({ source: 'perch-host', perch: 'identify', ...identity }, '*')
+      iframe?.contentWindow?.postMessage({ source: 'perch-host', perch: 'identify', ...identity }, origin)
     }
   }
 
@@ -143,21 +151,46 @@ function init() {
   function sendPage() {
     if (location.href === lastPage) return
     lastPage = location.href
-    iframe?.contentWindow?.postMessage({ source: 'perch-host', perch: 'page', url: location.href }, '*')
+    iframe?.contentWindow?.postMessage({ source: 'perch-host', perch: 'page', url: location.href }, origin)
   }
 
+  const originalPushState = history.pushState
+  const originalReplaceState = history.replaceState
+  let wrappedPushState: History['pushState'] | null = null
+  let wrappedReplaceState: History['replaceState'] | null = null
+
   function trackNavigation() {
-    const wrap = (method: 'pushState' | 'replaceState') => {
-      const original = history[method].bind(history)
-      history[method] = (...args: Parameters<History['pushState']>) => {
-        original(...args)
-        sendPage()
-      }
+    wrappedPushState = function (...args: Parameters<History['pushState']>) {
+      originalPushState.apply(history, args)
+      sendPage()
     }
-    wrap('pushState')
-    wrap('replaceState')
+    wrappedReplaceState = function (...args: Parameters<History['replaceState']>) {
+      originalReplaceState.apply(history, args)
+      sendPage()
+    }
+    history.pushState = wrappedPushState
+    history.replaceState = wrappedReplaceState
     window.addEventListener('popstate', sendPage)
     window.addEventListener('hashchange', sendPage)
+  }
+
+  function destroy() {
+    if (destroyed) return
+    destroyed = true
+    clearTimeout(iconTimer)
+    bubble.removeEventListener('click', onBubbleClick)
+    window.removeEventListener('message', onWidgetMessage)
+    window.removeEventListener('popstate', sendPage)
+    window.removeEventListener('hashchange', sendPage)
+    if (wrappedPushState && history.pushState === wrappedPushState) history.pushState = originalPushState
+    if (wrappedReplaceState && history.replaceState === wrappedReplaceState) history.replaceState = originalReplaceState
+    iframe?.remove()
+    bubble.remove()
+    style.remove()
+    iframe = null
+    open = false
+    if (w.Perch === api) delete w.Perch
+    w.__perchLoaded = false
   }
 
   const api: PerchApi = {
@@ -173,14 +206,15 @@ function init() {
       sendIdentity()
     },
     open: () => setOpen(true),
-    close: () => setOpen(false)
+    close: () => setOpen(false),
+    destroy
   }
   w.Perch = api
   if (w.perchIdentity) api.identify(w.perchIdentity)
 
-  window.addEventListener('message', (e: MessageEvent) => {
+  function onWidgetMessage(e: MessageEvent) {
     const d = e.data
-    if (!d || d.source !== 'perch-widget') return
+    if (e.origin !== origin || e.source !== iframe?.contentWindow || !d || d.source !== 'perch-widget') return
     if (d.perch === 'unread') {
       const n = Number(d.count) || 0
       if (n > 0 && !open) {
@@ -200,7 +234,7 @@ function init() {
       setOpen(true)
     } else if (d.perch === 'ready') {
       // frame (re)mounted — resync open state + identity + page in case a message was missed
-      iframe?.contentWindow?.postMessage({ source: 'perch-host', perch: open ? 'open' : 'close' }, '*')
+      iframe?.contentWindow?.postMessage({ source: 'perch-host', perch: open ? 'open' : 'close' }, origin)
       sendIdentity()
       lastPage = ''
       sendPage()
@@ -211,7 +245,8 @@ function init() {
         if (typeof d.fg === 'string' && HEX.test(d.fg)) bubble.style.color = d.fg
       }
     }
-  })
+  }
+  window.addEventListener('message', onWidgetMessage)
 
   document.body.appendChild(bubble)
   ensureIframe()
