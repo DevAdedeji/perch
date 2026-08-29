@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { CannedResponse, InboxFilter } from '~/composables/useControlRoom'
+import type { InboxFilter } from '~/composables/useControlRoom'
 
 definePageMeta({ layout: 'dashboard' })
 useHead({ title: 'Inbox · Perch' })
@@ -16,9 +16,6 @@ const filters: { label: string, value: InboxFilter }[] = [
   { label: 'Resolved', value: 'resolved' }
 ]
 
-const reply = ref('')
-const internalNote = ref(false)
-
 /* inbox search (visitor name/email or message text) */
 const {
   query: searchQuery,
@@ -31,56 +28,6 @@ function openSearchResult(id: string) {
   cr.select(id, { force: true })
 }
 
-/* @mentions in internal notes */
-const mentionIndex = ref(0)
-// what the picker inserted → the member it stands for (validated again on send)
-const pickedMentions = new Map<string, string>()
-
-const mentionQuery = computed<string | null>(() => {
-  if (!internalNote.value) return null
-  const m = reply.value.match(/@([\w-]*)$/)
-  return m ? m[1]!.toLowerCase() : null
-})
-const mentionMatches = computed(() =>
-  mentionQuery.value === null
-    ? []
-    : cr.members.value.filter(m => m.name.toLowerCase().includes(mentionQuery.value!)).slice(0, 6)
-)
-const mentionOpen = computed(() => mentionMatches.value.length > 0)
-watch(mentionQuery, () => {
-  mentionIndex.value = 0
-})
-
-function applyMention(m: { id: string, name: string }) {
-  const token = `@${m.name.split(' ')[0]}`
-  reply.value = reply.value.replace(/@[\w-]*$/, `${token} `)
-  pickedMentions.set(token, m.id)
-  nextTick(() => composerEl.value?.textareaRef?.focus())
-}
-
-const { uploading, uploadImage } = useImageUpload()
-const attachEl = ref<HTMLInputElement | null>(null)
-
-function pickAttachment() {
-  attachEl.value?.click()
-}
-
-async function onAttachmentPicked(e: Event) {
-  const input = e.target as HTMLInputElement
-  const file = input.files?.[0]
-  input.value = ''
-  if (!file) return
-  // validate before showing a bubble; network failures become retryable bubbles
-  if (!file.type.startsWith('image/')) {
-    toast.add({ title: 'Only images can be attached', color: 'error' })
-    return
-  }
-  if (file.size > 1024 * 1024) {
-    toast.add({ title: 'Images must be smaller than 1 MB', color: 'error' })
-    return
-  }
-  await cr.sendAttachment(file, () => uploadImage(file), internalNote.value)
-}
 const contextOpen = ref(false) // slideover on < xl
 function openContext() {
   contextOpen.value = true
@@ -95,96 +42,7 @@ function initials(name: string | null, fallback = 'V') {
   return (name ?? fallback).trim().split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase() || fallback
 }
 
-/* canned responses: type "/" to search templates */
-const composerEl = ref<{ textareaRef?: HTMLTextAreaElement } | null>(null)
-const cannedDismissed = ref(false)
-const cannedIndex = ref(0)
-
-const cannedQuery = computed<string | null>(() => {
-  const m = reply.value.match(/^\/([a-z0-9-]*)$/i)
-  return m ? m[1]!.toLowerCase() : null
-})
-const cannedMatches = computed<CannedResponse[]>(() =>
-  cannedQuery.value === null
-    ? []
-    : cr.canned.value.filter(c => c.shortcut.startsWith(cannedQuery.value!)).slice(0, 6)
-)
-const cannedOpen = computed(() => cannedMatches.value.length > 0 && !cannedDismissed.value && !internalNote.value)
-
-watch(cannedQuery, () => {
-  cannedIndex.value = 0
-  cannedDismissed.value = false
-})
-
-function applyCanned(c: CannedResponse) {
-  reply.value = c.content
-  nextTick(() => composerEl.value?.textareaRef?.focus())
-}
-
-function onComposerKeydown(e: KeyboardEvent) {
-  if (mentionOpen.value) {
-    if (e.key === 'ArrowDown') {
-      e.preventDefault()
-      mentionIndex.value = (mentionIndex.value + 1) % mentionMatches.value.length
-      return
-    }
-    if (e.key === 'ArrowUp') {
-      e.preventDefault()
-      mentionIndex.value = (mentionIndex.value - 1 + mentionMatches.value.length) % mentionMatches.value.length
-      return
-    }
-    if (e.key === 'Enter' || e.key === 'Tab') {
-      e.preventDefault()
-      applyMention(mentionMatches.value[mentionIndex.value]!)
-      return
-    }
-  }
-  if (cannedOpen.value) {
-    if (e.key === 'ArrowDown') {
-      e.preventDefault()
-      cannedIndex.value = (cannedIndex.value + 1) % cannedMatches.value.length
-      return
-    }
-    if (e.key === 'ArrowUp') {
-      e.preventDefault()
-      cannedIndex.value = (cannedIndex.value - 1 + cannedMatches.value.length) % cannedMatches.value.length
-      return
-    }
-    if (e.key === 'Enter' || e.key === 'Tab') {
-      e.preventDefault()
-      applyCanned(cannedMatches.value[cannedIndex.value]!)
-      return
-    }
-    if (e.key === 'Escape') {
-      cannedDismissed.value = true
-      return
-    }
-  }
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault()
-    onSend()
-  }
-}
-
 /* actions */
-async function onSend() {
-  const text = reply.value.trim()
-  if (!text) return
-  const note = internalNote.value
-  // mentions count only if their @token is still in the sent text
-  const mentionIds = note
-    ? [...new Set([...pickedMentions.entries()]
-        .filter(([token]) => text.includes(token))
-        .map(([, id]) => id))]
-    : []
-  pickedMentions.clear()
-  // clear instantly — the message appears optimistically; failures become
-  // retryable bubbles (see useControlRoom.performSend)
-  reply.value = ''
-  internalNote.value = false
-  await cr.sendReply(text, note, undefined, mentionIds)
-}
-
 async function onClaim(id: string) {
   try {
     await cr.claim(id)
@@ -767,122 +625,13 @@ const statusBadge = {
               :retry-send="cr.retrySend"
             />
 
-            <!-- composer -->
-            <div class="shrink-0 border-t border-default bg-default p-3">
-              <div class="relative">
-                <!-- @mention picker (internal notes) -->
-                <div
-                  v-if="mentionOpen"
-                  class="absolute bottom-full left-0 right-0 mb-2 rounded-xl bg-default ring-1 ring-default shadow-xl shadow-black/10 overflow-hidden z-10"
-                >
-                  <p class="px-3 pt-2.5 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-dimmed">
-                    Mention a teammate
-                  </p>
-                  <ul class="max-h-56 overflow-y-auto pb-1">
-                    <li
-                      v-for="(m, i) in mentionMatches"
-                      :key="m.id"
-                    >
-                      <button
-                        class="w-full flex items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors"
-                        :class="i === mentionIndex ? 'bg-amber-500/10 text-highlighted' : 'text-muted hover:bg-elevated'"
-                        @click="applyMention(m)"
-                      >
-                        <span
-                          class="size-1.5 rounded-full"
-                          :class="presenceDot(m.presence)"
-                        />
-                        {{ m.name }}
-                      </button>
-                    </li>
-                  </ul>
-                </div>
-
-                <!-- canned response picker -->
-                <div
-                  v-else-if="cannedOpen"
-                  class="absolute bottom-full left-0 right-0 mb-2 rounded-xl bg-default ring-1 ring-default shadow-xl shadow-black/10 overflow-hidden z-10"
-                >
-                  <p class="px-3 pt-2.5 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-dimmed">
-                    Canned replies
-                  </p>
-                  <ul class="max-h-56 overflow-y-auto pb-1">
-                    <li
-                      v-for="(c, i) in cannedMatches"
-                      :key="c.id"
-                    >
-                      <button
-                        class="w-full flex items-baseline gap-2.5 px-3 py-2 text-left transition-colors"
-                        :class="i === cannedIndex ? 'bg-amber-500/10' : 'hover:bg-elevated/60'"
-                        @mouseenter="cannedIndex = i"
-                        @click="applyCanned(c)"
-                      >
-                        <span class="shrink-0 font-mono text-xs font-semibold text-amber-700 dark:text-amber-400">/{{ c.shortcut }}</span>
-                        <span class="truncate text-xs text-muted">{{ c.content }}</span>
-                      </button>
-                    </li>
-                  </ul>
-                </div>
-
-                <div
-                  class="rounded-xl ring-1 transition-colors focus-within:ring-2"
-                  :class="internalNote
-                    ? 'ring-amber-500/40 bg-amber-500/5 focus-within:ring-amber-500/60'
-                    : 'ring-default bg-elevated/40 focus-within:ring-amber-500/60'"
-                >
-                  <UTextarea
-                    ref="composerEl"
-                    v-model="reply"
-                    :rows="2"
-                    autoresize
-                    variant="none"
-                    :placeholder="internalNote ? 'Write an internal note (agents only)…' : 'Reply to the visitor…'"
-                    class="w-full"
-                    @keydown="onComposerKeydown"
-                  />
-                  <div class="flex items-center gap-2 px-2.5 pb-2">
-                    <input
-                      ref="attachEl"
-                      type="file"
-                      accept="image/*"
-                      class="hidden"
-                      @change="onAttachmentPicked"
-                    >
-                    <UButton
-                      size="sm"
-                      color="neutral"
-                      variant="ghost"
-                      square
-                      icon="i-lucide-image-plus"
-                      :loading="uploading"
-                      aria-label="Attach an image (max 1 MB)"
-                      @click="pickAttachment"
-                    />
-                    <USwitch
-                      v-model="internalNote"
-                      size="sm"
-                    />
-                    <span
-                      class="text-xs"
-                      :class="internalNote ? 'text-amber-700 dark:text-amber-400 font-medium' : 'text-muted'"
-                    >Internal note</span>
-                    <span class="hidden sm:block ml-3 text-[11px] text-dimmed">
-                      <span class="font-mono">↵</span> send · <span class="font-mono">⇧↵</span> newline · <span class="font-mono">/</span> canned reply
-                    </span>
-                    <UButton
-                      class="ml-auto"
-                      size="sm"
-                      color="primary"
-                      icon="i-lucide-send-horizontal"
-                      square
-                      :aria-label="internalNote ? 'Add note' : 'Send'"
-                      :disabled="!reply.trim()"
-                      @click="onSend"
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
+            <ConversationComposer
+              :key="cr.activeConversation.value.id"
+              :members="cr.members.value"
+              :canned-responses="cr.canned.value"
+              :send-reply="cr.sendReply"
+              :send-attachment="cr.sendAttachment"
+            />
           </div>
 
           <!-- visitor context panel (xl+) -->
