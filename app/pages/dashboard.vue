@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import type { MessageDTO } from '@perch/shared'
 import type { CannedResponse, InboxFilter } from '~/composables/useControlRoom'
 
 definePageMeta({ layout: 'dashboard' })
@@ -95,108 +94,6 @@ function tabCount(value: InboxFilter): number {
 function initials(name: string | null, fallback = 'V') {
   return (name ?? fallback).trim().split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase() || fallback
 }
-
-/* thread rows: grouping + day dividers (mirrors the widget) */
-type ThreadMsg = MessageDTO & { pending?: boolean, failed?: boolean }
-interface MsgRow { kind: 'msg', m: ThreadMsg, first: boolean, last: boolean }
-interface NoteRow { kind: 'note', m: ThreadMsg }
-interface SystemRow { kind: 'system', m: ThreadMsg }
-interface DayRow { kind: 'day', id: string, label: string }
-
-function dayLabel(iso: string) {
-  const d = new Date(iso)
-  const today = new Date()
-  const yesterday = new Date(today)
-  yesterday.setDate(today.getDate() - 1)
-  if (d.toDateString() === today.toDateString()) return 'Today'
-  if (d.toDateString() === yesterday.toDateString()) return 'Yesterday'
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-}
-
-function formatTime(iso: string) {
-  return new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
-}
-
-function isBubble(m: ThreadMsg) {
-  return m.sender_type !== 'system' && !m.is_internal_note
-}
-
-function sameGroup(a: ThreadMsg, b: ThreadMsg) {
-  return isBubble(a) && isBubble(b)
-    && a.sender_type === b.sender_type
-    && a.sender_id === b.sender_id
-    && Math.abs(+new Date(b.created_at) - +new Date(a.created_at)) < 5 * 60_000
-}
-
-const rows = computed<(MsgRow | NoteRow | SystemRow | DayRow)[]>(() => {
-  const list = cr.messages.value
-  const out: (MsgRow | NoteRow | SystemRow | DayRow)[] = []
-  for (let i = 0; i < list.length; i++) {
-    const m = list[i]!
-    const prev = list[i - 1]
-    const next = list[i + 1]
-    const day = dayLabel(m.created_at)
-    const newDay = !prev || dayLabel(prev.created_at) !== day
-    if (newDay) out.push({ kind: 'day', id: `day-${m.id}`, label: day })
-    if (m.sender_type === 'system') {
-      out.push({ kind: 'system', m })
-    } else if (m.is_internal_note) {
-      out.push({ kind: 'note', m })
-    } else {
-      out.push({
-        kind: 'msg',
-        m,
-        first: newDay || !prev || !sameGroup(prev, m),
-        last: !next || !sameGroup(m, next) || dayLabel(next.created_at) !== day
-      })
-    }
-  }
-  return out
-})
-
-function bubbleShape(row: MsgRow) {
-  return row.m.sender_type === 'agent'
-    ? ['rounded-2xl rounded-br-md', !row.first && 'rounded-tr-md']
-    : ['rounded-2xl rounded-bl-md', !row.first && 'rounded-tl-md']
-}
-
-// keep the thread pinned to the newest message — but only when the newest
-// message actually changed (prepending older pages must not yank the scroll)
-const threadEl = ref<HTMLElement | null>(null)
-let lastMessageId: string | null = null
-watch(() => cr.messages.value[cr.messages.value.length - 1]?.id ?? null, (id) => {
-  if (id && id !== lastMessageId) {
-    nextTick(() => {
-      threadEl.value?.scrollTo({ top: threadEl.value.scrollHeight, behavior: 'smooth' })
-    })
-  }
-  lastMessageId = id
-})
-
-// keep the sneak-peek ghost bubble in view while the visitor types — but only
-// when the agent is already near the bottom (never yank them off history)
-watch(() => cr.visitorDraft.value, () => {
-  const el = threadEl.value
-  if (!el) return
-  const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 160
-  if (nearBottom) nextTick(() => el.scrollTo({ top: el.scrollHeight }))
-})
-
-async function onLoadOlder() {
-  const el = threadEl.value
-  const previousHeight = el?.scrollHeight ?? 0
-  await cr.loadOlderMessages()
-  // keep the viewport anchored on the message the agent was looking at
-  await nextTick()
-  if (el) el.scrollTop += el.scrollHeight - previousHeight
-}
-watch(() => cr.loadingThread.value, (loading) => {
-  if (!loading) {
-    nextTick(() => {
-      threadEl.value?.scrollTo({ top: threadEl.value.scrollHeight })
-    })
-  }
-})
 
 /* canned responses: type "/" to search templates */
 const composerEl = ref<{ textareaRef?: HTMLTextAreaElement } | null>(null)
@@ -858,184 +755,17 @@ const statusBadge = {
 
         <div class="flex-1 flex min-h-0">
           <div class="flex-1 flex flex-col min-w-0">
-            <!-- thread loading -->
-            <div
-              v-if="cr.loadingThread.value"
-              class="flex-1 px-5 py-5 space-y-3 bg-grid"
-            >
-              <USkeleton class="h-9 w-44 rounded-2xl rounded-bl-md" />
-              <USkeleton class="h-9 w-56 rounded-2xl rounded-br-md ml-auto" />
-              <USkeleton class="h-9 w-40 rounded-2xl rounded-bl-md" />
-              <USkeleton class="h-16 w-52 rounded-2xl rounded-br-md ml-auto" />
-            </div>
-
-            <!-- thread -->
-            <div
-              v-else
-              ref="threadEl"
-              class="flex-1 overflow-y-auto px-5 py-5 bg-grid"
-            >
-              <div
-                v-if="cr.hasMoreMessages.value"
-                class="flex justify-center pb-3"
-              >
-                <UButton
-                  size="xs"
-                  color="neutral"
-                  variant="subtle"
-                  icon="i-lucide-history"
-                  :loading="cr.loadingOlder.value"
-                  @click="onLoadOlder"
-                >
-                  Load earlier messages
-                </UButton>
-              </div>
-              <template
-                v-for="row in rows"
-                :key="row.kind === 'day' ? row.id : row.m.id"
-              >
-                <!-- day divider -->
-                <p
-                  v-if="row.kind === 'day'"
-                  class="text-center text-[10px] font-semibold uppercase tracking-wider text-dimmed mt-5 mb-3 first:mt-0"
-                >
-                  {{ row.label }}
-                </p>
-
-                <!-- system -->
-                <div
-                  v-else-if="row.kind === 'system'"
-                  class="flex justify-center my-2"
-                >
-                  <span class="rounded-full bg-elevated ring-1 ring-default px-3 py-1 text-[11px] text-muted">{{ row.m.content }}</span>
-                </div>
-
-                <!-- internal note: the sticky note -->
-                <div
-                  v-else-if="row.kind === 'note'"
-                  class="flex justify-end my-2"
-                >
-                  <div class="max-w-[72%] rounded-xl rounded-br-md bg-amber-500/10 ring-1 ring-amber-500/30 px-3.5 py-2 text-sm text-highlighted whitespace-pre-wrap wrap-break-word">
-                    <p class="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400 mb-1">
-                      <UIcon
-                        name="i-lucide-lock"
-                        class="size-3"
-                      />
-                      Internal note · {{ cr.memberName(row.m.sender_id) }} · {{ formatTime(row.m.created_at) }}
-                    </p>
-                    <a
-                      v-if="row.m.attachment_url"
-                      :href="row.m.attachment_url"
-                      target="_blank"
-                      rel="noopener"
-                      class="block my-1"
-                    >
-                      <img
-                        :src="cldThumb(row.m.attachment_url)"
-                        class="rounded-lg max-h-56 w-auto"
-                        loading="lazy"
-                        alt="Image attachment"
-                      >
-                    </a>
-                    {{ row.m.content }}
-                  </div>
-                </div>
-
-                <!-- visitor / agent -->
-                <div
-                  v-else
-                  :class="row.first ? 'mt-2.5' : 'mt-0.5'"
-                >
-                  <div
-                    class="flex items-end gap-2"
-                    :class="row.m.sender_type === 'agent' ? 'flex-row-reverse' : ''"
-                  >
-                    <template v-if="row.m.sender_type === 'agent'">
-                      <span
-                        v-if="row.last"
-                        class="grid place-items-center size-6 shrink-0 rounded-lg avatar-amber text-[10px] font-semibold"
-                      >{{ initials(cr.memberName(row.m.sender_id), 'A') }}</span>
-                      <span
-                        v-else
-                        class="w-6 shrink-0"
-                      />
-                    </template>
-                    <div
-                      class="max-w-[72%] px-3.5 py-2 text-sm leading-snug whitespace-pre-wrap wrap-break-word transition-opacity"
-                      :class="[
-                        ...bubbleShape(row),
-                        row.m.sender_type === 'agent'
-                          ? 'bg-amber-500 text-slate-950 shadow-sm'
-                          : 'bg-default ring-1 ring-default text-highlighted',
-                        { 'opacity-60': row.m.pending, 'ring-2 ring-red-500/60': row.m.failed }
-                      ]"
-                    >
-                      <a
-                        v-if="row.m.attachment_url"
-                        :href="row.m.attachment_url"
-                        target="_blank"
-                        rel="noopener"
-                        class="block -mx-2 my-0.5 first:mt-0"
-                      >
-                        <img
-                          :src="cldThumb(row.m.attachment_url)"
-                          class="rounded-lg max-h-56 w-auto"
-                          loading="lazy"
-                          alt="Image attachment"
-                        >
-                      </a>
-                      <template v-if="row.m.content">
-                        {{ row.m.content }}
-                      </template>
-                    </div>
-                  </div>
-                  <p
-                    v-if="row.last || row.m.failed"
-                    class="mt-1 text-[10px]"
-                    :class="row.m.sender_type === 'agent' ? 'text-right pr-9' : 'pl-1'"
-                  >
-                    <button
-                      v-if="row.m.failed"
-                      class="font-medium text-red-500 hover:underline"
-                      @click="cr.retrySend(row.m.id)"
-                    >
-                      Not sent — retry
-                    </button>
-                    <span
-                      v-else
-                      class="text-dimmed"
-                    >{{ row.m.pending ? 'Sending…' : formatTime(row.m.created_at) }}</span>
-                  </p>
-                </div>
-              </template>
-
-              <!-- visitor typing — with the live draft when the widget shares it -->
-              <div
-                v-if="cr.visitorTyping.value"
-                class="flex items-end gap-2 mt-2.5"
-              >
-                <!-- sneak-peek ghost bubble: what they've typed so far, pre-send -->
-                <div
-                  v-if="cr.visitorDraft.value"
-                  class="max-w-[70%] rounded-2xl rounded-bl-md bg-default ring-1 ring-dashed ring-accented px-3.5 py-2"
-                >
-                  <p class="text-sm leading-snug text-muted italic whitespace-pre-wrap wrap-break-word">
-                    {{ cr.visitorDraft.value }}<span class="sneak-caret" />
-                  </p>
-                  <p class="mt-0.5 text-[10px] text-dimmed">
-                    typing…
-                  </p>
-                </div>
-                <div
-                  v-else
-                  class="flex items-center gap-1 rounded-2xl rounded-bl-md bg-default ring-1 ring-default px-3.5 py-3"
-                >
-                  <span class="size-1.5 rounded-full bg-dimmed animate-bounce [animation-delay:-0.3s]" />
-                  <span class="size-1.5 rounded-full bg-dimmed animate-bounce [animation-delay:-0.15s]" />
-                  <span class="size-1.5 rounded-full bg-dimmed animate-bounce" />
-                </div>
-              </div>
-            </div>
+            <ConversationThread
+              :messages="cr.messages.value"
+              :loading="cr.loadingThread.value"
+              :has-more="cr.hasMoreMessages.value"
+              :loading-older="cr.loadingOlder.value"
+              :visitor-typing="cr.visitorTyping.value"
+              :visitor-draft="cr.visitorDraft.value"
+              :member-name="cr.memberName"
+              :load-older-messages="cr.loadOlderMessages"
+              :retry-send="cr.retrySend"
+            />
 
             <!-- composer -->
             <div class="shrink-0 border-t border-default bg-default p-3">
@@ -1182,28 +912,3 @@ const statusBadge = {
     </div>
   </div>
 </template>
-
-<style scoped>
-/* blinking caret at the end of the sneak-peek draft */
-.sneak-caret {
-  display: inline-block;
-  width: 2px;
-  height: 1em;
-  margin-left: 1px;
-  vertical-align: text-bottom;
-  background: currentcolor;
-  animation: sneak-blink 1s step-end infinite;
-}
-
-@keyframes sneak-blink {
-  50% {
-    opacity: 0;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .sneak-caret {
-    animation: none;
-  }
-}
-</style>
