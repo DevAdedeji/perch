@@ -5,6 +5,14 @@ const authSchema = z.object({
   visitor_session: z.string().min(1).max(2048).optional()
 })
 
+const cloudinaryResponseSchema = z.object({
+  secure_url: z.string().url(),
+  resource_type: z.literal('image'),
+  bytes: z.number().int().nonnegative()
+})
+
+const CLOUDINARY_TIMEOUT_MS = 15_000
+
 /** Authenticated, size-bounded image upload proxy. */
 export default defineEventHandler(async (event) => {
   assertRateLimit('attach-upload:ip', requestIp(event), { max: 30, windowMs: 60 * 1000 })
@@ -57,13 +65,14 @@ export default defineEventHandler(async (event) => {
   form.append('allowed_formats', params.allowed_formats)
   form.append('signature', signCloudinaryParams(params, apiSecret))
 
-  const response = await $fetch<{ secure_url: string, resource_type: string, bytes: number }>(
+  const rawResponse = await $fetch<unknown>(
     `https://api.cloudinary.com/v1_1/${encodeURIComponent(cloudName)}/image/upload`,
-    { method: 'POST', body: form }
+    { method: 'POST', body: form, timeout: CLOUDINARY_TIMEOUT_MS }
   )
-  if (response.resource_type !== 'image' || response.bytes > ATTACHMENT_MAX_BYTES
-    || !isOwnCloudinaryImageUrl(response.secure_url, cloudName)) {
+  const parsedResponse = cloudinaryResponseSchema.safeParse(rawResponse)
+  if (!parsedResponse.success || parsedResponse.data.bytes > ATTACHMENT_MAX_BYTES
+    || !isOwnCloudinaryImageUrl(parsedResponse.data.secure_url, cloudName)) {
     throw createError({ statusCode: 502, statusMessage: 'Image host returned an invalid upload' })
   }
-  return { url: response.secure_url, type: file.type }
+  return { url: parsedResponse.data.secure_url, type: file.type }
 })
