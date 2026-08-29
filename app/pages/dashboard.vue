@@ -21,44 +21,12 @@ const reply = ref('')
 const internalNote = ref(false)
 
 /* inbox search (visitor name/email or message text) */
-interface SearchResult {
-  id: string
-  status: 'open' | 'unassigned' | 'resolved'
-  assignedAgentId: string | null
-  lastMessageAt: string
-  snippet: string | null
-  visitor: { id: string, name: string | null, email: string | null, visitorId: string }
-}
-
-const searchQuery = ref('')
-const searchResults = ref<SearchResult[]>([])
-const searching = ref(false)
-const searchActive = computed(() => searchQuery.value.trim().length >= 2)
-let searchTimer: ReturnType<typeof setTimeout> | undefined
-let searchSeq = 0
-
-watch(searchQuery, () => {
-  clearTimeout(searchTimer)
-  if (!searchActive.value) {
-    searchResults.value = []
-    return
-  }
-  searching.value = true
-  searchTimer = setTimeout(async () => {
-    const seq = ++searchSeq
-    try {
-      const res = await $fetch<SearchResult[]>(
-        `/api/workspaces/${currentWorkspace.value?.workspaceId}/conversations/search`,
-        { query: { q: searchQuery.value.trim() } }
-      )
-      if (seq === searchSeq) searchResults.value = res
-    } catch {
-      if (seq === searchSeq) searchResults.value = []
-    } finally {
-      if (seq === searchSeq) searching.value = false
-    }
-  }, 300)
-})
+const {
+  query: searchQuery,
+  results: searchResults,
+  searching,
+  active: searchActive
+} = useConversationSearch(() => currentWorkspace.value?.workspaceId)
 
 function openSearchResult(id: string) {
   cr.select(id, { force: true })
