@@ -38,9 +38,7 @@ const swatches = ['#8b5cf6', '#6366f1', '#f43f5e', '#ec4899', '#f59e0b', '#10b98
 
 // closing tag split so it doesn't terminate this SFC <script> block
 const closeScript = '</' + 'script>'
-const snippet = computed(() =>
-  `<script src="${origin}/widget.js" data-site-id="${workspace.value?.siteId ?? ''}" async>${closeScript}`
-)
+const snippet = computed(() => workspace.value ? buildEmbedSnippet(origin, workspace.value.siteId) : '')
 // optional: tell Perch who the signed-in user is, so pre-chat is skipped.
 // window.perchIdentity is safe regardless of script order (the loader is async);
 // Perch.identify() is for logins that happen after page load.
@@ -734,26 +732,11 @@ async function removeLogo() {
           <p class="text-sm text-muted mt-0.5">
             Paste this before <code class="font-mono text-xs">&lt;/body&gt;</code> on your site.
           </p>
-          <div class="mt-4 rounded-xl bg-default ring-1 ring-default overflow-hidden">
-            <div class="flex items-center gap-2 px-4 py-2 border-b border-default bg-elevated/50">
-              <UIcon
-                name="i-lucide-code"
-                class="size-4 text-dimmed"
-              />
-              <span class="text-xs font-mono text-dimmed">embed snippet</span>
-              <UButton
-                class="ml-auto"
-                size="xs"
-                color="neutral"
-                variant="ghost"
-                icon="i-lucide-copy"
-                @click="copy(snippet, 'Snippet copied')"
-              >
-                Copy
-              </UButton>
-            </div>
-            <pre class="p-4 text-xs font-mono text-highlighted overflow-x-auto whitespace-pre-wrap break-all">{{ snippet }}</pre>
-          </div>
+          <EmbedSnippetCard
+            compact
+            class="mt-4"
+            :snippet="snippet"
+          />
 
           <div class="mt-5">
             <p class="text-sm font-medium text-highlighted">

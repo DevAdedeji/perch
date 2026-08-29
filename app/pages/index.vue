@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { PERCH_PRODUCTION_ORIGIN } from '@perch/shared'
+import { buildEmbedSnippet } from '~/utils/embed'
 
 const config = useRuntimeConfig()
 const { copy } = useCopyToClipboard()
@@ -21,9 +22,7 @@ onBeforeUnmount(() => {
   ;(window as Window & { Perch?: { destroy?: () => void } }).Perch?.destroy?.()
 })
 
-// closing tag split so it doesn't terminate this SFC <script> block
-const closeScript = '</' + 'script>'
-const snippetText = computed(() => `<script src="${PERCH_PRODUCTION_ORIGIN}/widget.js" data-site-id="ws_abc123" async>${closeScript}`)
+const snippetText = computed(() => buildEmbedSnippet(PERCH_PRODUCTION_ORIGIN, 'ws_abc123'))
 function copySnippet() {
   void copy(snippetText.value, 'Snippet copied')
 }
