@@ -87,7 +87,7 @@ export default defineWebSocketHandler({
   open(peer) {
     const url = new URL(peer.request?.url ?? '/', 'http://localhost')
     const ticket = url.searchParams.get('ticket')
-    const secret = useRuntimeConfig().realtimeSecret || process.env.NUXT_SESSION_PASSWORD
+    const secret = realtimeSecret()
     const subject = ticket && secret ? verifyTicket(ticket, secret) : null
 
     if (!subject) {
