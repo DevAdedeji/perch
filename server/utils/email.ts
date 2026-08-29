@@ -28,13 +28,13 @@ export function publicOrigin(event: import('h3').H3Event): string {
   }
   return import.meta.dev
     ? getRequestURL(event, { xForwardedHost: true, xForwardedProto: true }).origin
-    : 'https://perch.adedeji.xyz'
+    : 'https://useperch.xyz'
 }
 
 export async function sendEmail({ to, subject, html }: SendEmailOptions): Promise<boolean> {
   const config = useRuntimeConfig()
   const apiKey = config.resendApiKey || process.env.RESEND_API_KEY
-  const from = config.emailFrom || process.env.RESEND_FROM || 'Perch <no-reply@perch.adedeji.xyz>'
+  const from = config.emailFrom || process.env.RESEND_FROM || 'Perch <no-reply@useperch.xyz>'
 
   if (!apiKey) {
     console.warn(`[email] RESEND_API_KEY not set — would have sent to ${to}: "${subject}"`)

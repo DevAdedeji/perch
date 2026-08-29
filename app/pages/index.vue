@@ -21,7 +21,7 @@ onBeforeUnmount(() => {
 
 // closing tag split so it doesn't terminate this SFC <script> block
 const closeScript = '</' + 'script>'
-const snippetText = computed(() => `<script src="https://perch.adedeji.xyz/widget.js" data-site-id="ws_abc123" async>${closeScript}`)
+const snippetText = computed(() => `<script src="https://useperch.xyz/widget.js" data-site-id="ws_abc123" async>${closeScript}`)
 async function copySnippet() {
   try {
     await navigator.clipboard.writeText(snippetText.value)
@@ -250,7 +250,7 @@ const claimSql = 'UPDATE conversations\nSET assigned_agent_id = $me, status = \'
                 @click="copySnippet"
               />
             </div>
-            <pre class="p-5 text-sm font-mono leading-relaxed overflow-x-auto"><code><span class="text-dimmed">&lt;</span><span class="text-highlighted">script</span> <span class="text-highlighted">src</span>=<span class="text-muted">"https://perch.adedeji.xyz/widget.js"</span> <span class="text-highlighted">data-site-id</span>=<span class="text-amber-600 dark:text-amber-400">"ws_abc123"</span> <span class="text-highlighted">async</span><span class="text-dimmed">&gt;&lt;/</span><span class="text-highlighted">script</span><span class="text-dimmed">&gt;</span></code></pre>
+            <pre class="p-5 text-sm font-mono leading-relaxed overflow-x-auto"><code><span class="text-dimmed">&lt;</span><span class="text-highlighted">script</span> <span class="text-highlighted">src</span>=<span class="text-muted">"https://useperch.xyz/widget.js"</span> <span class="text-highlighted">data-site-id</span>=<span class="text-amber-600 dark:text-amber-400">"ws_abc123"</span> <span class="text-highlighted">async</span><span class="text-dimmed">&gt;&lt;/</span><span class="text-highlighted">script</span><span class="text-dimmed">&gt;</span></code></pre>
           </div>
           <p class="mt-5 text-center text-sm text-muted">
             Works on any website — Shopify, WordPress, Webflow, plain HTML.

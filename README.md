@@ -11,7 +11,7 @@ indicators, unread state, and race-safe conversation claiming.
 > auth scoping, secure third-party embedding, and concurrency correctness — all open source.
 > Every dependency is free or on a genuine free tier.
 
-**Live:** https://perch.adedeji.xyz &nbsp;·&nbsp; **Stack:** Nuxt 4 · Nitro WebSockets · Drizzle · Neon Postgres
+**Live:** https://useperch.xyz &nbsp;·&nbsp; **Stack:** Nuxt 4 · Nitro WebSockets · Drizzle · Neon Postgres
 
 ![Landing page](docs/screenshots/landing.png)
 
@@ -207,7 +207,7 @@ Useful scripts: `pnpm build` (production Nitro bundle), `pnpm preview`, `pnpm li
 | `RESEND_FROM` | *(optional)* from address, e.g. `Perch <no-reply@yourdomain.com>` |
 | `SENTRY_DSN` | *(optional)* server-side error tracking; the client DSN lives in `sentry.client.config.ts` |
 | `CLOUDINARY_CLOUD_NAME` / `CLOUDINARY_API_KEY` / `CLOUDINARY_API_SECRET` | *(optional)* signed image attachments; the secret never leaves the server |
-| `PERCH_PUBLIC_URL` | `https://perch.adedeji.xyz` in production | canonical origin used in password, verification, and invite links |
+| `PERCH_PUBLIC_URL` | `https://useperch.xyz` in production | canonical origin used in password, verification, and invite links |
 
 > Nuxt only auto-maps `NUXT_`-prefixed env at runtime, so the server also reads these two names
 > directly from `process.env` — set them as plain environment variables in production.
