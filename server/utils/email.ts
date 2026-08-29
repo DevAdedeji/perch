@@ -59,7 +59,7 @@ export async function sendEmail({ to, subject, html }: SendEmailOptions): Promis
     })
     return true
   } catch (e) {
-    console.error(`[email] failed to send "${subject}" to ${to}:`, (e as Error).message)
+    console.error(`[email] failed to send "${subject}":`, (e as Error).message)
     return false
   }
 }
