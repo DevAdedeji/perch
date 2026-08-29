@@ -19,6 +19,7 @@ interface Member {
 
 const { currentWorkspace, user } = useAuth()
 const toast = useToast()
+const { copy } = useCopyToClipboard()
 const rt = useRealtime()
 
 const wid = computed(() => currentWorkspace.value?.workspaceId ?? null)
@@ -113,15 +114,6 @@ async function removeMember(m: Member) {
     toast.add({ title: getErrorMessage(e, 'Could not remove'), color: 'error' })
   }
 }
-async function copy(text: string, label = 'Copied') {
-  try {
-    await navigator.clipboard.writeText(text)
-    toast.add({ title: label, icon: 'i-lucide-check', color: 'success' })
-  } catch {
-    toast.add({ title: 'Copy failed', color: 'error' })
-  }
-}
-
 function initials(n: string) {
   return n.trim().split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase()
 }

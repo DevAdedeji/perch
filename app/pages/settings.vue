@@ -25,6 +25,7 @@ interface WorkspaceDetail {
 
 const { currentWorkspace } = useAuth()
 const toast = useToast()
+const { copy } = useCopyToClipboard()
 const origin = useRequestURL().origin
 
 const wid = computed(() => currentWorkspace.value?.workspaceId ?? null)
@@ -153,15 +154,6 @@ async function saveHours() {
     toast.add({ title: getErrorMessage(e, 'Could not save business hours'), color: 'error' })
   } finally {
     savingHours.value = false
-  }
-}
-
-async function copy(text: string, label = 'Copied') {
-  try {
-    await navigator.clipboard.writeText(text)
-    toast.add({ title: label, icon: 'i-lucide-check', color: 'success' })
-  } catch {
-    toast.add({ title: 'Copy failed', color: 'error' })
   }
 }
 

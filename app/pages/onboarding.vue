@@ -4,6 +4,7 @@ useHead({ title: 'Set up your workspace · Perch' })
 
 const toast = useToast()
 const { refresh } = useAuth()
+const { copy } = useCopyToClipboard()
 const origin = useRequestURL().origin
 
 const steps = ['Workspace', 'Invite team', 'You’re live'] as const
@@ -85,15 +86,6 @@ const closeScript = '</' + 'script>'
 const snippet = computed(() =>
   `<script src="${origin}/widget.js" data-site-id="${created.value?.siteId ?? ''}" async>${closeScript}`
 )
-
-async function copy(text: string, label = 'Copied') {
-  try {
-    await navigator.clipboard.writeText(text)
-    toast.add({ title: label, icon: 'i-lucide-check', color: 'success' })
-  } catch {
-    toast.add({ title: 'Copy failed', color: 'error' })
-  }
-}
 
 async function finish() {
   await navigateTo('/dashboard')

@@ -2,7 +2,7 @@
 import { PERCH_PRODUCTION_ORIGIN } from '@perch/shared'
 
 const config = useRuntimeConfig()
-const toast = useToast()
+const { copy } = useCopyToClipboard()
 
 // the landing page eats its own dog food — the real widget, live, bottom-right
 useHead({
@@ -24,13 +24,8 @@ onBeforeUnmount(() => {
 // closing tag split so it doesn't terminate this SFC <script> block
 const closeScript = '</' + 'script>'
 const snippetText = computed(() => `<script src="${PERCH_PRODUCTION_ORIGIN}/widget.js" data-site-id="ws_abc123" async>${closeScript}`)
-async function copySnippet() {
-  try {
-    await navigator.clipboard.writeText(snippetText.value)
-    toast.add({ title: 'Snippet copied', icon: 'i-lucide-check', color: 'success' })
-  } catch {
-    toast.add({ title: 'Copy failed', color: 'error' })
-  }
+function copySnippet() {
+  void copy(snippetText.value, 'Snippet copied')
 }
 
 // plain-language numbers under the demo

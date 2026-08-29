@@ -6,7 +6,7 @@ const props = defineProps<{
   fallbackName: string | null
 }>()
 
-const toast = useToast()
+const { copy } = useCopyToClipboard()
 
 const displayName = computed(() => props.context?.visitor.name ?? props.fallbackName ?? 'Visitor')
 
@@ -28,15 +28,6 @@ const pageHost = computed(() => {
     return url
   }
 })
-
-async function copy(text: string) {
-  try {
-    await navigator.clipboard.writeText(text)
-    toast.add({ title: 'Copied', icon: 'i-lucide-check', color: 'success' })
-  } catch {
-    toast.add({ title: 'Copy failed', color: 'error' })
-  }
-}
 </script>
 
 <template>
