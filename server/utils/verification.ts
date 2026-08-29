@@ -39,6 +39,7 @@ export async function sendVerificationEmail(
       ctaUrl: verifyUrl
     })
   })
-  if (!sent) console.warn(`[auth] verification link for ${opts.email}: ${verifyUrl}`)
+  // Local-only convenience. Production logs must never contain verification tokens.
+  if (shouldLogEmailPreview(sent, import.meta.dev)) console.warn(`[auth] verification link: ${verifyUrl}`)
   return sent
 }

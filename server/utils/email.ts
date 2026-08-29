@@ -13,10 +13,17 @@ interface SendEmailOptions {
   html: string
 }
 
+const EMAIL_TIMEOUT_MS = 10_000
+
 export function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, char => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', '\'': '&#39;'
   })[char]!)
+}
+
+/** Sensitive local preview links are never eligible for production logs. */
+export function shouldLogEmailPreview(sent: boolean, isDev: boolean): boolean {
+  return !sent && isDev
 }
 
 export function publicOrigin(event: import('h3').H3Event): string {
@@ -39,7 +46,7 @@ export async function sendEmail({ to, subject, html }: SendEmailOptions): Promis
   const from = config.emailFrom || process.env.RESEND_FROM || `Perch <no-reply@${new URL(PERCH_PRODUCTION_ORIGIN).hostname}>`
 
   if (!apiKey) {
-    console.warn(`[email] RESEND_API_KEY not set — would have sent to ${to}: "${subject}"`)
+    console.warn(`[email] RESEND_API_KEY not set — skipped "${subject}"`)
     return false
   }
 
@@ -47,7 +54,8 @@ export async function sendEmail({ to, subject, html }: SendEmailOptions): Promis
     await $fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}` },
-      body: { from, to, subject, html }
+      body: { from, to, subject, html },
+      timeout: EMAIL_TIMEOUT_MS
     })
     return true
   } catch (e) {
