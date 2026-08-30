@@ -7,7 +7,7 @@
  */
 export default defineNuxtRouteMiddleware(async (to) => {
   // the embedded widget frame is a public visitor page — no session lookup
-  if (to.path === '/widget') return
+  if (to.path === '/widget' || to.path.startsWith('/help/')) return
 
   const { ensureLoaded, loggedIn, hasWorkspace } = useAuth()
   await ensureLoaded()

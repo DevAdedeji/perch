@@ -9,7 +9,9 @@ import { z } from 'zod'
 export default defineEventHandler(async (event) => {
   assertRateLimit('widget-articles:ip', requestIp(event), { max: 30, windowMs: 60 * 1000 })
 
-  const query = await getValidatedQuery(event, q => z.object({ site_id: z.string().min(1) }).safeParse(q))
+  const query = await getValidatedQuery(event, q => z.object({
+    site_id: z.string().regex(/^ws_[a-f0-9]{10}$/)
+  }).safeParse(q))
   if (!query.success) {
     throw createError({ statusCode: 400, statusMessage: 'Invalid input' })
   }
@@ -43,7 +45,7 @@ export default defineEventHandler(async (event) => {
         id: a.id,
         title: a.title,
         body: a.body,
-        url: a.url
+        url: normalizePublicArticleUrl(a.url)
       }))
     }))
     .filter(g => g.articles.length > 0)

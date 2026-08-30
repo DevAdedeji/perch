@@ -4,7 +4,10 @@ import { z } from 'zod'
 const schema = z.object({
   title: z.string().trim().min(1).max(160).optional(),
   body: z.string().trim().max(20000).optional(),
-  url: z.string().trim().url('Enter a valid link (https://…)').max(500).nullable().optional(),
+  url: z.string().trim().url('Enter a valid link (https://…)').max(500)
+    .refine(value => normalizePublicArticleUrl(value) !== null, 'Use a public HTTP(S) link without credentials')
+    .nullable()
+    .optional(),
   status: z.enum(['draft', 'published']).optional(),
   group_id: z.string().uuid().optional()
 })

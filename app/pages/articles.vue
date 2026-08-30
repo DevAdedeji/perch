@@ -20,9 +20,13 @@ interface Group {
 }
 
 const { currentWorkspace } = useAuth()
+const { url: siteUrl } = useSiteUrl()
 const toast = useToast()
 
 const wid = computed(() => currentWorkspace.value?.workspaceId ?? null)
+const publicHelpUrl = computed(() => currentWorkspace.value
+  ? `${siteUrl.value}/help/${currentWorkspace.value.siteId}`
+  : null)
 const isAdmin = computed(() => currentWorkspace.value?.role === 'admin')
 const groups = ref<Group[]>([])
 const loading = ref(true)
@@ -180,7 +184,7 @@ async function togglePublish(article: Article) {
 <template>
   <div class="h-full overflow-y-auto">
     <div class="max-w-2xl mx-auto p-5 sm:p-8 space-y-8">
-      <div class="flex items-center justify-between gap-3">
+      <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 class="font-display text-2xl font-bold text-highlighted">
             Help Center
@@ -190,15 +194,27 @@ async function togglePublish(article: Article) {
             common questions before they become conversations.
           </p>
         </div>
-        <UButton
-          v-if="isAdmin"
-          color="primary"
-          icon="i-lucide-plus"
-          class="shrink-0"
-          @click="openGroupModal(null)"
-        >
-          New group
-        </UButton>
+        <div class="flex flex-wrap gap-2 sm:justify-end">
+          <UButton
+            v-if="publicHelpUrl"
+            :to="publicHelpUrl"
+            target="_blank"
+            rel="noopener noreferrer"
+            color="neutral"
+            variant="soft"
+            trailing-icon="i-lucide-external-link"
+          >
+            View public page
+          </UButton>
+          <UButton
+            v-if="isAdmin"
+            color="primary"
+            icon="i-lucide-plus"
+            @click="openGroupModal(null)"
+          >
+            New group
+          </UButton>
+        </div>
       </div>
 
       <div
