@@ -244,6 +244,12 @@ export function useWidget(siteId: string, embedTicket: string) {
           refreshAgent()
         }
         break
+      case 'conversation.status':
+        if (ev.payload.conversation_id === conversationId.value) {
+          conversationStatus.value = ev.payload.status
+          refreshAgent()
+        }
+        break
       case 'business.presence':
         // outside scheduled hours the business is offline no matter who's here
         businessOnline.value = ev.payload.online && withinHours.value

@@ -151,17 +151,7 @@ export async function ingestVisitorMessage(input: IncomingVisitorMessage) {
       inboxScope(conversation.assignedAgentId)
     )
   } else {
-    publish(wsChannel, {
-      type: 'conversation.updated',
-      payload: {
-        id: conversation.id,
-        status: conversation.status,
-        assigned_agent_id: conversation.assignedAgentId,
-        priority: conversation.priority,
-        snoozed_until: conversation.snoozedUntil?.toISOString() ?? null,
-        last_message_at: conversation.lastMessageAt.toISOString()
-      }
-    })
+    publishConversationUpdate(conversation)
   }
   const msgEvent = { type: 'message.new' as const, payload: serializeMessage(message) }
   // scope the inbox copy so agents don't receive chats assigned to someone else
@@ -305,9 +295,9 @@ export async function startAgentConversation(input: StartConversationInput) {
       senderId: input.memberId,
       content: input.content
     }).returning()
-    return { visitor, conversation, message: message!, isNew }
+    return { visitor, conversation, message: message!, isNew, previousAssignedAgentId: existing?.assignedAgentId ?? null }
   })
-  const { visitor, conversation, message, isNew } = result
+  const { visitor, conversation, message, isNew, previousAssignedAgentId } = result
 
   const msgEvent = { type: 'message.new' as const, payload: serializeMessage(message) }
   if (isNew) {
@@ -321,7 +311,7 @@ export async function startAgentConversation(input: StartConversationInput) {
       visitor: { id: visitor.id, name: visitor.name, email: visitor.email }
     })
   } else {
-    publishConversationUpdate(conversation)
+    publishConversationUpdate(conversation, { previousAssignedAgentId })
   }
   publishFiltered(channels.workspace(input.workspaceId), msgEvent, inboxScope(conversation.assignedAgentId))
   publishConversationEvent(channels.conversation(conversation.id), msgEvent, conversation.assignedAgentId)
@@ -358,7 +348,7 @@ export async function claimConversation(conversationId: string, workspaceId: str
 
   if (rows.length === 1) {
     const conversation = rows[0]!
-    publishConversationUpdate(conversation)
+    publishConversationUpdate(conversation, { previousAssignedAgentId: null })
     return { ok: true, conversation }
   }
 
@@ -369,12 +359,17 @@ export async function claimConversation(conversationId: string, workspaceId: str
 
 export async function assignConversation(conversationId: string, memberId: string): Promise<Conversation | null> {
   const db = useDb()
-  const [conversation] = await db.update(conversations)
-    .set({ assignedAgentId: memberId, status: 'open', updatedAt: new Date() })
-    .where(eq(conversations.id, conversationId))
-    .returning()
-  if (conversation) publishConversationUpdate(conversation)
-  return conversation ?? null
+  const result = await db.transaction(async (tx) => {
+    const [current] = await tx.select().from(conversations).where(eq(conversations.id, conversationId)).for('update')
+    if (!current) return null
+    const [conversation] = await tx.update(conversations)
+      .set({ assignedAgentId: memberId, status: 'open', updatedAt: new Date() })
+      .where(eq(conversations.id, conversationId))
+      .returning()
+    return conversation ? { conversation, previousAssignedAgentId: current.assignedAgentId } : null
+  })
+  if (result) publishConversationUpdate(result.conversation, { previousAssignedAgentId: result.previousAssignedAgentId })
+  return result?.conversation ?? null
 }
 
 export async function setConversationStatus(conversationId: string, status: 'open' | 'resolved'): Promise<Conversation | null> {
@@ -394,7 +389,16 @@ export async function setConversationStatus(conversationId: string, status: 'ope
   return conversation ?? null
 }
 
-export function publishConversationUpdate(c: Conversation) {
+export function inboxRemovalScope(previousAssignedAgentId: string | null, assignedAgentId: string | null) {
+  return (ctx: Record<string, unknown>) => {
+    if (ctx.role !== 'agent' || ctx.memberRole === 'admin') return false
+    const wasVisible = previousAssignedAgentId === null || ctx.memberId === previousAssignedAgentId
+    const isVisible = assignedAgentId === null || ctx.memberId === assignedAgentId
+    return wasVisible && !isVisible
+  }
+}
+
+export function publishConversationUpdate(c: Conversation, options: { previousAssignedAgentId?: string | null } = {}) {
   const payload = {
     id: c.id,
     status: c.status,
@@ -403,6 +407,22 @@ export function publishConversationUpdate(c: Conversation) {
     snoozed_until: c.snoozedUntil?.toISOString() ?? null,
     last_message_at: c.lastMessageAt.toISOString()
   }
-  publish(channels.workspace(c.workspaceId), { type: 'conversation.updated', payload })
-  publishConversationEvent(channels.conversation(c.id), { type: 'conversation.updated', payload }, c.assignedAgentId)
+  const workspaceChannel = channels.workspace(c.workspaceId)
+  publishFiltered(workspaceChannel, { type: 'conversation.updated', payload }, inboxScope(c.assignedAgentId))
+  if ('previousAssignedAgentId' in options && options.previousAssignedAgentId !== c.assignedAgentId) {
+    publishFiltered(workspaceChannel, {
+      type: 'conversation.removed',
+      payload: { conversation_id: c.id }
+    }, inboxRemovalScope(options.previousAssignedAgentId ?? null, c.assignedAgentId))
+  }
+  publishConversationEvent(
+    channels.conversation(c.id),
+    { type: 'conversation.updated', payload },
+    c.assignedAgentId,
+    { agentsOnly: true }
+  )
+  publishFiltered(channels.conversation(c.id), {
+    type: 'conversation.status',
+    payload: { conversation_id: c.id, status: c.status }
+  }, context => context.role === 'visitor')
 }

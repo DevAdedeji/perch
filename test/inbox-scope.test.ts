@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { inboxScope } from '../server/utils/conversations'
+import { inboxRemovalScope, inboxScope } from '../server/utils/conversations'
 import { canMemberAccessConversation } from '../server/utils/workspace'
 
 describe('inboxScope — agent visibility on the workspace channel', () => {
@@ -26,6 +26,27 @@ describe('inboxScope — agent visibility on the workspace channel', () => {
 
   it('a peer with no membership context receives nothing assigned', () => {
     expect(inboxScope('agent-a')({})).toBe(false)
+  })
+})
+
+describe('inboxRemovalScope — assignment visibility changes', () => {
+  const admin = { role: 'agent', memberRole: 'admin', memberId: 'admin-1' }
+  const agentA = { role: 'agent', memberRole: 'agent', memberId: 'agent-a' }
+  const agentB = { role: 'agent', memberRole: 'agent', memberId: 'agent-b' }
+  const visitor = { role: 'visitor' }
+
+  it('removes a newly claimed pool conversation from other agents only', () => {
+    const scope = inboxRemovalScope(null, 'agent-a')
+    expect(scope(agentA)).toBe(false)
+    expect(scope(agentB)).toBe(true)
+    expect(scope(admin)).toBe(false)
+    expect(scope(visitor)).toBe(false)
+  })
+
+  it('removes a reassigned conversation from its previous owner', () => {
+    const scope = inboxRemovalScope('agent-a', 'agent-b')
+    expect(scope(agentA)).toBe(true)
+    expect(scope(agentB)).toBe(false)
   })
 })
 

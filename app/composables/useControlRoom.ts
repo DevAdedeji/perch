@@ -404,6 +404,11 @@ export function useControlRoom() {
         loadConversations()
         loadCounts()
         break
+      case 'conversation.removed':
+        conversations.value = conversations.value.filter(conversation => conversation.id !== ev.payload.conversation_id)
+        if (activeId.value === ev.payload.conversation_id) deselect()
+        loadCounts()
+        break
       case 'conversation.updated': {
         const p = ev.payload
         const c = conversations.value.find(x => x.id === p.id)

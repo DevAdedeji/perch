@@ -87,6 +87,15 @@ export interface ConversationUpdatedPayload {
   last_message_at: string
 }
 
+export interface ConversationRemovedPayload {
+  conversation_id: string
+}
+
+export interface ConversationStatusPayload {
+  conversation_id: string
+  status: ConversationStatus
+}
+
 export interface ClaimOkPayload {
   conversation_id: string
 }
@@ -166,6 +175,8 @@ export interface ConversationStartedPayload {
 export type ServerEvent = | { type: 'message.new', payload: MessageDTO }
   | { type: 'conversation.new', payload: ConversationDTO }
   | { type: 'conversation.updated', payload: ConversationUpdatedPayload }
+  | { type: 'conversation.removed', payload: ConversationRemovedPayload }
+  | { type: 'conversation.status', payload: ConversationStatusPayload }
   | { type: 'conversation.claim.ok', payload: ClaimOkPayload }
   | { type: 'conversation.claim.conflict', payload: ClaimConflictPayload }
   | { type: 'typing', payload: TypingPayload }
