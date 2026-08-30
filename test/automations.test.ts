@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { inactivityExecutionKey, roundRobinIndex } from '../server/utils/automation-engine'
+import { inactivityExecutionKey, reminderExecutionKey, roundRobinIndex } from '../server/utils/automation-engine'
 import { matchesPageRule, matchesVipRule, parseAutomationConfig } from '../server/utils/automation-rules'
 
 describe('automation rule validation', () => {
@@ -20,6 +20,9 @@ describe('automation rule validation', () => {
     expect(parseAutomationConfig('inactivity_reminder', { minutes: 1 }).success).toBe(false)
     expect(parseAutomationConfig('vip_tagging', {
       condition: 'metadata', metadata_key: 'password', value: 'x', tag_id: '32e0cb65-3800-4e9b-b05d-d1f4cd20b414'
+    }).success).toBe(false)
+    expect(parseAutomationConfig('vip_tagging', {
+      condition: 'metadata', metadata_key: 'browser', value: 'Safari', tag_id: '32e0cb65-3800-4e9b-b05d-d1f4cd20b414'
     }).success).toBe(false)
   })
 })
@@ -65,5 +68,12 @@ describe('automation idempotency helpers', () => {
     const afterReply = inactivityExecutionKey('rule', 'conversation', new Date('2026-08-30T10:01:00Z'))
     expect(retry).toBe(first)
     expect(afterReply).not.toBe(first)
+  })
+
+  it('reminds a new owner even when conversation activity has not changed', () => {
+    const activity = new Date('2026-08-30T10:00:00Z')
+    const firstOwner = reminderExecutionKey('rule', 'conversation', 'agent-a', activity)
+    expect(reminderExecutionKey('rule', 'conversation', 'agent-a', activity)).toBe(firstOwner)
+    expect(reminderExecutionKey('rule', 'conversation', 'agent-b', activity)).not.toBe(firstOwner)
   })
 })

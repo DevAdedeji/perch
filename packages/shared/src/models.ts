@@ -82,7 +82,7 @@ export type AutomationRuleConfig
     | { url_contains: string, member_id: string }
     | { condition: 'email_domain', value: string, tag_id: string }
     | { condition: 'email_equals', value: string, tag_id: string }
-    | { condition: 'metadata', metadata_key: 'page_url' | 'referrer' | 'browser' | 'device', value: string, tag_id: string }
+    | { condition: 'metadata', metadata_key: 'page_url', value: string, tag_id: string }
     | { minutes: number }
     | { hours: number }
 

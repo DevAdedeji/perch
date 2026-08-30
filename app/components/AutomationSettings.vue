@@ -30,6 +30,7 @@ const tags = ref<Tag[]>([])
 const loading = ref(true)
 const saving = ref(false)
 const editingId = ref<string | null>(null)
+const createRequestKey = ref<string | null>(null)
 const selectedType = ref<AutomationRuleType | null>(null)
 const ruleName = ref('')
 const memberIds = ref<string[]>([])
@@ -37,7 +38,7 @@ const targetMemberId = ref('')
 const urlContains = ref('')
 const vipCondition = ref<'email_domain' | 'email_equals' | 'metadata'>('email_domain')
 const vipValue = ref('')
-const metadataKey = ref<'page_url' | 'referrer' | 'browser' | 'device'>('page_url')
+const metadataKey = ref<'page_url'>('page_url')
 const tagId = ref('')
 const reminderMinutes = ref(30)
 const closeHours = ref(72)
@@ -68,12 +69,14 @@ watch(() => props.workspaceId, () => {
 
 function chooseTemplate(type: AutomationRuleType) {
   resetEditor()
+  createRequestKey.value = crypto.randomUUID()
   selectedType.value = type
   ruleName.value = templates.find(template => template.type === type)?.title ?? 'Automation'
 }
 
 function resetEditor() {
   editingId.value = null
+  createRequestKey.value = null
   selectedType.value = null
   ruleName.value = ''
   memberIds.value = []
@@ -142,9 +145,10 @@ async function saveRule() {
       rules.value = rules.value.map(rule => rule.id === updated.id ? updated : rule)
       toast.add({ title: 'Automation updated', color: 'success', icon: 'i-lucide-check' })
     } else {
+      createRequestKey.value ||= crypto.randomUUID()
       const created = await $fetch<AutomationRule>(`/api/workspaces/${props.workspaceId}/automation-rules`, {
         method: 'POST',
-        body: { name: ruleName.value.trim(), type: selectedType.value, config }
+        body: { name: ruleName.value.trim(), type: selectedType.value, config, idempotency_key: createRequestKey.value }
       })
       rules.value = [...rules.value, created]
       toast.add({ title: 'Automation is active', color: 'success', icon: 'i-lucide-zap' })
@@ -455,9 +459,6 @@ function ruleSummary(rule: AutomationRule) {
               class="h-10 w-full rounded-lg border border-default bg-default px-3 text-sm text-highlighted"
             >
               <option value="page_url">Page URL</option>
-              <option value="referrer">Referrer</option>
-              <option value="browser">Browser</option>
-              <option value="device">Device</option>
             </select>
           </label>
           <label>

@@ -10,6 +10,7 @@ import {
   eq,
   inArray,
   isNull,
+  notExists,
   sql,
   workspaceMembers
 } from '@perch/db'
@@ -28,16 +29,28 @@ export function inactivityExecutionKey(ruleId: string, conversationId: string, l
   return `inactive:${ruleId}:${conversationId}:${lastMessageAt.toISOString()}`
 }
 
+export function reminderExecutionKey(ruleId: string, conversationId: string, memberId: string, lastMessageAt: Date) {
+  return `reminder:${ruleId}:${conversationId}:${memberId}:${lastMessageAt.toISOString()}`
+}
+
 export function roundRobinIndex(cursor: number, memberCount: number) {
   if (!Number.isInteger(cursor) || cursor < 1 || !Number.isInteger(memberCount) || memberCount < 1) return null
   return (cursor - 1) % memberCount
 }
 
-async function claimExecution(tx: Parameters<Parameters<Database['transaction']>[0]>[0], rule: AutomationRule, conversationId: string, key: string) {
+async function claimExecution(
+  tx: Parameters<Parameters<Database['transaction']>[0]>[0],
+  rule: AutomationRule,
+  conversationId: string,
+  key: string,
+  context: { activityAt?: Date, memberId?: string } = {}
+) {
   const [execution] = await tx.insert(automationExecutions).values({
     ruleId: rule.id,
     conversationId,
     executionKey: key,
+    activityAt: context.activityAt,
+    memberId: context.memberId,
     detail: { type: rule.type }
   }).onConflictDoNothing().returning()
   return execution ?? null
@@ -144,18 +157,24 @@ export async function runEntryAutomations(conversation: Conversation, visitor: V
 }
 
 async function runReminder(rule: AutomationRule, candidate: Conversation) {
-  const key = inactivityExecutionKey(rule.id, candidate.id, candidate.lastMessageAt)
   const result = await useDb().transaction(async (tx) => {
     const [current] = await tx.update(conversations).set({
       updatedAt: sql`${conversations.updatedAt}`
     }).where(and(
       eq(conversations.id, candidate.id),
+      eq(conversations.workspaceId, rule.workspaceId),
       eq(conversations.status, 'open'),
       sql`${conversations.assignedAgentId} is not null`,
       sql`${conversations.lastMessageAt} = ${candidate.lastMessageAt.toISOString()}::timestamptz`
     )).returning()
     if (!current?.assignedAgentId) return null
-    const execution = await claimExecution(tx, rule, current.id, key)
+    const execution = await claimExecution(
+      tx,
+      rule,
+      current.id,
+      reminderExecutionKey(rule.id, current.id, current.assignedAgentId, current.lastMessageAt),
+      { activityAt: current.lastMessageAt, memberId: current.assignedAgentId }
+    )
     if (!execution) return null
     const [notification] = await tx.insert(automationNotifications).values({
       workspaceId: current.workspaceId,
@@ -214,11 +233,18 @@ export async function runAutomationSweep(now = new Date()) {
       ? (rule.config as { minutes: number }).minutes * 60_000
       : (rule.config as { hours: number }).hours * 3_600_000
     const cutoff = new Date(now.getTime() - amount)
+    const previousReminder = useDb().select({ id: automationExecutions.id }).from(automationExecutions).where(and(
+      eq(automationExecutions.ruleId, rule.id),
+      eq(automationExecutions.conversationId, conversations.id),
+      eq(automationExecutions.activityAt, conversations.lastMessageAt),
+      eq(automationExecutions.memberId, conversations.assignedAgentId)
+    ))
     const candidates = await useDb().query.conversations.findMany({
       where: and(
         eq(conversations.workspaceId, rule.workspaceId),
         eq(conversations.status, 'open'),
         sql`${conversations.assignedAgentId} is not null`,
+        rule.type === 'inactivity_reminder' ? notExists(previousReminder) : undefined,
         sql`${conversations.lastMessageAt} <= ${cutoff.toISOString()}::timestamptz`
       ),
       orderBy: asc(conversations.lastMessageAt),

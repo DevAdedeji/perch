@@ -163,6 +163,7 @@ export const inboxSavedViews = pgTable('inbox_saved_views', {
 export const automationRules = pgTable('automation_rules', {
   id: uuid('id').defaultRandom().primaryKey(),
   workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  requestKey: uuid('request_key').notNull(),
   name: text('name').notNull(),
   type: automationRuleTypeEnum('type').notNull(),
   config: jsonb('config').$type<AutomationRuleConfig>().notNull(),
@@ -171,6 +172,7 @@ export const automationRules = pgTable('automation_rules', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
 }, t => [
+  uniqueIndex('automation_rules_workspace_request_uq').on(t.workspaceId, t.requestKey),
   index('automation_rules_workspace_order_idx').on(t.workspaceId, t.sortOrder, t.createdAt)
 ])
 
@@ -185,10 +187,13 @@ export const automationExecutions = pgTable('automation_executions', {
   ruleId: uuid('rule_id').notNull().references(() => automationRules.id, { onDelete: 'cascade' }),
   conversationId: uuid('conversation_id').notNull().references(() => conversations.id, { onDelete: 'cascade' }),
   executionKey: text('execution_key').notNull(),
+  activityAt: timestamp('activity_at', { withTimezone: true }),
+  memberId: uuid('member_id').references(() => workspaceMembers.id, { onDelete: 'set null' }),
   detail: jsonb('detail').$type<Record<string, unknown>>().default({}).notNull(),
   executedAt: timestamp('executed_at', { withTimezone: true }).defaultNow().notNull()
 }, t => [
   uniqueIndex('automation_executions_key_uq').on(t.executionKey),
+  index('automation_executions_activity_idx').on(t.ruleId, t.conversationId, t.activityAt, t.memberId),
   index('automation_executions_rule_recency_idx').on(t.ruleId, t.executedAt),
   index('automation_executions_conversation_idx').on(t.conversationId)
 ])

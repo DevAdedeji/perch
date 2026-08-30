@@ -80,7 +80,7 @@ export default defineEventHandler(async (event) => {
       try {
         const automated = await runEntryAutomations(conversation, updated)
         if (automated.conversation.assignedAgentId !== conversation.assignedAgentId) {
-          publishConversationUpdate(automated.conversation)
+          publishConversationUpdate(automated.conversation, { previousAssignedAgentId: conversation.assignedAgentId })
         }
         if (automated.tagsChanged) {
           publishFiltered(channels.workspace(workspace.id), {

@@ -133,16 +133,16 @@ function showAutomationReminder(notification: AutomationNotification) {
     color: 'warning',
     actions: [{
       label: 'View',
-      onClick: () => {
+      onClick: async () => {
+        if (wid.value) {
+          await $fetch(`/api/workspaces/${wid.value}/automation-notifications/${notification.id}/read`, { method: 'POST' }).catch(() => {})
+        }
         pendingSelect.value = notification.conversation_id
         navigateTo('/dashboard')
       }
     }]
   })
   play()
-  if (wid.value) {
-    $fetch(`/api/workspaces/${wid.value}/automation-notifications/${notification.id}/read`, { method: 'POST' }).catch(() => {})
-  }
 }
 
 async function loadAutomationNotifications() {

@@ -20,7 +20,7 @@ export const automationRuleSchemas = {
     z.object({ condition: z.literal('email_equals'), value: z.string().trim().toLowerCase().email().max(200), tag_id: uuid }).strict(),
     z.object({
       condition: z.literal('metadata'),
-      metadata_key: z.enum(['page_url', 'referrer', 'browser', 'device']),
+      metadata_key: z.literal('page_url'),
       value: z.string().trim().min(1).max(300),
       tag_id: uuid
     }).strict()

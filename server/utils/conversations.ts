@@ -165,7 +165,7 @@ export async function ingestVisitorMessage(input: IncomingVisitorMessage) {
       inboxScope(conversation.assignedAgentId)
     )
   } else {
-    publishConversationUpdate(conversation)
+    publishConversationUpdate(conversation, { previousAssignedAgentId: result.conversation.assignedAgentId })
   }
   const msgEvent = { type: 'message.new' as const, payload: serializeMessage(message) }
   // scope the inbox copy so agents don't receive chats assigned to someone else
