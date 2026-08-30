@@ -1,9 +1,9 @@
+import { validateImageAttachment } from '@perch/shared'
+
 export interface UploadedImage {
   url: string
   type: string
 }
-
-const MAX_BYTES = 1024 * 1024 // fast client feedback; the server enforces it too
 
 /**
  * Size-bounded image upload through Perch, which authenticates the caller and
@@ -15,12 +15,8 @@ export function useImageUpload() {
 
   /** Throws with a human-readable message on validation or upload failure. */
   async function uploadImage(file: File, signBody: Record<string, string> = {}): Promise<UploadedImage> {
-    if (!file.type.startsWith('image/')) {
-      throw new Error('Only images can be attached')
-    }
-    if (file.size > MAX_BYTES) {
-      throw new Error('Images must be smaller than 1 MB')
-    }
+    const validationError = validateImageAttachment(file)
+    if (validationError) throw new Error(validationError)
 
     uploading.value = true
     try {

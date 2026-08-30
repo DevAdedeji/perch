@@ -1,12 +1,13 @@
 import { createHash } from 'node:crypto'
 
+export { ATTACHMENT_MAX_BYTES } from '@perch/shared'
+
 /**
  * Cloudinary upload helpers (PRD §5.3). The API secret never leaves the
  * server: Perch authenticates the caller and enforces the byte cap before
  * forwarding a short-lived signed upload. Pure helpers are unit-tested.
  */
 
-export const ATTACHMENT_MAX_BYTES = 1024 * 1024 // 1 MB
 export const ATTACHMENT_FORMATS = 'jpg,jpeg,png,gif,webp'
 
 export function cloudinaryConfig() {

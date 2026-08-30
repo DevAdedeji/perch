@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { validateImageAttachment } from '@perch/shared'
 import type { CannedResponse, TeamMember } from '~/composables/useControlRoom'
 
 const props = defineProps<{
@@ -145,12 +146,9 @@ async function onAttachmentPicked(event: Event) {
   const file = input.files?.[0]
   input.value = ''
   if (!file) return
-  if (!file.type.startsWith('image/')) {
-    toast.add({ title: 'Only images can be attached', color: 'error' })
-    return
-  }
-  if (file.size > 1024 * 1024) {
-    toast.add({ title: 'Images must be smaller than 1 MB', color: 'error' })
+  const validationError = validateImageAttachment(file)
+  if (validationError) {
+    toast.add({ title: validationError, color: 'error' })
     return
   }
   await props.sendAttachment(file, () => uploadImage(file), internalNote.value)
