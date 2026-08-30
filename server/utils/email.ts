@@ -26,14 +26,23 @@ export function shouldLogEmailPreview(sent: boolean, isDev: boolean): boolean {
   return !sent && isDev
 }
 
+export function normalizePublicOrigin(value: string, allowHttp: boolean): string | null {
+  try {
+    const url = new URL(value)
+    const allowedProtocol = url.protocol === 'https:' || (allowHttp && url.protocol === 'http:')
+    if (!allowedProtocol || url.username || url.password) return null
+    return url.origin
+  } catch {
+    return null
+  }
+}
+
 export function publicOrigin(event: import('h3').H3Event): string {
   const configured = useRuntimeConfig(event).publicBaseUrl || process.env.PERCH_PUBLIC_URL
   if (configured) {
-    try {
-      return new URL(configured).origin
-    } catch {
-      throw createError({ statusCode: 500, statusMessage: 'PERCH_PUBLIC_URL is invalid' })
-    }
+    const origin = normalizePublicOrigin(configured, import.meta.dev)
+    if (origin) return origin
+    throw createError({ statusCode: 500, statusMessage: 'PERCH_PUBLIC_URL must be a valid HTTPS origin' })
   }
   return import.meta.dev
     ? getRequestURL(event, { xForwardedHost: true, xForwardedProto: true }).origin
