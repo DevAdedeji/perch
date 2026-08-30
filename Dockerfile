@@ -13,6 +13,9 @@ COPY . .
 RUN pnpm install --frozen-lockfile
 
 # build the embeddable widget.js, then the Nuxt/Nitro server
+# Railway passes service variables into Docker builds when the matching build
+# argument is declared. Nuxt needs the public URL while prerendering SEO tags.
+ARG PERCH_PUBLIC_URL
 RUN pnpm --filter @perch/widget-loader build \
   && pnpm build
 
