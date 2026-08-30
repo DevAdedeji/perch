@@ -1,25 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { filterHelpGroups, helpArticleExcerpt } from '../app/utils/help-center'
+import { helpArticleExcerpt } from '../app/utils/help-center'
 import { normalizePublicArticleUrl, publicHelpSitemapPaths } from '../server/utils/help-center'
 
-const groups = [{
-  id: 'group-1',
-  name: 'Getting started',
-  description: 'Account setup',
-  articles: [
-    { id: 'article-1', title: 'Invite teammates', excerpt: 'Open Team settings and send an invite.', url: null },
-    { id: 'article-2', title: 'Contact billing', excerpt: 'Email the accounts team.', url: 'https://example.com/billing' }
-  ]
-}]
-
 describe('public help center', () => {
-  it('searches titles, article bodies, group names and descriptions', () => {
-    expect(filterHelpGroups(groups, 'invite')[0]?.articles.map(article => article.id)).toEqual(['article-1'])
-    expect(filterHelpGroups(groups, 'accounts')[0]?.articles.map(article => article.id)).toEqual(['article-2'])
-    expect(filterHelpGroups(groups, 'getting started')[0]?.articles).toHaveLength(2)
-    expect(filterHelpGroups(groups, 'missing')).toEqual([])
-  })
-
   it('creates short, whitespace-normalized excerpts', () => {
     expect(helpArticleExcerpt(' First\n\nsecond ')).toBe('First second')
     expect(helpArticleExcerpt('One two three', 8)).toBe('One two…')

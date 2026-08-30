@@ -1,27 +1,29 @@
 <script setup lang="ts">
 import type { PublicHelpGroup } from '~/utils/help-center'
-import { filterHelpGroups, helpArticleExcerpt } from '~/utils/help-center'
+import { helpArticleExcerpt } from '~/utils/help-center'
 
 definePageMeta({ layout: 'help-center' })
 
 const route = useRoute()
 const router = useRouter()
 const siteId = computed(() => String(route.params.siteId ?? ''))
-const search = ref(typeof route.query.q === 'string' ? route.query.q.slice(0, 80) : '')
+const submittedSearch = computed(() => typeof route.query.q === 'string' ? route.query.q.trim().slice(0, 80) : '')
+const search = ref(submittedSearch.value)
 const { url: siteUrl, indexable } = useSiteUrl()
 
 const { data: groups, error, status, refresh } = await useFetch<PublicHelpGroup[]>('/api/widget/articles', {
-  query: computed(() => ({ site_id: siteId.value }))
+  query: computed(() => ({
+    site_id: siteId.value,
+    ...(submittedSearch.value ? { q: submittedSearch.value } : {})
+  }))
 })
 
 if (import.meta.server && error.value) {
-  setResponseStatus(useRequestEvent()!, error.value.statusCode === 404 ? 404 : 503)
+  setResponseStatus(useRequestEvent()!, error.value.statusCode === 404 ? 404 : (error.value.statusCode === 429 ? 429 : 503))
 }
 
-const filteredGroups = computed(() => filterHelpGroups(groups.value ?? [], search.value))
 const articleCount = computed(() => (groups.value ?? []).reduce((total, group) => total + group.articles.length, 0))
-const resultCount = computed(() => filteredGroups.value.reduce((total, group) => total + group.articles.length, 0))
-const pageTitle = computed(() => search.value.trim() ? `Search help articles · Perch` : 'Help Center · Perch')
+const pageTitle = computed(() => submittedSearch.value ? `Search help articles · Perch` : 'Help Center · Perch')
 const pageDescription = computed(() => articleCount.value
   ? `Browse ${articleCount.value} support ${articleCount.value === 1 ? 'article' : 'articles'} and find answers quickly.`
   : 'Browse support articles and find answers quickly.')
@@ -29,7 +31,7 @@ const pageDescription = computed(() => articleCount.value
 useSeoMeta({
   title: pageTitle,
   description: pageDescription,
-  robots: () => indexable.value && articleCount.value > 0 && !search.value.trim()
+  robots: () => indexable.value && articleCount.value > 0 && !submittedSearch.value
     ? 'index, follow'
     : 'noindex, follow',
   ogTitle: pageTitle,
@@ -129,6 +131,30 @@ watch(() => route.query.q, (value) => {
       </div>
 
       <div
+        v-else-if="submittedSearch && !articleCount"
+        class="mt-10 rounded-2xl border-glow bg-elevated/30 px-6 py-12 text-center"
+      >
+        <UIcon
+          name="i-lucide-search-x"
+          class="mx-auto size-8 text-dimmed"
+        />
+        <h2 class="mt-3 font-display text-lg font-semibold text-highlighted">
+          No matches for “{{ submittedSearch }}”
+        </h2>
+        <p class="mt-1 text-sm text-muted">
+          Try a shorter phrase or browse all topics.
+        </p>
+        <UButton
+          class="mt-5"
+          color="neutral"
+          variant="soft"
+          @click="search = ''; updateSearchUrl()"
+        >
+          Clear search
+        </UButton>
+      </div>
+
+      <div
         v-else-if="!articleCount"
         class="mt-10 rounded-2xl border-glow bg-elevated/30 px-6 py-12 text-center"
       >
@@ -145,43 +171,19 @@ watch(() => route.query.q, (value) => {
       </div>
 
       <div
-        v-else-if="search.trim() && !resultCount"
-        class="mt-10 rounded-2xl border-glow bg-elevated/30 px-6 py-12 text-center"
-      >
-        <UIcon
-          name="i-lucide-search-x"
-          class="mx-auto size-8 text-dimmed"
-        />
-        <h2 class="mt-3 font-display text-lg font-semibold text-highlighted">
-          No matches for “{{ search.trim() }}”
-        </h2>
-        <p class="mt-1 text-sm text-muted">
-          Try a shorter phrase or browse all topics.
-        </p>
-        <UButton
-          class="mt-5"
-          color="neutral"
-          variant="soft"
-          @click="search = ''; updateSearchUrl()"
-        >
-          Clear search
-        </UButton>
-      </div>
-
-      <div
         v-else
         class="mt-10 space-y-8"
       >
         <p
-          v-if="search.trim()"
+          v-if="submittedSearch"
           class="text-sm text-muted"
           role="status"
         >
-          {{ resultCount }} {{ resultCount === 1 ? 'result' : 'results' }}
+          {{ articleCount }} {{ articleCount === 1 ? 'result' : 'results' }}
         </p>
 
         <section
-          v-for="group in filteredGroups"
+          v-for="group in groups"
           :key="group.id"
           :aria-labelledby="`group-${group.id}`"
         >

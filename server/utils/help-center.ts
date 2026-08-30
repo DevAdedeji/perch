@@ -1,8 +1,11 @@
-import { and, articleGroups, articles, asc, eq, sql, workspaces, type Database } from '@perch/db'
+import { and, articleGroups, articles, asc, eq, inArray, or, sql, workspaces, type Database } from '@perch/db'
 
 export const PUBLIC_HELP_SITE_ID_PATTERN = /^ws_[a-f0-9]{10}$/
 export const PUBLIC_HELP_ARTICLE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const PUBLIC_HELP_EXCERPT_SOURCE_LENGTH = 181
+export const PUBLIC_HELP_SEARCH_MAX_LENGTH = 80
+export const PUBLIC_HELP_SEARCH_RESULT_LIMIT = 50
+const PUBLIC_HELP_INDEX_RESULT_LIMIT = 200
 
 export interface PublishedHelpSitemapEntry {
   siteId: string
@@ -29,24 +32,40 @@ export async function findPublicHelpWorkspaceId(db: Database, siteId: string): P
   return workspace?.id ?? null
 }
 
-export async function listPublishedHelpGroups(db: Database, workspaceId: string) {
-  const [groups, rows] = await Promise.all([
-    db.query.articleGroups.findMany({
-      columns: { id: true, name: true, description: true },
-      where: eq(articleGroups.workspaceId, workspaceId),
-      orderBy: [asc(articleGroups.sortOrder), asc(articleGroups.createdAt)]
-    }),
-    db.select({
-      id: articles.id,
-      groupId: articles.groupId,
-      title: articles.title,
-      excerpt: sql<string>`left(regexp_replace(btrim(${articles.body}), '\\s+', ' ', 'g'), ${PUBLIC_HELP_EXCERPT_SOURCE_LENGTH})`,
-      url: articles.url
-    })
-      .from(articles)
-      .where(and(eq(articles.workspaceId, workspaceId), eq(articles.status, 'published')))
-      .orderBy(asc(articles.createdAt))
-  ])
+export async function listPublishedHelpGroups(db: Database, workspaceId: string, search?: string) {
+  const groups = await db.query.articleGroups.findMany({
+    columns: { id: true, name: true, description: true },
+    where: eq(articleGroups.workspaceId, workspaceId),
+    orderBy: [asc(articleGroups.sortOrder), asc(articleGroups.createdAt)]
+  })
+  const matchingGroupIds = search
+    ? groups.filter(group => [group.name, group.description ?? '']
+        .some(value => value.toLocaleLowerCase().includes(search.toLocaleLowerCase())))
+        .map(group => group.id)
+    : []
+  const searchCondition = search
+    ? or(
+        sql<boolean>`position(lower(${search}) in lower(${articles.title})) > 0`,
+        sql<boolean>`position(lower(${search}) in lower(${articles.body})) > 0`,
+        ...(matchingGroupIds.length ? [inArray(articles.groupId, matchingGroupIds)] : [])
+      )
+    : undefined
+
+  const rows = await db.select({
+    id: articles.id,
+    groupId: articles.groupId,
+    title: articles.title,
+    excerpt: sql<string>`left(regexp_replace(btrim(${articles.body}), '\\s+', ' ', 'g'), ${PUBLIC_HELP_EXCERPT_SOURCE_LENGTH})`,
+    url: articles.url
+  })
+    .from(articles)
+    .where(and(
+      eq(articles.workspaceId, workspaceId),
+      eq(articles.status, 'published'),
+      searchCondition
+    ))
+    .orderBy(asc(articles.createdAt))
+    .limit(search ? PUBLIC_HELP_SEARCH_RESULT_LIMIT : PUBLIC_HELP_INDEX_RESULT_LIMIT)
 
   return groups
     .map(group => ({

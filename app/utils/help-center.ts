@@ -25,18 +25,3 @@ export function helpArticleExcerpt(body: string, maxLength = 180): string {
   if (compact.length <= maxLength) return compact
   return `${compact.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`
 }
-
-export function filterHelpGroups(groups: PublicHelpGroup[], query: string): PublicHelpGroup[] {
-  const needle = query.trim().toLocaleLowerCase()
-  if (!needle) return groups
-
-  return groups
-    .map(group => ({
-      ...group,
-      articles: group.articles.filter(article =>
-        [article.title, article.excerpt, group.name, group.description ?? '']
-          .some(value => value.toLocaleLowerCase().includes(needle))
-      )
-    }))
-    .filter(group => group.articles.length > 0)
-}
