@@ -1,5 +1,8 @@
 <script setup lang="ts">
-useHead({ title: 'Terms of Service · Perch' })
+useSeoMeta({
+  title: 'Terms of Service · Perch',
+  description: 'The terms governing access to and use of the Perch live-chat service.'
+})
 
 const updated = 'July 11, 2026'
 const contact = 'adedejitewogbade2@gmail.com'

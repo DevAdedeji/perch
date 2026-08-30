@@ -4,6 +4,48 @@ import { buildEmbedSnippet } from '~/utils/embed'
 
 const config = useRuntimeConfig()
 const { copy } = useCopyToClipboard()
+const { url: siteUrl } = useSiteUrl()
+
+useHead(() => ({
+  script: [{
+    type: 'application/ld+json',
+    innerHTML: JSON.stringify({
+      '@context': 'https://schema.org',
+      '@graph': [
+        {
+          '@type': 'WebSite',
+          '@id': `${siteUrl.value}/#website`,
+          'url': siteUrl.value,
+          'name': 'Perch Live Chat',
+          'alternateName': 'Perch'
+        },
+        {
+          '@type': 'Organization',
+          '@id': `${siteUrl.value}/#organization`,
+          'name': 'Perch',
+          'url': siteUrl.value,
+          'logo': `${siteUrl.value}/favicon.svg`,
+          'sameAs': ['https://github.com/DevAdedeji/perch']
+        },
+        {
+          '@type': 'SoftwareApplication',
+          '@id': `${siteUrl.value}/#software`,
+          'name': 'Perch',
+          'url': siteUrl.value,
+          'applicationCategory': 'BusinessApplication',
+          'operatingSystem': 'Web',
+          'description': 'Real-time website live chat with a shared inbox, conversation ownership, private notes, saved replies and team handoffs.',
+          'offers': {
+            '@type': 'Offer',
+            'price': '0',
+            'priceCurrency': 'USD'
+          },
+          'publisher': { '@id': `${siteUrl.value}/#organization` }
+        }
+      ]
+    })
+  }]
+}))
 
 // the landing page eats its own dog food — the real widget, live, bottom-right
 useHead({

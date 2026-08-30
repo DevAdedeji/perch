@@ -1,5 +1,11 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
 // Perch dashboard — Nuxt app + Nitro API + (soon) WS handler
+const publicSiteUrl = process.env.PERCH_PUBLIC_URL?.trim().replace(/\/+$/, '') ?? ''
+
+if (process.env.npm_lifecycle_event === 'build' && !publicSiteUrl) {
+  throw new Error('PERCH_PUBLIC_URL is required while building so prerendered pages use the public origin.')
+}
+
 export default defineNuxtConfig({
   modules: [
     '@nuxt/eslint',
@@ -31,6 +37,9 @@ export default defineNuxtConfig({
     adminEmails: '',
     publicBaseUrl: '',
     public: {
+      // Available while prerendering so production HTML never points
+      // canonical and social metadata at localhost.
+      siteUrl: publicSiteUrl,
       // the workspace the landing page's live demo widget talks to (site_ids are public by design)
       demoSiteId: process.env.NUXT_PUBLIC_DEMO_SITE_ID || 'ws_18c6715c14'
     }
@@ -48,6 +57,8 @@ export default defineNuxtConfig({
         'strict-transport-security': 'max-age=31536000; includeSubDomains'
       }
     },
+    '/privacy': { prerender: true },
+    '/terms': { prerender: true },
     '/widget.js': {
       headers: {
         'cache-control': 'public, max-age=300, stale-while-revalidate=86400',

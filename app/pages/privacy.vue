@@ -1,5 +1,8 @@
 <script setup lang="ts">
-useHead({ title: 'Privacy Policy · Perch' })
+useSeoMeta({
+  title: 'Privacy Policy · Perch',
+  description: 'How Perch collects, uses and protects account, workspace and live-chat data.'
+})
 
 const updated = 'July 11, 2026'
 const contact = 'adedejitewogbade2@gmail.com'

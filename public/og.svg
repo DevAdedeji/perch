@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-labelledby="title desc">
+  <title id="title">Perch live chat</title>
+  <desc id="desc">Perch live chat shared inbox for support teams</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0f172a"/>
+      <stop offset="1" stop-color="#111827"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.78" cy="0.18" r="0.68">
+      <stop offset="0" stop-color="#f59e0b" stop-opacity="0.32"/>
+      <stop offset="1" stop-color="#f59e0b" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1200" height="630" fill="url(#background)"/>
+  <rect width="1200" height="630" fill="url(#glow)"/>
+  <g opacity="0.11" stroke="#f8fafc">
+    <path d="M0 90H1200M0 180H1200M0 270H1200M0 360H1200M0 450H1200M0 540H1200"/>
+    <path d="M90 0V630M180 0V630M270 0V630M360 0V630M450 0V630M540 0V630M630 0V630M720 0V630M810 0V630M900 0V630M990 0V630M1080 0V630"/>
+  </g>
+  <g transform="translate(82 78)">
+    <rect width="72" height="72" rx="20" fill="#f59e0b" fill-opacity="0.14" stroke="#f59e0b" stroke-opacity="0.4"/>
+    <path d="M21 46c11-2 21-11 27-27 4 17 0 31-12 37-7 3-13-1-15-10Zm11-4c7 0 14 3 19 9" fill="none" stroke="#fbbf24" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <text x="174" y="129" fill="#f8fafc" font-family="Arial, Helvetica, sans-serif" font-size="43" font-weight="700">Perch</text>
+  <text x="82" y="290" fill="#f8fafc" font-family="Arial, Helvetica, sans-serif" font-size="68" font-weight="700">Live chat support</text>
+  <text x="82" y="374" fill="#fbbf24" font-family="Arial, Helvetica, sans-serif" font-size="68" font-weight="700">that feels instant.</text>
+  <text x="86" y="454" fill="#cbd5e1" font-family="Arial, Helvetica, sans-serif" font-size="30">One chat widget. One shared inbox. No duplicate replies.</text>
+  <g transform="translate(86 510)">
+    <circle cx="9" cy="9" r="9" fill="#22c55e"/>
+    <text x="34" y="19" fill="#e2e8f0" font-family="Arial, Helvetica, sans-serif" font-size="25">useperch.xyz</text>
+  </g>
+</svg>
