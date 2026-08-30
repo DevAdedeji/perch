@@ -11,6 +11,7 @@ export interface AuthUser {
   email: string
   name: string
   emailVerified: boolean
+  hasPassword: boolean
 }
 
 interface AuthState {

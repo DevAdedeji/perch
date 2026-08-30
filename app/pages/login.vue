@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { z } from 'zod'
 import type { FormSubmitEvent } from '@nuxt/ui'
+import { safeAuthRedirect } from '@perch/shared'
 
 definePageMeta({ layout: 'auth' })
 useHead({ title: 'Sign in · Perch' })
@@ -13,10 +14,16 @@ type Schema = z.output<typeof schema>
 
 const state = reactive({ email: '', password: '' })
 const loading = ref(false)
-const error = ref('')
 
 const route = useRoute()
 const { refresh, hasWorkspace } = useAuth()
+const { data: authMethods } = await useFetch<{ google: boolean }>('/api/auth/methods', {
+  default: () => ({ google: false })
+})
+const redirect = computed(() => safeAuthRedirect(route.query.redirect, '/dashboard'))
+const error = ref(route.query.oauth_error
+  ? 'Google sign-in could not be completed. Please try again.'
+  : '')
 
 async function onSubmit(event: FormSubmitEvent<Schema>) {
   loading.value = true
@@ -24,8 +31,9 @@ async function onSubmit(event: FormSubmitEvent<Schema>) {
   try {
     await $fetch('/api/auth/login', { method: 'POST', body: event.data })
     await refresh()
-    const redirect = route.query.redirect as string | undefined
-    await navigateTo(redirect || (hasWorkspace.value ? '/dashboard' : '/onboarding'))
+    await navigateTo(route.query.redirect
+      ? redirect.value
+      : hasWorkspace.value ? '/dashboard' : '/onboarding')
   } catch (e) {
     error.value = getErrorMessage(e, 'Could not sign in')
   } finally {
@@ -52,6 +60,16 @@ async function onSubmit(event: FormSubmitEvent<Schema>) {
     </div>
 
     <div class="rounded-2xl border-glow bg-elevated/40 glass p-6 sm:p-7 shadow-xl shadow-black/10">
+      <template v-if="authMethods.google">
+        <GoogleAuthButton :redirect="redirect" />
+
+        <div class="my-5 flex items-center gap-3">
+          <span class="h-px flex-1 bg-border" />
+          <span class="text-xs text-dimmed">or with email</span>
+          <span class="h-px flex-1 bg-border" />
+        </div>
+      </template>
+
       <UForm
         :schema="schema"
         :state="state"
