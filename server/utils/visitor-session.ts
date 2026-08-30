@@ -16,10 +16,7 @@ interface EmbedTicketPayload {
 }
 
 function visitorSessionSecret(event?: H3Event): string {
-  const config = useRuntimeConfig(event)
-  const secret = config.realtimeSecret || process.env.REALTIME_SECRET || process.env.NUXT_SESSION_PASSWORD
-  if (!secret) throw createError({ statusCode: 503, statusMessage: 'Visitor sessions are not configured' })
-  return secret
+  return requireRealtimeSecret(event)
 }
 
 function signature(encoded: string, secret: string): Buffer {

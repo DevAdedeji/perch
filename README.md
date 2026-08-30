@@ -11,7 +11,7 @@ indicators, unread state, and race-safe conversation claiming.
 > auth scoping, secure third-party embedding, and concurrency correctness — all open source.
 > Every dependency is free or on a genuine free tier.
 
-**Live:** https://perch.adedeji.xyz &nbsp;·&nbsp; **Stack:** Nuxt 4 · Nitro WebSockets · Drizzle · Neon Postgres
+**Live:** https://useperch.xyz &nbsp;·&nbsp; **Stack:** Nuxt 4 · Nitro WebSockets · Drizzle · Neon Postgres
 
 ![Landing page](docs/screenshots/landing.png)
 
@@ -181,8 +181,8 @@ perch/
 # 1. install
 pnpm install
 
-# 2. create a .env at the repo root with the two vars below
-#    (drizzle-kit and the app both read it from the repo root)
+# 2. copy the environment template and fill in the required values
+cp .env.example .env
 
 # 3. run migrations against your database
 pnpm --filter @perch/db db:migrate
@@ -203,14 +203,17 @@ Useful scripts: `pnpm build` (production Nitro bundle), `pnpm preview`, `pnpm li
 |---|---|
 | `NEON_CONNECTION_STRING` | Postgres connection string (Neon or any Postgres) |
 | `NUXT_SESSION_PASSWORD` | 32+ char secret — seals auth cookies **and** signs the HMAC WS tickets |
+| `REALTIME_SECRET` | *(optional)* separate 32+ char HMAC secret for realtime and visitor tickets; otherwise `NUXT_SESSION_PASSWORD` is reused |
 | `RESEND_API_KEY` | *(optional)* transactional email — password resets + invite emails. Without it, emails are logged to the server console |
 | `RESEND_FROM` | *(optional)* from address, e.g. `Perch <no-reply@yourdomain.com>` |
 | `SENTRY_DSN` | *(optional)* server-side error tracking; the client DSN lives in `sentry.client.config.ts` |
 | `CLOUDINARY_CLOUD_NAME` / `CLOUDINARY_API_KEY` / `CLOUDINARY_API_SECRET` | *(optional)* signed image attachments; the secret never leaves the server |
-| `PERCH_PUBLIC_URL` | `https://perch.adedeji.xyz` in production | canonical origin used in password, verification, and invite links |
+| `PERCH_PUBLIC_URL` | Canonical origin used in password, verification, and invite links; `https://useperch.xyz` in production |
+| `PERCH_ADMIN_EMAILS` | *(optional)* comma-separated operator emails allowed to access instance metrics |
+| `NUXT_PUBLIC_DEMO_SITE_ID` | *(optional)* workspace site ID used by the landing-page demo widget |
 
-> Nuxt only auto-maps `NUXT_`-prefixed env at runtime, so the server also reads these two names
-> directly from `process.env` — set them as plain environment variables in production.
+> Nuxt only auto-maps `NUXT_`-prefixed env at runtime. The server reads the documented plain
+> environment variable names directly as production fallbacks.
 
 ---
 
@@ -230,7 +233,7 @@ machine (see the script header for the crontab line and restore command).
 Notes from getting this live on a small tier:
 - The Nitro build can OOM on small builders — the Dockerfile raises V8's heap
   (`--max-old-space-size=4096`) and server/client sourcemaps are disabled in `nuxt.config.ts`.
-- `/api/health` is the real health check (process + database). Point uptime monitoring there —
+- `/api/health` is the real readiness check (signing configuration + database). Point uptime monitoring there —
   pinging `/` proves nothing, since the landing page is prerendered.
 - Free-tier services that sleep on idle break presence; an UptimeRobot monitor on `/api/health`
   every 5 minutes keeps both the instance and Neon's compute warm.

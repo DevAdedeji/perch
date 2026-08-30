@@ -25,7 +25,7 @@ describe('normalizeDomain', () => {
 })
 
 describe('isDomainAllowed', () => {
-  const allowed = ['example.com', 'adedeji.xyz']
+  const allowed = ['example.com', 'useperch.xyz']
 
   it('allows everything when no list is configured', () => {
     expect(isDomainAllowed('https://anywhere.io/page', [])).toBe(true)
@@ -36,7 +36,7 @@ describe('isDomainAllowed', () => {
     expect(isDomainAllowed('https://example.com/', allowed)).toBe(true)
     expect(isDomainAllowed('https://www.example.com/', allowed)).toBe(true)
     expect(isDomainAllowed('https://app.example.com/dash', allowed)).toBe(true)
-    expect(isDomainAllowed('https://perch.adedeji.xyz/', allowed)).toBe(true)
+    expect(isDomainAllowed('https://useperch.xyz/', allowed)).toBe(true)
   })
 
   it('blocks other hosts — including suffix look-alikes', () => {

@@ -71,7 +71,8 @@ export const workspaceMembers = pgTable('workspace_members', {
   presence: presenceEnum('presence').default('offline').notNull(),
   lastSeenAt: timestamp('last_seen_at', { withTimezone: true })
 }, t => [
-  uniqueIndex('workspace_members_workspace_user_uq').on(t.workspaceId, t.userId)
+  uniqueIndex('workspace_members_workspace_user_uq').on(t.workspaceId, t.userId),
+  index('workspace_members_user_idx').on(t.userId)
 ])
 
 export const invites = pgTable('invites', {
@@ -214,7 +215,9 @@ export const sessions = pgTable('sessions', {
   ip: text('ip'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).defaultNow().notNull()
-})
+}, t => [
+  index('sessions_user_recency_idx').on(t.userId, t.lastSeenAt)
+])
 
 /**
  * Workspace audit trail: who did what, when. Rows survive actor deletion
@@ -229,7 +232,9 @@ export const auditLogs = pgTable('audit_logs', {
   action: text('action').notNull(),
   detail: jsonb('detail').$type<Record<string, unknown>>().default({}).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull()
-})
+}, t => [
+  index('audit_logs_workspace_recency_idx').on(t.workspaceId, t.createdAt)
+])
 
 /** Help-center article groups ("Getting started", "Billing", …). */
 export const articleGroups = pgTable('article_groups', {
@@ -239,7 +244,9 @@ export const articleGroups = pgTable('article_groups', {
   description: text('description'),
   sortOrder: integer('sort_order').default(0).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull()
-})
+}, t => [
+  index('article_groups_workspace_order_idx').on(t.workspaceId, t.sortOrder)
+])
 
 /**
  * Help-center articles. Body is plain text (rendered as paragraphs) — visitors
@@ -258,7 +265,9 @@ export const articles = pgTable('articles', {
   status: text('status', { enum: ['draft', 'published'] }).default('draft').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
-})
+}, t => [
+  index('articles_workspace_status_created_idx').on(t.workspaceId, t.status, t.createdAt)
+])
 
 export const cannedResponses = pgTable('canned_responses', {
   id: uuid('id').defaultRandom().primaryKey(),

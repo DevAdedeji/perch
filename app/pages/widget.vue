@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { validateImageAttachment } from '@perch/shared'
+
 definePageMeta({ layout: false })
 useHead({ title: 'Chat', meta: [{ name: 'robots', content: 'noindex' }] })
 
@@ -76,15 +78,12 @@ async function onFilePicked(e: Event) {
   input.value = ''
   if (!file) return
   uploadError.value = ''
-  // validate before showing a bubble; network failures become retryable bubbles
-  if (!file.type.startsWith('image/')) {
-    uploadError.value = 'Only images can be attached'
-  } else if (file.size > 1024 * 1024) {
-    uploadError.value = 'Images must be smaller than 1 MB'
-  } else {
+  const validationError = validateImageAttachment(file)
+  if (!validationError) {
     await widget.sendAttachment(file, () => uploadImage(file, { site_id: siteId.value, visitor_session: widget.visitorSession.value }))
     return
   }
+  uploadError.value = validationError
   setTimeout(() => (uploadError.value = ''), 4000)
 }
 

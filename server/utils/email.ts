@@ -1,3 +1,5 @@
+import { PERCH_PRODUCTION_ORIGIN } from '@perch/shared'
+
 /**
  * Transactional email via Resend's REST API (no SDK dependency).
  * Best-effort by design: callers treat email as a side channel — a failed
@@ -11,33 +13,49 @@ interface SendEmailOptions {
   html: string
 }
 
+const EMAIL_TIMEOUT_MS = 10_000
+
 export function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, char => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', '\'': '&#39;'
   })[char]!)
 }
 
+/** Sensitive local preview links are never eligible for production logs. */
+export function shouldLogEmailPreview(sent: boolean, isDev: boolean): boolean {
+  return !sent && isDev
+}
+
+export function normalizePublicOrigin(value: string, allowHttp: boolean): string | null {
+  try {
+    const url = new URL(value)
+    const allowedProtocol = url.protocol === 'https:' || (allowHttp && url.protocol === 'http:')
+    if (!allowedProtocol || url.username || url.password) return null
+    return url.origin
+  } catch {
+    return null
+  }
+}
+
 export function publicOrigin(event: import('h3').H3Event): string {
   const configured = useRuntimeConfig(event).publicBaseUrl || process.env.PERCH_PUBLIC_URL
   if (configured) {
-    try {
-      return new URL(configured).origin
-    } catch {
-      throw createError({ statusCode: 500, statusMessage: 'PERCH_PUBLIC_URL is invalid' })
-    }
+    const origin = normalizePublicOrigin(configured, import.meta.dev)
+    if (origin) return origin
+    throw createError({ statusCode: 500, statusMessage: 'PERCH_PUBLIC_URL must be a valid HTTPS origin' })
   }
   return import.meta.dev
     ? getRequestURL(event, { xForwardedHost: true, xForwardedProto: true }).origin
-    : 'https://perch.adedeji.xyz'
+    : PERCH_PRODUCTION_ORIGIN
 }
 
 export async function sendEmail({ to, subject, html }: SendEmailOptions): Promise<boolean> {
   const config = useRuntimeConfig()
   const apiKey = config.resendApiKey || process.env.RESEND_API_KEY
-  const from = config.emailFrom || process.env.RESEND_FROM || 'Perch <no-reply@perch.adedeji.xyz>'
+  const from = config.emailFrom || process.env.RESEND_FROM || `Perch <no-reply@${new URL(PERCH_PRODUCTION_ORIGIN).hostname}>`
 
   if (!apiKey) {
-    console.warn(`[email] RESEND_API_KEY not set — would have sent to ${to}: "${subject}"`)
+    console.warn(`[email] RESEND_API_KEY not set — skipped "${subject}"`)
     return false
   }
 
@@ -45,11 +63,12 @@ export async function sendEmail({ to, subject, html }: SendEmailOptions): Promis
     await $fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}` },
-      body: { from, to, subject, html }
+      body: { from, to, subject, html },
+      timeout: EMAIL_TIMEOUT_MS
     })
     return true
   } catch (e) {
-    console.error(`[email] failed to send "${subject}" to ${to}:`, (e as Error).message)
+    console.error(`[email] failed to send "${subject}":`, (e as Error).message)
     return false
   }
 }

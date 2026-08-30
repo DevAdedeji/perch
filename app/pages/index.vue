@@ -1,6 +1,9 @@
 <script setup lang="ts">
+import { PERCH_PRODUCTION_ORIGIN } from '@perch/shared'
+import { buildEmbedSnippet } from '~/utils/embed'
+
 const config = useRuntimeConfig()
-const toast = useToast()
+const { copy } = useCopyToClipboard()
 
 // the landing page eats its own dog food — the real widget, live, bottom-right
 useHead({
@@ -19,16 +22,9 @@ onBeforeUnmount(() => {
   ;(window as Window & { Perch?: { destroy?: () => void } }).Perch?.destroy?.()
 })
 
-// closing tag split so it doesn't terminate this SFC <script> block
-const closeScript = '</' + 'script>'
-const snippetText = computed(() => `<script src="https://perch.adedeji.xyz/widget.js" data-site-id="ws_abc123" async>${closeScript}`)
-async function copySnippet() {
-  try {
-    await navigator.clipboard.writeText(snippetText.value)
-    toast.add({ title: 'Snippet copied', icon: 'i-lucide-check', color: 'success' })
-  } catch {
-    toast.add({ title: 'Copy failed', color: 'error' })
-  }
+const snippetText = computed(() => buildEmbedSnippet(PERCH_PRODUCTION_ORIGIN, 'ws_abc123'))
+function copySnippet() {
+  void copy(snippetText.value, 'Snippet copied')
 }
 
 // plain-language numbers under the demo
@@ -250,7 +246,7 @@ const claimSql = 'UPDATE conversations\nSET assigned_agent_id = $me, status = \'
                 @click="copySnippet"
               />
             </div>
-            <pre class="p-5 text-sm font-mono leading-relaxed overflow-x-auto"><code><span class="text-dimmed">&lt;</span><span class="text-highlighted">script</span> <span class="text-highlighted">src</span>=<span class="text-muted">"https://perch.adedeji.xyz/widget.js"</span> <span class="text-highlighted">data-site-id</span>=<span class="text-amber-600 dark:text-amber-400">"ws_abc123"</span> <span class="text-highlighted">async</span><span class="text-dimmed">&gt;&lt;/</span><span class="text-highlighted">script</span><span class="text-dimmed">&gt;</span></code></pre>
+            <pre class="p-5 text-sm font-mono leading-relaxed overflow-x-auto"><code><span class="text-dimmed">&lt;</span><span class="text-highlighted">script</span> <span class="text-highlighted">src</span>=<span class="text-muted">"{{ PERCH_PRODUCTION_ORIGIN }}/widget.js"</span> <span class="text-highlighted">data-site-id</span>=<span class="text-amber-600 dark:text-amber-400">"ws_abc123"</span> <span class="text-highlighted">async</span><span class="text-dimmed">&gt;&lt;/</span><span class="text-highlighted">script</span><span class="text-dimmed">&gt;</span></code></pre>
           </div>
           <p class="mt-5 text-center text-sm text-muted">
             Works on any website — Shopify, WordPress, Webflow, plain HTML.

@@ -82,7 +82,7 @@ export default defineEventHandler(async (event) => {
     agentLastReadAt = read?.last ? new Date(read.last).toISOString() : null
   }
 
-  const secret = (useRuntimeConfig(event).realtimeSecret || process.env.NUXT_SESSION_PASSWORD)!
+  const secret = requireRealtimeSecret(event)
   const wsTicket = signTicket({ role: 'visitor', wid: workspace.id, vid: visitor!.id }, secret)
 
   // the Help tab only renders when there's something to read

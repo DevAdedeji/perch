@@ -17,6 +17,7 @@ interface WorkspaceDetail {
 
 const { currentWorkspace, refresh } = useAuth()
 const toast = useToast()
+const { copy } = useCopyToClipboard()
 
 const wid = computed(() => currentWorkspace.value?.workspaceId ?? null)
 const workspace = ref<WorkspaceDetail | null>(null)
@@ -49,15 +50,6 @@ async function patchWorkspace(body: Record<string, unknown>, okMsg?: string) {
   const res = await $fetch<{ workspace: WorkspaceDetail }>(`/api/workspaces/${wid.value}`, { method: 'PATCH', body })
   if (workspace.value) Object.assign(workspace.value, res.workspace)
   if (okMsg) toast.add({ title: okMsg, icon: 'i-lucide-check', color: 'success' })
-}
-
-async function copy(text: string, label = 'Copied') {
-  try {
-    await navigator.clipboard.writeText(text)
-    toast.add({ title: label, icon: 'i-lucide-check', color: 'success' })
-  } catch {
-    toast.add({ title: 'Copy failed', color: 'error' })
-  }
 }
 
 /* allowed domains */

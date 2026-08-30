@@ -48,8 +48,8 @@ export default defineEventHandler(async (event) => {
         ctaUrl: resetUrl
       })
     })
-    // dev convenience: without an email provider, surface the link in the server log
-    if (!sent) console.warn(`[auth] password reset link for ${user.email}: ${resetUrl}`)
+    // Local-only convenience. Production logs must never contain reset tokens.
+    if (shouldLogEmailPreview(sent, import.meta.dev)) console.warn(`[auth] password reset link: ${resetUrl}`)
   }
 
   return { ok: true }

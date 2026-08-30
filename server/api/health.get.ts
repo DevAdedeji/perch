@@ -1,11 +1,11 @@
 import { sql } from '@perch/db'
 
 /**
- * Real health check: proves the process AND the database are up (the landing
- * page is prerendered, so pinging `/` says nothing about either). Point
- * UptimeRobot here — as a bonus, the DB ping keeps Neon's compute warm.
+ * Readiness check: proves required signing configuration and the database are
+ * available. The landing page is prerendered, so pinging `/` proves neither.
  */
-export default defineEventHandler(async () => {
+export default defineEventHandler(async (event) => {
+  requireRealtimeSecret(event)
   const startedAt = Date.now()
   await useDb().execute(sql`select 1`)
   return {

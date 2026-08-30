@@ -28,10 +28,11 @@ ENV PORT=8000
 WORKDIR /app
 
 # Nitro's .output is self-contained (bundles the deps it needs)
-COPY --from=builder /app/.output ./.output
+COPY --chown=node:node --from=builder /app/.output ./.output
 # deploy-time migrations: schema lands before the server boots
-COPY --from=builder /app/migrate.bundle.mjs ./migrate.bundle.mjs
-COPY --from=builder /app/packages/db/migrations ./migrations
+COPY --chown=node:node --from=builder /app/migrate.bundle.mjs ./migrate.bundle.mjs
+COPY --chown=node:node --from=builder /app/packages/db/migrations ./migrations
 
 EXPOSE 8000
+USER node
 CMD ["sh", "-c", "node migrate.bundle.mjs && exec node .output/server/index.mjs"]

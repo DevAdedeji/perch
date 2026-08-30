@@ -4,6 +4,7 @@ useHead({ title: 'Set up your workspace · Perch' })
 
 const toast = useToast()
 const { refresh } = useAuth()
+const { copy } = useCopyToClipboard()
 const origin = useRequestURL().origin
 
 const steps = ['Workspace', 'Invite team', 'You’re live'] as const
@@ -80,20 +81,7 @@ async function sendInvites() {
 }
 
 /* step 3: embed */
-// closing tag split so it doesn't terminate this SFC <script> block
-const closeScript = '</' + 'script>'
-const snippet = computed(() =>
-  `<script src="${origin}/widget.js" data-site-id="${created.value?.siteId ?? ''}" async>${closeScript}`
-)
-
-async function copy(text: string, label = 'Copied') {
-  try {
-    await navigator.clipboard.writeText(text)
-    toast.add({ title: label, icon: 'i-lucide-check', color: 'success' })
-  } catch {
-    toast.add({ title: 'Copy failed', color: 'error' })
-  }
-}
+const snippet = computed(() => created.value ? buildEmbedSnippet(origin, created.value.siteId) : '')
 
 async function finish() {
   await navigateTo('/dashboard')
@@ -368,26 +356,10 @@ async function finish() {
           Paste this snippet before <code class="font-mono text-highlighted">&lt;/body&gt;</code> on your site to start receiving chats.
         </p>
 
-        <div class="mt-6 text-left rounded-xl bg-default ring-1 ring-default overflow-hidden">
-          <div class="flex items-center gap-2 px-4 py-2 border-b border-default bg-elevated/50">
-            <UIcon
-              name="i-lucide-code"
-              class="size-4 text-dimmed"
-            />
-            <span class="text-xs font-mono text-dimmed">embed snippet</span>
-            <UButton
-              color="neutral"
-              variant="ghost"
-              size="xs"
-              icon="i-lucide-copy"
-              class="ml-auto"
-              @click="copy(snippet, 'Snippet copied')"
-            >
-              Copy
-            </UButton>
-          </div>
-          <pre class="p-4 text-xs sm:text-sm font-mono text-highlighted overflow-x-auto whitespace-pre-wrap break-all">{{ snippet }}</pre>
-        </div>
+        <EmbedSnippetCard
+          class="mt-6 text-left"
+          :snippet="snippet"
+        />
 
         <UButton
           color="neutral"
