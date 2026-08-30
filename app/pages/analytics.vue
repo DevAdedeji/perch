@@ -47,6 +47,7 @@ interface AnalyticsResponse {
 
 const { currentWorkspace } = useAuth()
 const wid = computed(() => currentWorkspace.value?.workspaceId ?? null)
+const isAdmin = computed(() => currentWorkspace.value?.role === 'admin')
 const range = ref<AnalyticsRange>('30d')
 const rangeItems = [
   { label: 'Last 7 days', value: '7d' },
@@ -60,7 +61,13 @@ const error = ref(false)
 let requestVersion = 0
 
 async function load() {
-  if (!wid.value) return
+  if (!wid.value || !isAdmin.value) {
+    requestVersion++
+    analytics.value = null
+    loading.value = false
+    error.value = false
+    return
+  }
   const version = ++requestVersion
   loading.value = true
   error.value = false
@@ -80,7 +87,7 @@ async function load() {
 }
 
 onMounted(load)
-watch([wid, range], load)
+watch([wid, range, isAdmin], load)
 
 function formatDuration(seconds: number | null): string {
   if (seconds === null) return '—'
@@ -136,7 +143,10 @@ const hasActivity = computed(() => analytics.value?.trend.some(day =>
 <template>
   <div class="h-full overflow-y-auto">
     <div class="max-w-5xl mx-auto p-5 sm:p-8 space-y-6">
-      <header class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <header
+        v-if="isAdmin"
+        class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"
+      >
         <div>
           <h1 class="font-display text-2xl font-bold text-highlighted">
             Support analytics
@@ -153,7 +163,31 @@ const hasActivity = computed(() => analytics.value?.trend.some(day =>
         />
       </header>
 
-      <template v-if="loading">
+      <div
+        v-if="!isAdmin"
+        class="rounded-2xl border-glow bg-elevated/30 px-6 py-12 text-center"
+      >
+        <UIcon
+          name="i-lucide-lock-keyhole"
+          class="mx-auto size-8 text-dimmed"
+        />
+        <h1 class="mt-3 font-display text-xl font-semibold text-highlighted">
+          Admin access required
+        </h1>
+        <p class="mx-auto mt-1 max-w-md text-sm text-muted">
+          Support analytics includes team performance data, so only workspace admins can view it.
+        </p>
+        <UButton
+          to="/dashboard"
+          color="neutral"
+          variant="outline"
+          class="mt-4"
+        >
+          Back to inbox
+        </UButton>
+      </div>
+
+      <template v-else-if="loading">
         <div class="grid grid-cols-2 gap-3 lg:grid-cols-5">
           <USkeleton
             v-for="n in 5"

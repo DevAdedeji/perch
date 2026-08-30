@@ -1,6 +1,7 @@
 import { conversations, eq, messages, sql, users, workspaceMembers, workspaces } from '@perch/db'
 import {
   resolveSupportAnalyticsWindow,
+  supportAnalyticsMissedCutoff,
   toFiniteNumber,
   toNullableFiniteNumber
 } from '../../../utils/support-analytics'
@@ -44,12 +45,7 @@ interface MemberRow extends Record<string, unknown> {
 
 export default defineEventHandler(async (event) => {
   const workspaceId = getRouterParam(event, 'id')!
-  await requireMembership(event, workspaceId)
-
-  const range = resolveSupportAnalyticsWindow(getQuery(event).range ?? '30d')
-  if (!range) {
-    throw createError({ statusCode: 400, statusMessage: 'Range must be 7d, 30d, or 90d' })
-  }
+  await requireMembership(event, workspaceId, { admin: true })
 
   const db = useDb()
   const workspace = await db.query.workspaces.findFirst({
@@ -61,8 +57,13 @@ export default defineEventHandler(async (event) => {
   }
 
   const timezone = workspace.timezone ?? 'UTC'
-  const start = range.start.toISOString()
-  const end = range.end.toISOString()
+  const range = resolveSupportAnalyticsWindow(getQuery(event).range ?? '30d', timezone)
+  if (!range) {
+    throw createError({ statusCode: 400, statusMessage: 'Range must be 7d, 30d, or 90d' })
+  }
+  const start = range.startDay
+  const end = range.endDayExclusive
+  const missedCutoff = supportAnalyticsMissedCutoff().toISOString()
 
   const [summaryRows, trendRows, hourRows, memberRows] = await Promise.all([
     db.execute<SummaryRow>(sql`
@@ -93,61 +94,63 @@ export default defineEventHandler(async (event) => {
         ) first_agent on true
         where c.workspace_id = ${workspaceId}::uuid
           and (
-            (c.created_at >= ${start}::timestamptz and c.created_at < ${end}::timestamptz)
-            or (c.resolved_at >= ${start}::timestamptz and c.resolved_at < ${end}::timestamptz)
-            or (c.csat_at >= ${start}::timestamptz and c.csat_at < ${end}::timestamptz)
+            (c.created_at >= (${start}::date::timestamp at time zone ${timezone}) and c.created_at < (${end}::date::timestamp at time zone ${timezone}))
+            or (c.resolved_at >= (${start}::date::timestamp at time zone ${timezone}) and c.resolved_at < (${end}::date::timestamp at time zone ${timezone}))
+            or (c.csat_at >= (${start}::date::timestamp at time zone ${timezone}) and c.csat_at < (${end}::date::timestamp at time zone ${timezone}))
           )
       )
       select
         count(*) filter (
-          where created_at >= ${start}::timestamptz and created_at < ${end}::timestamptz
+          where created_at >= (${start}::date::timestamp at time zone ${timezone})
+            and created_at < (${end}::date::timestamp at time zone ${timezone})
         ) as conversations,
         count(*) filter (
-          where resolved_at >= ${start}::timestamptz and resolved_at < ${end}::timestamptz
+          where resolved_at >= (${start}::date::timestamp at time zone ${timezone})
+            and resolved_at < (${end}::date::timestamp at time zone ${timezone})
         ) as resolved,
         count(*) filter (
-          where created_at >= ${start}::timestamptz
-            and created_at < ${end}::timestamptz
+          where created_at >= (${start}::date::timestamp at time zone ${timezone})
+            and created_at < (${end}::date::timestamp at time zone ${timezone})
             and first_visitor_at is not null
             and first_agent_at is null
         ) as unanswered,
         count(*) filter (
-          where created_at >= ${start}::timestamptz
-            and created_at < ${end}::timestamptz
+          where created_at >= (${start}::date::timestamp at time zone ${timezone})
+            and created_at < (${end}::date::timestamp at time zone ${timezone})
             and status <> 'resolved'
             and first_visitor_at is not null
             and first_agent_at is null
-            and last_message_at <= ${end}::timestamptz - interval '15 minutes'
+            and first_visitor_at <= ${missedCutoff}::timestamptz
         ) as missed,
         avg(extract(epoch from (first_agent_at - first_visitor_at)))
           filter (
-            where created_at >= ${start}::timestamptz
-              and created_at < ${end}::timestamptz
+            where created_at >= (${start}::date::timestamp at time zone ${timezone})
+              and created_at < (${end}::date::timestamp at time zone ${timezone})
               and first_agent_at is not null
           ) as average_first_response_seconds,
         avg(extract(epoch from (resolved_at - created_at)))
           filter (
-            where resolved_at >= ${start}::timestamptz
-              and resolved_at < ${end}::timestamptz
+            where resolved_at >= (${start}::date::timestamp at time zone ${timezone})
+              and resolved_at < (${end}::date::timestamp at time zone ${timezone})
               and resolved_at >= created_at
           ) as average_resolution_seconds,
         count(*) filter (
           where csat_rating = 'good'
-            and csat_at >= ${start}::timestamptz
-            and csat_at < ${end}::timestamptz
+            and csat_at >= (${start}::date::timestamp at time zone ${timezone})
+            and csat_at < (${end}::date::timestamp at time zone ${timezone})
         ) as csat_good,
         count(*) filter (
           where csat_rating = 'bad'
-            and csat_at >= ${start}::timestamptz
-            and csat_at < ${end}::timestamptz
+            and csat_at >= (${start}::date::timestamp at time zone ${timezone})
+            and csat_at < (${end}::date::timestamp at time zone ${timezone})
         ) as csat_bad
       from relevant_conversations
     `),
     db.execute<TrendRow>(sql`
       with days as (
         select generate_series(
-          (${start}::timestamptz at time zone ${timezone})::date,
-          (${end}::timestamptz at time zone ${timezone})::date,
+          ${start}::date,
+          ${end}::date - 1,
           interval '1 day'
         )::date as day
       ),
@@ -155,8 +158,8 @@ export default defineEventHandler(async (event) => {
         select (c.created_at at time zone ${timezone})::date as day, count(*) as total
         from ${conversations} c
         where c.workspace_id = ${workspaceId}::uuid
-          and c.created_at >= ${start}::timestamptz
-          and c.created_at < ${end}::timestamptz
+          and c.created_at >= (${start}::date::timestamp at time zone ${timezone})
+          and c.created_at < (${end}::date::timestamp at time zone ${timezone})
         group by 1
       ),
       daily_messages as (
@@ -166,16 +169,16 @@ export default defineEventHandler(async (event) => {
         where c.workspace_id = ${workspaceId}::uuid
           and m.sender_type = 'visitor'
           and m.is_internal_note = false
-          and m.created_at >= ${start}::timestamptz
-          and m.created_at < ${end}::timestamptz
+          and m.created_at >= (${start}::date::timestamp at time zone ${timezone})
+          and m.created_at < (${end}::date::timestamp at time zone ${timezone})
         group by 1
       ),
       daily_resolutions as (
         select (c.resolved_at at time zone ${timezone})::date as day, count(*) as total
         from ${conversations} c
         where c.workspace_id = ${workspaceId}::uuid
-          and c.resolved_at >= ${start}::timestamptz
-          and c.resolved_at < ${end}::timestamptz
+          and c.resolved_at >= (${start}::date::timestamp at time zone ${timezone})
+          and c.resolved_at < (${end}::date::timestamp at time zone ${timezone})
         group by 1
       )
       select
@@ -199,8 +202,8 @@ export default defineEventHandler(async (event) => {
       where c.workspace_id = ${workspaceId}::uuid
         and m.sender_type = 'visitor'
         and m.is_internal_note = false
-        and m.created_at >= ${start}::timestamptz
-        and m.created_at < ${end}::timestamptz
+        and m.created_at >= (${start}::date::timestamp at time zone ${timezone})
+        and m.created_at < (${end}::date::timestamp at time zone ${timezone})
       group by 1
       order by visitor_messages desc, hour asc
       limit 6
@@ -211,8 +214,8 @@ export default defineEventHandler(async (event) => {
         from ${messages} m
         inner join ${conversations} c on c.id = m.conversation_id
         where c.workspace_id = ${workspaceId}::uuid
-          and c.created_at >= ${start}::timestamptz
-          and c.created_at < ${end}::timestamptz
+          and c.created_at >= (${start}::date::timestamp at time zone ${timezone})
+          and c.created_at < (${end}::date::timestamp at time zone ${timezone})
           and m.sender_type = 'visitor'
           and m.is_internal_note = false
         group by m.conversation_id
@@ -246,8 +249,8 @@ export default defineEventHandler(async (event) => {
             and c.workspace_id = ${workspaceId}::uuid
             and m.sender_type = 'agent'
             and m.is_internal_note = false
-            and m.created_at >= ${start}::timestamptz
-            and m.created_at < ${end}::timestamptz
+            and m.created_at >= (${start}::date::timestamp at time zone ${timezone})
+            and m.created_at < (${end}::date::timestamp at time zone ${timezone})
         ) as handled_conversations,
         (
           select count(*)
@@ -257,15 +260,15 @@ export default defineEventHandler(async (event) => {
             and c.workspace_id = ${workspaceId}::uuid
             and m.sender_type = 'agent'
             and m.is_internal_note = false
-            and m.created_at >= ${start}::timestamptz
-            and m.created_at < ${end}::timestamptz
+            and m.created_at >= (${start}::date::timestamp at time zone ${timezone})
+            and m.created_at < (${end}::date::timestamp at time zone ${timezone})
         ) as replies,
         (
           select count(*)
           from ${conversations} c
           where c.assigned_agent_id = wm.id
-            and c.resolved_at >= ${start}::timestamptz
-            and c.resolved_at < ${end}::timestamptz
+            and c.resolved_at >= (${start}::date::timestamp at time zone ${timezone})
+            and c.resolved_at < (${end}::date::timestamp at time zone ${timezone})
         ) as resolved_conversations,
         (
           select avg(extract(epoch from (fa.created_at - fv.created_at)))
@@ -278,16 +281,16 @@ export default defineEventHandler(async (event) => {
           from ${conversations} c
           where c.assigned_agent_id = wm.id
             and c.csat_rating = 'good'
-            and c.csat_at >= ${start}::timestamptz
-            and c.csat_at < ${end}::timestamptz
+            and c.csat_at >= (${start}::date::timestamp at time zone ${timezone})
+            and c.csat_at < (${end}::date::timestamp at time zone ${timezone})
         ) as csat_good,
         (
           select count(*)
           from ${conversations} c
           where c.assigned_agent_id = wm.id
             and c.csat_rating = 'bad'
-            and c.csat_at >= ${start}::timestamptz
-            and c.csat_at < ${end}::timestamptz
+            and c.csat_at >= (${start}::date::timestamp at time zone ${timezone})
+            and c.csat_at < (${end}::date::timestamp at time zone ${timezone})
         ) as csat_bad
       from ${workspaceMembers} wm
       inner join ${users} u on u.id = wm.user_id
@@ -305,8 +308,8 @@ export default defineEventHandler(async (event) => {
     range: {
       key: range.key,
       days: range.days,
-      start: range.start.toISOString(),
-      end: range.end.toISOString(),
+      start: range.startDay,
+      end: range.endDayExclusive,
       timezone
     },
     summary: {
