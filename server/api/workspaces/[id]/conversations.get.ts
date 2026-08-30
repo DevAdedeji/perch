@@ -1,6 +1,4 @@
-import { and, conversationReads, conversations, desc, eq, isNull, messages, or, sql, visitors } from '@perch/db'
-import { CONVERSATION_STATUSES } from '@perch/shared'
-import type { ConversationStatus } from '@perch/shared'
+import { and, conversationReads, conversations, desc, eq, inArray, isNull, messages, or, sql, visitors } from '@perch/db'
 
 const DEFAULT_LIMIT = 30
 const MAX_LIMIT = 100
@@ -15,13 +13,16 @@ export default defineEventHandler(async (event) => {
   const { member } = await requireMembership(event, workspaceId)
 
   const query = getQuery(event)
-  const statusParam = query.status as string | undefined
-  const status = CONVERSATION_STATUSES.includes(statusParam as ConversationStatus)
-    ? (statusParam as ConversationStatus)
-    : undefined
+  const parsedFilters = parseInboxFilters(query)
+  if (!parsedFilters.success) {
+    throw createError({ statusCode: 400, statusMessage: 'Invalid inbox filters', data: parsedFilters.error.flatten() })
+  }
+  const filters = parsedFilters.data
+  if (member.role === 'agent' && !['any', 'me', 'unassigned', member.id].includes(filters.assignee)) {
+    throw createError({ statusCode: 403, statusMessage: 'You cannot view another agent\'s inbox' })
+  }
   const limit = Math.min(Math.max(Number(query.limit) || DEFAULT_LIMIT, 1), MAX_LIMIT)
   const beforeId = typeof query.before === 'string' ? query.before : null
-  const tagId = typeof query.tag === 'string' && query.tag ? query.tag : null
 
   // agents see only the unassigned pool + their own chats; admins see everything
   const scope = member.role === 'agent'
@@ -43,6 +44,8 @@ export default defineEventHandler(async (event) => {
       id: conversations.id,
       status: conversations.status,
       assignedAgentId: conversations.assignedAgentId,
+      priority: conversations.priority,
+      snoozedUntil: conversations.snoozedUntil,
       lastMessageAt: conversations.lastMessageAt,
       createdAt: conversations.createdAt,
       visitorRef: visitors.id,
@@ -65,10 +68,24 @@ export default defineEventHandler(async (event) => {
     )
     .where(and(
       eq(conversations.workspaceId, workspaceId),
-      status ? eq(conversations.status, status) : undefined,
-      tagId
-        ? sql`exists (select 1 from conversation_tags ct where ct.conversation_id = ${conversations.id} and ct.tag_id = ${tagId}::uuid)`
-        : undefined,
+      filters.status ? eq(conversations.status, filters.status) : undefined,
+      filters.priorities.length ? inArray(conversations.priority, filters.priorities) : undefined,
+      filters.assignee === 'unassigned'
+        ? isNull(conversations.assignedAgentId)
+        : filters.assignee === 'me'
+          ? eq(conversations.assignedAgentId, member.id)
+          : filters.assignee !== 'any'
+            ? eq(conversations.assignedAgentId, filters.assignee)
+            : undefined,
+      ...filters.tagIds.map(tagId => sql`exists (
+        select 1 from conversation_tags ct
+        where ct.conversation_id = ${conversations.id} and ct.tag_id = ${tagId}::uuid
+      )`),
+      filters.snoozed === 'exclude'
+        ? sql`(${conversations.snoozedUntil} is null or ${conversations.snoozedUntil} <= now())`
+        : filters.snoozed === 'only'
+          ? sql`${conversations.snoozedUntil} > now()`
+          : undefined,
       scope,
       // tuple comparison keeps the order stable when timestamps collide
       cursor
@@ -86,6 +103,8 @@ export default defineEventHandler(async (event) => {
       id: r.id,
       status: r.status,
       assignedAgentId: r.assignedAgentId,
+      priority: r.priority,
+      snoozedUntil: r.snoozedUntil?.toISOString() ?? null,
       lastMessageAt: r.lastMessageAt.toISOString(),
       createdAt: r.createdAt.toISOString(),
       preview: r.preview ?? '',

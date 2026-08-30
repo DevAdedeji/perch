@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import type { InboxFilter } from '~/composables/useControlRoom'
+import type { ConversationPriority } from '@perch/shared'
+import type { InboxFilter, InboxSavedView } from '~/composables/useControlRoom'
 
 definePageMeta({ layout: 'dashboard' })
 useHead({ title: 'Inbox · Perch' })
@@ -8,6 +9,12 @@ const toast = useToast()
 const cr = useControlRoom()
 const { currentWorkspace } = useAuth()
 const { enabled: soundEnabled, toggle: toggleSound } = useNotificationSound()
+const filterOpen = ref(false)
+const savedViewsOpen = ref(false)
+const newViewName = ref('')
+const savingView = ref(false)
+const snoozeOpen = ref(false)
+const customSnooze = ref('')
 
 const filters: { label: string, value: InboxFilter }[] = [
   { label: 'All', value: 'all' },
@@ -15,6 +22,76 @@ const filters: { label: string, value: InboxFilter }[] = [
   { label: 'Open', value: 'open' },
   { label: 'Resolved', value: 'resolved' }
 ]
+
+const priorities: { value: ConversationPriority, label: string, icon: string }[] = [
+  { value: 'urgent', label: 'Urgent', icon: 'i-lucide-siren' },
+  { value: 'high', label: 'High', icon: 'i-lucide-chevrons-up' },
+  { value: 'normal', label: 'Normal', icon: 'i-lucide-minus' },
+  { value: 'low', label: 'Low', icon: 'i-lucide-chevrons-down' }
+]
+
+const assigneeOptions = computed(() => [
+  { value: 'any', label: 'Anyone' },
+  { value: 'unassigned', label: 'Unassigned' },
+  { value: 'me', label: 'Assigned to me' },
+  ...(currentWorkspace.value?.role === 'admin'
+    ? cr.members.value.map(member => ({ value: member.id, label: member.name }))
+    : [])
+])
+
+const activeAdvancedFilters = computed(() =>
+  (cr.assigneeFilter.value !== 'any' ? 1 : 0)
+  + cr.priorityFilters.value.length
+  + cr.tagFilters.value.length
+  + (cr.snoozedFilter.value !== 'exclude' ? 1 : 0)
+)
+
+function togglePriorityFilter(priority: ConversationPriority) {
+  cr.priorityFilters.value = cr.priorityFilters.value.includes(priority)
+    ? cr.priorityFilters.value.filter(value => value !== priority)
+    : [...cr.priorityFilters.value, priority]
+}
+
+function toggleTagFilter(tagId: string) {
+  cr.tagFilters.value = cr.tagFilters.value.includes(tagId)
+    ? cr.tagFilters.value.filter(value => value !== tagId)
+    : [...cr.tagFilters.value, tagId]
+}
+
+function clearAdvancedFilters() {
+  cr.assigneeFilter.value = 'any'
+  cr.priorityFilters.value = []
+  cr.tagFilters.value = []
+  cr.snoozedFilter.value = 'exclude'
+}
+
+function applySavedView(view: InboxSavedView) {
+  cr.applySavedView(view)
+  savedViewsOpen.value = false
+}
+
+async function saveView() {
+  const name = newViewName.value.trim()
+  if (!name || savingView.value) return
+  savingView.value = true
+  try {
+    await cr.saveCurrentView(name)
+    newViewName.value = ''
+    toast.add({ title: 'View saved', color: 'success', icon: 'i-lucide-bookmark-check' })
+  } catch (error) {
+    toast.add({ title: getErrorMessage(error, 'Could not save view'), color: 'error' })
+  } finally {
+    savingView.value = false
+  }
+}
+
+async function removeSavedView(id: string) {
+  try {
+    await cr.deleteSavedView(id)
+  } catch (error) {
+    toast.add({ title: getErrorMessage(error, 'Could not delete view'), color: 'error' })
+  }
+}
 
 /* inbox search (visitor name/email or message text) */
 const {
@@ -83,6 +160,57 @@ async function onAssign(memberId: string, memberName: string) {
   } catch (e) {
     toast.add({ title: getErrorMessage(e, 'Could not transfer'), color: 'error' })
   }
+}
+
+const priorityMenuItems = computed(() => [priorities.map(priority => ({
+  label: priority.label,
+  icon: priority.icon,
+  trailingIcon: cr.activeConversation.value?.priority === priority.value ? 'i-lucide-check' : undefined,
+  onSelect: () => setPriority(priority.value)
+}))])
+
+async function setPriority(priority: ConversationPriority) {
+  const active = cr.activeConversation.value
+  if (!active || active.priority === priority) return
+  try {
+    await cr.organize(active.id, { priority })
+    toast.add({ title: `Priority set to ${priority}`, color: 'success' })
+  } catch (error) {
+    toast.add({ title: getErrorMessage(error, 'Could not change priority'), color: 'error' })
+  }
+}
+
+function nextLocalHour(hours: number) {
+  return new Date(Date.now() + hours * 60 * 60 * 1000)
+}
+
+function tomorrowMorning() {
+  const date = new Date()
+  date.setDate(date.getDate() + 1)
+  date.setHours(9, 0, 0, 0)
+  return date
+}
+
+async function setSnooze(date: Date | null) {
+  const active = cr.activeConversation.value
+  if (!active) return
+  try {
+    await cr.organize(active.id, { snoozed_until: date?.toISOString() ?? null })
+    snoozeOpen.value = false
+    toast.add({ title: date ? `Snoozed until ${date.toLocaleString()}` : 'Conversation returned to inbox', color: 'success' })
+  } catch (error) {
+    toast.add({ title: getErrorMessage(error, 'Could not update snooze'), color: 'error' })
+  }
+}
+
+function applyCustomSnooze() {
+  const date = new Date(customSnooze.value)
+  if (Number.isNaN(date.getTime())) return
+  setSnooze(date)
+}
+
+function snoozedLabel(value: string) {
+  return new Date(value).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 }
 
 // a mention toast (from the layout) asked us to open a specific conversation
@@ -156,6 +284,168 @@ const statusBadge = {
             Inbox
           </h1>
           <div class="flex items-center gap-1.5">
+            <UPopover
+              v-model:open="savedViewsOpen"
+              :content="{ align: 'end' }"
+            >
+              <UButton
+                icon="i-lucide-bookmark"
+                color="neutral"
+                variant="ghost"
+                size="xs"
+                square
+                aria-label="Saved views"
+              />
+              <template #content>
+                <div class="w-72 p-3">
+                  <p class="text-sm font-semibold text-highlighted">
+                    Saved views
+                  </p>
+                  <p
+                    v-if="!cr.savedViews.value.length"
+                    class="mt-2 text-xs text-muted"
+                  >
+                    Save your current filters for one-click access.
+                  </p>
+                  <ul
+                    v-else
+                    class="mt-2 space-y-1"
+                  >
+                    <li
+                      v-for="view in cr.savedViews.value"
+                      :key="view.id"
+                      class="flex items-center gap-1"
+                    >
+                      <button
+                        class="min-w-0 flex-1 truncate rounded-lg px-2.5 py-2 text-left text-sm text-muted hover:bg-elevated hover:text-highlighted"
+                        @click="applySavedView(view)"
+                      >
+                        {{ view.name }}
+                      </button>
+                      <UButton
+                        icon="i-lucide-trash-2"
+                        color="neutral"
+                        variant="ghost"
+                        size="xs"
+                        :aria-label="`Delete ${view.name}`"
+                        @click="removeSavedView(view.id)"
+                      />
+                    </li>
+                  </ul>
+                  <form
+                    class="mt-3 flex gap-2 border-t border-default pt-3"
+                    @submit.prevent="saveView"
+                  >
+                    <UInput
+                      v-model="newViewName"
+                      class="min-w-0 flex-1"
+                      size="sm"
+                      maxlength="50"
+                      placeholder="View name"
+                    />
+                    <UButton
+                      type="submit"
+                      size="sm"
+                      :loading="savingView"
+                      :disabled="!newViewName.trim()"
+                    >
+                      Save
+                    </UButton>
+                  </form>
+                </div>
+              </template>
+            </UPopover>
+
+            <UPopover
+              v-model:open="filterOpen"
+              :content="{ align: 'end' }"
+            >
+              <UButton
+                icon="i-lucide-list-filter"
+                color="neutral"
+                :variant="activeAdvancedFilters ? 'subtle' : 'ghost'"
+                size="xs"
+                square
+                :aria-label="activeAdvancedFilters ? `${activeAdvancedFilters} active inbox filters` : 'Filter inbox'"
+              />
+              <template #content>
+                <div class="w-76 max-w-[90vw] p-3 space-y-4">
+                  <div class="flex items-center justify-between">
+                    <p class="text-sm font-semibold text-highlighted">
+                      Filters
+                    </p>
+                    <button
+                      v-if="activeAdvancedFilters"
+                      class="text-xs text-amber-700 dark:text-amber-400 hover:underline"
+                      @click="clearAdvancedFilters"
+                    >
+                      Clear all
+                    </button>
+                  </div>
+                  <label class="block">
+                    <span class="mb-1.5 block text-xs font-medium text-muted">Assignee</span>
+                    <select
+                      v-model="cr.assigneeFilter.value"
+                      class="h-9 w-full rounded-lg border border-default bg-default px-2.5 text-sm text-highlighted outline-none focus:ring-2 focus:ring-amber-500/50"
+                    >
+                      <option
+                        v-for="option in assigneeOptions"
+                        :key="option.value"
+                        :value="option.value"
+                      >{{ option.label }}</option>
+                    </select>
+                  </label>
+                  <fieldset>
+                    <legend class="mb-1.5 text-xs font-medium text-muted">
+                      Priority
+                    </legend>
+                    <div class="flex flex-wrap gap-1.5">
+                      <button
+                        v-for="priority in priorities"
+                        :key="priority.value"
+                        type="button"
+                        class="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs ring-1 ring-default transition-colors"
+                        :class="cr.priorityFilters.value.includes(priority.value) ? 'bg-amber-500/12 text-amber-700 dark:text-amber-400' : 'text-muted hover:bg-elevated'"
+                        @click="togglePriorityFilter(priority.value)"
+                      >
+                        <UIcon
+                          :name="priority.icon"
+                          class="size-3.5"
+                        />{{ priority.label }}
+                      </button>
+                    </div>
+                  </fieldset>
+                  <fieldset v-if="cr.workspaceTags.value.length">
+                    <legend class="mb-1.5 text-xs font-medium text-muted">
+                      Must include tags
+                    </legend>
+                    <div class="flex max-h-24 flex-wrap gap-1.5 overflow-y-auto">
+                      <button
+                        v-for="tag in cr.workspaceTags.value"
+                        :key="tag.id"
+                        type="button"
+                        class="rounded-lg px-2 py-1 font-mono text-xs ring-1 ring-default transition-colors"
+                        :class="cr.tagFilters.value.includes(tag.id) ? 'bg-amber-500/12 text-amber-700 dark:text-amber-400' : 'text-muted hover:bg-elevated'"
+                        @click="toggleTagFilter(tag.id)"
+                      >
+                        #{{ tag.name }}
+                      </button>
+                    </div>
+                  </fieldset>
+                  <label class="block">
+                    <span class="mb-1.5 block text-xs font-medium text-muted">Snoozed conversations</span>
+                    <select
+                      v-model="cr.snoozedFilter.value"
+                      class="h-9 w-full rounded-lg border border-default bg-default px-2.5 text-sm text-highlighted outline-none focus:ring-2 focus:ring-amber-500/50"
+                    >
+                      <option value="exclude">Hide until they return</option>
+                      <option value="include">Include in this inbox</option>
+                      <option value="only">Show snoozed only</option>
+                    </select>
+                  </label>
+                </div>
+              </template>
+            </UPopover>
             <UButton
               :icon="soundEnabled ? 'i-lucide-bell' : 'i-lucide-bell-off'"
               color="neutral"
@@ -214,28 +504,23 @@ const statusBadge = {
           </button>
         </div>
 
-        <!-- tag filter -->
+        <!-- active filter summary -->
         <div
-          v-if="cr.workspaceTags.value.length"
+          v-if="activeAdvancedFilters"
           class="mt-2 flex items-center gap-1 overflow-x-auto scrollbar-none"
         >
+          <span class="rounded-md bg-elevated px-2 py-0.5 text-[11px] text-muted">{{ activeAdvancedFilters }} active</span>
           <button
-            class="rounded-lg px-2 py-0.5 text-[11px] font-medium whitespace-nowrap transition-colors"
-            :class="!cr.tagFilter.value ? 'bg-elevated text-highlighted' : 'text-dimmed hover:text-muted'"
-            @click="cr.tagFilter.value = null"
+            class="whitespace-nowrap text-[11px] text-amber-700 dark:text-amber-400 hover:underline"
+            @click="filterOpen = true"
           >
-            All tags
+            Edit filters
           </button>
           <button
-            v-for="t in cr.workspaceTags.value"
-            :key="t.id"
-            class="rounded-lg px-2 py-0.5 font-mono text-[11px] whitespace-nowrap transition-colors"
-            :class="cr.tagFilter.value === t.id
-              ? 'bg-amber-500/12 text-amber-700 dark:text-amber-400'
-              : 'text-dimmed hover:text-muted'"
-            @click="cr.tagFilter.value = cr.tagFilter.value === t.id ? null : t.id"
+            class="whitespace-nowrap text-[11px] text-dimmed hover:text-highlighted"
+            @click="clearAdvancedFilters"
           >
-            #{{ t.name }}
+            Clear
           </button>
         </div>
       </div>
@@ -345,6 +630,17 @@ const statusBadge = {
                     {{ c.preview || '—' }}
                   </p>
                   <div class="mt-1.5 flex items-center gap-1.5">
+                    <span
+                      v-if="c.priority !== 'normal'"
+                      class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-semibold capitalize"
+                      :class="c.priority === 'urgent' ? 'bg-red-500/12 text-red-600 dark:text-red-400' : c.priority === 'high' ? 'bg-orange-500/12 text-orange-700 dark:text-orange-400' : 'bg-elevated text-muted'"
+                    >
+                      <UIcon
+                        :name="priorities.find(priority => priority.value === c.priority)?.icon"
+                        class="size-3"
+                      />
+                      {{ c.priority }}
+                    </span>
                     <UBadge
                       :color="statusBadge[c.status].color"
                       variant="subtle"
@@ -363,6 +659,17 @@ const statusBadge = {
                         :class="presenceDot(cr.memberPresence(c.assignedAgentId))"
                       />
                       <span class="text-[10px] font-medium text-muted truncate max-w-20">{{ (cr.memberName(c.assignedAgentId) ?? 'Agent').split(' ')[0] }}</span>
+                    </span>
+                    <span
+                      v-if="c.snoozedUntil && cr.snoozedFilter.value !== 'exclude'"
+                      class="ml-auto inline-flex items-center gap-1 text-[10px] text-muted"
+                      :title="`Snoozed until ${snoozedLabel(c.snoozedUntil)}`"
+                    >
+                      <UIcon
+                        name="i-lucide-clock-3"
+                        class="size-3"
+                      />
+                      {{ snoozedLabel(c.snoozedUntil) }}
                     </span>
                   </div>
                 </div>
@@ -453,6 +760,112 @@ const statusBadge = {
           </div>
 
           <div class="flex items-center gap-1 sm:gap-2 shrink-0">
+            <UDropdownMenu
+              :items="priorityMenuItems"
+              :content="{ align: 'end' }"
+            >
+              <UButton
+                size="sm"
+                color="neutral"
+                variant="ghost"
+                :icon="priorities.find(priority => priority.value === cr.activeConversation.value?.priority)?.icon"
+                :aria-label="`Priority: ${cr.activeConversation.value.priority}`"
+              >
+                <span class="hidden lg:inline capitalize">{{ cr.activeConversation.value.priority }}</span>
+              </UButton>
+            </UDropdownMenu>
+
+            <UPopover
+              v-model:open="snoozeOpen"
+              :content="{ align: 'end' }"
+            >
+              <UButton
+                size="sm"
+                color="neutral"
+                :variant="cr.activeConversation.value.snoozedUntil ? 'subtle' : 'ghost'"
+                icon="i-lucide-clock-3"
+                :aria-label="cr.activeConversation.value.snoozedUntil ? `Snoozed until ${snoozedLabel(cr.activeConversation.value.snoozedUntil)}` : 'Snooze conversation'"
+              >
+                <span class="hidden lg:inline">Snooze</span>
+              </UButton>
+              <template #content>
+                <div class="w-72 p-3">
+                  <p class="text-sm font-semibold text-highlighted">
+                    Snooze conversation
+                  </p>
+                  <div class="mt-2 grid grid-cols-2 gap-1.5">
+                    <UButton
+                      color="neutral"
+                      variant="subtle"
+                      size="sm"
+                      @click="setSnooze(nextLocalHour(1))"
+                    >
+                      In 1 hour
+                    </UButton>
+                    <UButton
+                      color="neutral"
+                      variant="subtle"
+                      size="sm"
+                      @click="setSnooze(nextLocalHour(4))"
+                    >
+                      In 4 hours
+                    </UButton>
+                    <UButton
+                      color="neutral"
+                      variant="subtle"
+                      size="sm"
+                      @click="setSnooze(tomorrowMorning())"
+                    >
+                      Tomorrow, 9:00
+                    </UButton>
+                    <UButton
+                      color="neutral"
+                      variant="subtle"
+                      size="sm"
+                      @click="setSnooze(nextLocalHour(24 * 7))"
+                    >
+                      In 1 week
+                    </UButton>
+                  </div>
+                  <form
+                    class="mt-3 border-t border-default pt-3"
+                    @submit.prevent="applyCustomSnooze"
+                  >
+                    <label
+                      class="block text-xs font-medium text-muted"
+                      for="custom-snooze"
+                    >Choose a date and time</label>
+                    <div class="mt-1.5 flex gap-2">
+                      <input
+                        id="custom-snooze"
+                        v-model="customSnooze"
+                        required
+                        type="datetime-local"
+                        class="h-9 min-w-0 flex-1 rounded-lg border border-default bg-default px-2 text-xs text-highlighted outline-none focus:ring-2 focus:ring-amber-500/50"
+                      >
+                      <UButton
+                        type="submit"
+                        size="sm"
+                      >
+                        Set
+                      </UButton>
+                    </div>
+                  </form>
+                  <UButton
+                    v-if="cr.activeConversation.value.snoozedUntil"
+                    class="mt-2"
+                    block
+                    color="neutral"
+                    variant="ghost"
+                    size="sm"
+                    @click="setSnooze(null)"
+                  >
+                    Return to inbox now
+                  </UButton>
+                </div>
+              </template>
+            </UPopover>
+
             <!-- assignee / transfer -->
             <UDropdownMenu
               :items="assignMenuItems"

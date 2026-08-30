@@ -1,10 +1,12 @@
 import { channels } from '@perch/shared'
-import type { ConversationStatus, MessageDTO, ServerEvent } from '@perch/shared'
+import type { ConversationPriority, ConversationStatus, MessageDTO, SavedInboxFilters, ServerEvent } from '@perch/shared'
 
 export interface InboxItem {
   id: string
   status: ConversationStatus
   assignedAgentId: string | null
+  priority: ConversationPriority
+  snoozedUntil: string | null
   lastMessageAt: string
   createdAt: string
   preview: string
@@ -16,6 +18,12 @@ export interface InboxItem {
 export interface WorkspaceTag {
   id: string
   name: string
+}
+
+export interface InboxSavedView {
+  id: string
+  name: string
+  filters: SavedInboxFilters
 }
 
 export interface TeamMember {
@@ -84,8 +92,12 @@ export function useControlRoom() {
   const activeId = useState<string | null>('inbox:activeId', () => null)
   const messages = useState<Array<MessageDTO & { pending?: boolean, failed?: boolean }>>('cr:messages', () => [])
   const filter = useState<InboxFilter>('cr:filter', () => 'all')
-  const tagFilter = useState<string | null>('cr:tagFilter', () => null)
+  const assigneeFilter = useState<string>('cr:assigneeFilter', () => 'any')
+  const priorityFilters = useState<ConversationPriority[]>('cr:priorityFilters', () => [])
+  const tagFilters = useState<string[]>('cr:tagFilters', () => [])
+  const snoozedFilter = useState<'exclude' | 'include' | 'only'>('cr:snoozedFilter', () => 'exclude')
   const workspaceTags = useState<WorkspaceTag[]>('cr:tags', () => [])
+  const savedViews = useState<InboxSavedView[]>('cr:savedViews', () => [])
   const loadingList = ref(false)
   const loadingThread = ref(false)
   const visitorTyping = ref(false)
@@ -129,6 +141,27 @@ export function useControlRoom() {
     conversations.value.sort((a, b) => b.lastMessageAt.localeCompare(a.lastMessageAt))
   }
 
+  function appendFilters(params: URLSearchParams) {
+    if (filter.value !== 'all') params.set('status', filter.value)
+    if (assigneeFilter.value !== 'any') params.set('assignee', assigneeFilter.value)
+    if (priorityFilters.value.length) params.set('priority', priorityFilters.value.join(','))
+    if (tagFilters.value.length) params.set('tag', tagFilters.value.join(','))
+    if (snoozedFilter.value !== 'exclude') params.set('snoozed', snoozedFilter.value)
+  }
+
+  function matchesFilters(conversation: InboxItem) {
+    if (filter.value !== 'all' && conversation.status !== filter.value) return false
+    if (priorityFilters.value.length && !priorityFilters.value.includes(conversation.priority)) return false
+    if (assigneeFilter.value === 'unassigned' && conversation.assignedAgentId) return false
+    if (assigneeFilter.value === 'me' && conversation.assignedAgentId !== myMemberId.value) return false
+    if (!['any', 'me', 'unassigned'].includes(assigneeFilter.value) && conversation.assignedAgentId !== assigneeFilter.value) return false
+    if (tagFilters.value.some(tagId => !conversation.tags.some(tag => tag.id === tagId))) return false
+    const activelySnoozed = Boolean(conversation.snoozedUntil && new Date(conversation.snoozedUntil) > new Date())
+    if (snoozedFilter.value === 'exclude' && activelySnoozed) return false
+    if (snoozedFilter.value === 'only' && !activelySnoozed) return false
+    return true
+  }
+
   /* loaders */
   // `showLoader` is used for user-driven loads (tab switch, workspace change);
   // live-event refreshes pass nothing so the list updates without flashing skeletons.
@@ -138,8 +171,7 @@ export function useControlRoom() {
     if (showLoader) loadingList.value = true
     try {
       const params = new URLSearchParams()
-      if (filter.value !== 'all') params.set('status', filter.value)
-      if (tagFilter.value) params.set('tag', tagFilter.value)
+      appendFilters(params)
       const qs = params.size ? `?${params}` : ''
       const data = await $fetch<{ items: InboxItem[], has_more: boolean }>(
         `/api/workspaces/${workspaceId.value}/conversations${qs}`
@@ -159,8 +191,7 @@ export function useControlRoom() {
     loadingMore.value = true
     try {
       const params = new URLSearchParams({ before: last.id })
-      if (filter.value !== 'all') params.set('status', filter.value)
-      if (tagFilter.value) params.set('tag', tagFilter.value)
+      appendFilters(params)
       const data = await $fetch<{ items: InboxItem[], has_more: boolean }>(
         `/api/workspaces/${workspaceId.value}/conversations?${params}`
       )
@@ -188,6 +219,11 @@ export function useControlRoom() {
   async function loadCanned() {
     if (!workspaceId.value) return
     canned.value = await $fetch<CannedResponse[]>(`/api/workspaces/${workspaceId.value}/canned`)
+  }
+
+  async function loadSavedViews() {
+    if (!workspaceId.value) return
+    savedViews.value = await $fetch<InboxSavedView[]>(`/api/workspaces/${workspaceId.value}/saved-views`)
   }
 
   async function select(id: string, opts: { force?: boolean } = {}) {
@@ -344,6 +380,21 @@ export function useControlRoom() {
   async function reopen(id: string) {
     await $fetch(`/api/conversations/${id}/reopen`, { method: 'POST' })
   }
+  async function organize(id: string, changes: { priority?: ConversationPriority, snoozed_until?: string | null }) {
+    const { conversation } = await $fetch<{ conversation: { priority: ConversationPriority, snoozed_until: string | null } }>(`/api/conversations/${id}/organize`, {
+      method: 'PATCH',
+      body: changes
+    })
+    const item = conversations.value.find(conversation => conversation.id === id)
+    if (item) {
+      item.priority = conversation.priority
+      item.snoozedUntil = conversation.snoozed_until
+      if (!matchesFilters(item)) {
+        conversations.value = conversations.value.filter(conversation => conversation.id !== id)
+        if (activeId.value === id) deselect()
+      }
+    }
+  }
 
   /* live events */
   function applyEvent(ev: ServerEvent) {
@@ -361,9 +412,11 @@ export function useControlRoom() {
           const statusChanged = c.status !== p.status
           c.status = p.status
           c.assignedAgentId = p.assigned_agent_id
+          c.priority = p.priority
+          c.snoozedUntil = p.snoozed_until
           c.lastMessageAt = p.last_message_at
 
-          if (assignmentChanged && !canSee(p.assigned_agent_id)) {
+          if ((assignmentChanged && !canSee(p.assigned_agent_id)) || !matchesFilters(c)) {
             // reassigned to another agent — drop it from my view
             conversations.value = conversations.value.filter(x => x.id !== p.id)
             if (activeId.value === p.id) deselect()
@@ -420,6 +473,8 @@ export function useControlRoom() {
     loadCounts()
     loadMembers()
     loadCanned()
+    loadTags()
+    loadSavedViews()
   }
 
   // NB: the workspace channel is owned by the dashboard layout (so notifications
@@ -473,6 +528,7 @@ export function useControlRoom() {
   }
 
   let offReconnect: (() => void) | undefined
+  let snoozeRefresh: ReturnType<typeof setInterval> | undefined
   onMounted(() => {
     rt.connect()
     off = rt.on(applyEvent)
@@ -488,6 +544,7 @@ export function useControlRoom() {
       loadMembers()
       loadCanned()
       loadTags()
+      loadSavedViews()
     }
     // restore the open thread after navigating away and back
     if (activeId.value) {
@@ -505,11 +562,18 @@ export function useControlRoom() {
         select(activeId.value, { force: true })
       }
     }
+    snoozeRefresh = setInterval(() => {
+      if (snoozedFilter.value !== 'include') {
+        loadConversations()
+        loadCounts()
+      }
+    }, 60_000)
   })
 
   onBeforeUnmount(() => {
     off?.()
     offReconnect?.()
+    if (snoozeRefresh) clearInterval(snoozeRefresh)
     if (activeId.value) rt.unsubscribe(channels.conversation(activeId.value))
   })
 
@@ -519,11 +583,50 @@ export function useControlRoom() {
     messages.value = []
     conversations.value = []
     counts.value = { unassigned: 0, open: 0, resolved: 0 }
+    savedViews.value = []
+    filter.value = 'all'
+    assigneeFilter.value = 'any'
+    priorityFilters.value = []
+    tagFilters.value = []
+    snoozedFilter.value = 'exclude'
     if (next) loadAll()
   })
 
-  watch(filter, () => loadConversations({ showLoader: true }))
-  watch(tagFilter, () => loadConversations({ showLoader: true }))
+  watch([filter, assigneeFilter, priorityFilters, tagFilters, snoozedFilter], () => loadConversations({ showLoader: true }), { deep: true })
+
+  function currentSavedFilters(): SavedInboxFilters {
+    return {
+      status: filter.value,
+      assignee: assigneeFilter.value,
+      priorities: [...priorityFilters.value],
+      tag_ids: [...tagFilters.value],
+      snoozed: snoozedFilter.value
+    }
+  }
+
+  function applySavedView(view: InboxSavedView) {
+    filter.value = view.filters.status
+    assigneeFilter.value = view.filters.assignee
+    priorityFilters.value = [...view.filters.priorities]
+    tagFilters.value = [...view.filters.tag_ids]
+    snoozedFilter.value = view.filters.snoozed
+  }
+
+  async function saveCurrentView(name: string) {
+    if (!workspaceId.value) return
+    const view = await $fetch<InboxSavedView>(`/api/workspaces/${workspaceId.value}/saved-views`, {
+      method: 'POST',
+      body: { name, filters: currentSavedFilters() }
+    })
+    savedViews.value = [...savedViews.value, view]
+    return view
+  }
+
+  async function deleteSavedView(id: string) {
+    if (!workspaceId.value) return
+    await $fetch(`/api/workspaces/${workspaceId.value}/saved-views/${id}`, { method: 'DELETE' })
+    savedViews.value = savedViews.value.filter(view => view.id !== id)
+  }
 
   return {
     conversations,
@@ -546,8 +649,16 @@ export function useControlRoom() {
     status: rt.status,
     memberName,
     memberPresence,
-    tagFilter,
+    assigneeFilter,
+    priorityFilters,
+    tagFilters,
+    snoozedFilter,
     workspaceTags,
+    savedViews,
+    currentSavedFilters,
+    applySavedView,
+    saveCurrentView,
+    deleteSavedView,
     applyTag,
     removeTag,
     createTag,
@@ -562,6 +673,7 @@ export function useControlRoom() {
     claim,
     resolve,
     reopen,
+    organize,
     reload: loadConversations
   }
 }

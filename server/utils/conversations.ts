@@ -12,6 +12,8 @@ export function serializeConversation(c: Conversation): ConversationDTO {
     visitor_ref: c.visitorRef,
     assigned_agent_id: c.assignedAgentId,
     status: c.status,
+    priority: c.priority,
+    snoozed_until: c.snoozedUntil?.toISOString() ?? null,
     last_message_at: c.lastMessageAt.toISOString(),
     created_at: c.createdAt.toISOString(),
     updated_at: c.updatedAt.toISOString(),
@@ -92,6 +94,7 @@ export async function ingestVisitorMessage(input: IncomingVisitorMessage) {
       const [updated] = await tx.update(conversations).set({
         lastMessageAt: now,
         updatedAt: now,
+        snoozedUntil: null,
         ...(existing.status === 'resolved'
           ? { status: existing.assignedAgentId ? 'open' as const : 'unassigned' as const, resolvedAt: null }
           : {})
@@ -142,7 +145,11 @@ export async function ingestVisitorMessage(input: IncomingVisitorMessage) {
   const wsChannel = channels.workspace(input.workspaceId)
   const convChannel = channels.conversation(conversation.id)
   if (isNew) {
-    publish(wsChannel, { type: 'conversation.new', payload: serializeConversation(conversation) })
+    publishFiltered(
+      wsChannel,
+      { type: 'conversation.new', payload: serializeConversation(conversation) },
+      inboxScope(conversation.assignedAgentId)
+    )
   } else {
     publish(wsChannel, {
       type: 'conversation.updated',
@@ -150,6 +157,8 @@ export async function ingestVisitorMessage(input: IncomingVisitorMessage) {
         id: conversation.id,
         status: conversation.status,
         assigned_agent_id: conversation.assignedAgentId,
+        priority: conversation.priority,
+        snoozed_until: conversation.snoozedUntil?.toISOString() ?? null,
         last_message_at: conversation.lastMessageAt.toISOString()
       }
     })
@@ -198,7 +207,11 @@ export async function addAgentMessage(input: AgentMessageInput) {
 
   const { message, conv } = await db.transaction(async (tx) => {
     const [conv] = await tx.update(conversations)
-      .set({ lastMessageAt: now, updatedAt: now })
+      .set({
+        lastMessageAt: now,
+        updatedAt: now,
+        ...(!input.isInternalNote ? { snoozedUntil: null } : {})
+      })
       .where(eq(conversations.id, input.conversationId))
       .returning()
     if (!conv) throw createError({ statusCode: 404, statusMessage: 'Conversation not found' })
@@ -272,7 +285,8 @@ export async function startAgentConversation(input: StartConversationInput) {
         assignedAgentId: existing.assignedAgentId ?? input.memberId,
         status: 'open',
         lastMessageAt: now,
-        updatedAt: now
+        updatedAt: now,
+        snoozedUntil: null
       }).where(eq(conversations.id, existing.id)).returning()
       conversation = updated!
     } else {
@@ -297,7 +311,11 @@ export async function startAgentConversation(input: StartConversationInput) {
 
   const msgEvent = { type: 'message.new' as const, payload: serializeMessage(message) }
   if (isNew) {
-    publish(channels.workspace(input.workspaceId), { type: 'conversation.new', payload: serializeConversation(conversation) })
+    publishFiltered(
+      channels.workspace(input.workspaceId),
+      { type: 'conversation.new', payload: serializeConversation(conversation) },
+      inboxScope(conversation.assignedAgentId)
+    )
     dispatchWebhooks(input.workspaceId, 'conversation.created', {
       conversation: serializeConversation(conversation),
       visitor: { id: visitor.id, name: visitor.name, email: visitor.email }
@@ -362,7 +380,7 @@ export async function assignConversation(conversationId: string, memberId: strin
 export async function setConversationStatus(conversationId: string, status: 'open' | 'resolved'): Promise<Conversation | null> {
   const db = useDb()
   const [conversation] = await db.update(conversations)
-    .set({ status, resolvedAt: status === 'resolved' ? new Date() : null, updatedAt: new Date() })
+    .set({ status, resolvedAt: status === 'resolved' ? new Date() : null, updatedAt: new Date(), snoozedUntil: null })
     .where(eq(conversations.id, conversationId))
     .returning()
   if (conversation) {
@@ -376,11 +394,13 @@ export async function setConversationStatus(conversationId: string, status: 'ope
   return conversation ?? null
 }
 
-function publishConversationUpdate(c: Conversation) {
+export function publishConversationUpdate(c: Conversation) {
   const payload = {
     id: c.id,
     status: c.status,
     assigned_agent_id: c.assignedAgentId,
+    priority: c.priority,
+    snoozed_until: c.snoozedUntil?.toISOString() ?? null,
     last_message_at: c.lastMessageAt.toISOString()
   }
   publish(channels.workspace(c.workspaceId), { type: 'conversation.updated', payload })

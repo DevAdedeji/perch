@@ -8,6 +8,7 @@
  */
 
 import type {
+  ConversationPriority,
   ConversationStatus,
   Presence,
   Role,
@@ -58,10 +59,22 @@ export interface ConversationDTO {
   visitor_ref: string
   assigned_agent_id: string | null
   status: ConversationStatus
+  priority: ConversationPriority
+  snoozed_until: string | null
   last_message_at: string
   created_at: string
   updated_at: string
   resolved_at: string | null
+}
+
+export type InboxSnoozedFilter = 'exclude' | 'include' | 'only'
+
+export interface SavedInboxFilters {
+  status: ConversationStatus | 'all'
+  assignee: 'any' | 'me' | 'unassigned' | string
+  priorities: ConversationPriority[]
+  tag_ids: string[]
+  snoozed: InboxSnoozedFilter
 }
 
 export interface MessageDTO {

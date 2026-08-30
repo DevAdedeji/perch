@@ -120,6 +120,13 @@
       "when": 1788127217008,
       "tag": "0016_widget-customization",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1788132495637,
+      "tag": "0017_inbox_organization",
+      "breakpoints": true
     }
   ]
 }

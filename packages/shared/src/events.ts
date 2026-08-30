@@ -7,7 +7,7 @@
  * `conversation:{id}` — never `workspace:*` or another conversation.
  */
 
-import type { ConversationStatus, Presence, SettablePresence } from './enums'
+import type { ConversationPriority, ConversationStatus, Presence, SettablePresence } from './enums'
 import type { ConversationDTO, LiveVisitorDTO, MessageDTO } from './models'
 
 /* §6.1 Channels */
@@ -82,6 +82,8 @@ export interface ConversationUpdatedPayload {
   id: string
   status: ConversationStatus
   assigned_agent_id: string | null
+  priority: ConversationPriority
+  snoozed_until: string | null
   last_message_at: string
 }
 

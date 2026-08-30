@@ -19,7 +19,7 @@ import {
   uuid
 } from 'drizzle-orm/pg-core'
 import { sql } from 'drizzle-orm'
-import type { BusinessHours, VisitorMetadata } from '@perch/shared'
+import type { BusinessHours, SavedInboxFilters, VisitorMetadata } from '@perch/shared'
 
 /* Enums (mirror @perch/shared) */
 
@@ -27,6 +27,7 @@ export const roleEnum = pgEnum('role', ['admin', 'agent'])
 export const presenceEnum = pgEnum('presence', ['online', 'offline', 'away'])
 export const inviteStatusEnum = pgEnum('invite_status', ['pending', 'accepted', 'revoked'])
 export const conversationStatusEnum = pgEnum('conversation_status', ['unassigned', 'open', 'resolved'])
+export const conversationPriorityEnum = pgEnum('conversation_priority', ['low', 'normal', 'high', 'urgent'])
 export const senderTypeEnum = pgEnum('sender_type', ['visitor', 'agent', 'system'])
 
 /* Tables */
@@ -122,6 +123,8 @@ export const conversations = pgTable('conversations', {
   visitorRef: uuid('visitor_ref').notNull().references(() => visitors.id, { onDelete: 'cascade' }),
   assignedAgentId: uuid('assigned_agent_id').references(() => workspaceMembers.id, { onDelete: 'set null' }),
   status: conversationStatusEnum('status').default('unassigned').notNull(),
+  priority: conversationPriorityEnum('priority').default('normal').notNull(),
+  snoozedUntil: timestamp('snoozed_until', { withTimezone: true }),
   lastMessageAt: timestamp('last_message_at', { withTimezone: true }).defaultNow().notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
@@ -133,10 +136,25 @@ export const conversations = pgTable('conversations', {
 }, t => [
   // inbox listing + status filters, sorted by recency (§4 design note)
   index('conversations_workspace_status_recency_idx').on(t.workspaceId, t.status, t.lastMessageAt),
+  index('conversations_workspace_priority_recency_idx').on(t.workspaceId, t.priority, t.lastMessageAt),
+  index('conversations_workspace_snoozed_idx').on(t.workspaceId, t.snoozedUntil),
   // Defense in depth for concurrent widget and agent-initiated starts.
   uniqueIndex('conversations_visitor_active_uq')
     .on(t.visitorRef)
     .where(sql`${t.status} in ('unassigned', 'open')`)
+])
+
+/** Saved inbox filters are private to one workspace membership. */
+export const inboxSavedViews = pgTable('inbox_saved_views', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  memberId: uuid('member_id').notNull().references(() => workspaceMembers.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  filters: jsonb('filters').$type<SavedInboxFilters>().notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
+}, t => [
+  uniqueIndex('inbox_saved_views_member_name_uq').on(t.memberId, t.name),
+  index('inbox_saved_views_member_created_idx').on(t.memberId, t.createdAt)
 ])
 
 /** Workspace-defined conversation labels ("billing", "bug", …). */
@@ -368,6 +386,8 @@ export type Visitor = typeof visitors.$inferSelect
 export type NewVisitor = typeof visitors.$inferInsert
 export type Conversation = typeof conversations.$inferSelect
 export type NewConversation = typeof conversations.$inferInsert
+export type InboxSavedView = typeof inboxSavedViews.$inferSelect
+export type NewInboxSavedView = typeof inboxSavedViews.$inferInsert
 export type Message = typeof messages.$inferSelect
 export type NewMessage = typeof messages.$inferInsert
 export type ConversationRead = typeof conversationReads.$inferSelect

@@ -1,4 +1,4 @@
-import { and, conversations, count, eq, isNull, or } from '@perch/db'
+import { and, conversations, count, eq, isNull, or, sql } from '@perch/db'
 
 /** Per-status conversation counts for the inbox tabs (independent of the active filter). */
 export default defineEventHandler(async (event) => {
@@ -14,7 +14,11 @@ export default defineEventHandler(async (event) => {
   const rows = await db
     .select({ status: conversations.status, total: count() })
     .from(conversations)
-    .where(and(eq(conversations.workspaceId, workspaceId), scope))
+    .where(and(
+      eq(conversations.workspaceId, workspaceId),
+      sql`(${conversations.snoozedUntil} is null or ${conversations.snoozedUntil} <= now())`,
+      scope
+    ))
     .groupBy(conversations.status)
 
   const result = { unassigned: 0, open: 0, resolved: 0 }

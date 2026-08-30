@@ -20,6 +20,10 @@ export type SettablePresence = (typeof SETTABLE_PRESENCES)[number]
 export const CONVERSATION_STATUSES = ['unassigned', 'open', 'resolved'] as const
 export type ConversationStatus = (typeof CONVERSATION_STATUSES)[number]
 
+/** Agent-set urgency used to order and filter the inbox. */
+export const CONVERSATION_PRIORITIES = ['low', 'normal', 'high', 'urgent'] as const
+export type ConversationPriority = (typeof CONVERSATION_PRIORITIES)[number]
+
 /** Who authored a message. */
 export const SENDER_TYPES = ['visitor', 'agent', 'system'] as const
 export type SenderType = (typeof SENDER_TYPES)[number]
