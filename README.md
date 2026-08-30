@@ -233,7 +233,7 @@ machine (see the script header for the crontab line and restore command).
 Notes from getting this live on a small tier:
 - The Nitro build can OOM on small builders — the Dockerfile raises V8's heap
   (`--max-old-space-size=4096`) and server/client sourcemaps are disabled in `nuxt.config.ts`.
-- `/api/health` is the real health check (process + database). Point uptime monitoring there —
+- `/api/health` is the real readiness check (signing configuration + database). Point uptime monitoring there —
   pinging `/` proves nothing, since the landing page is prerendered.
 - Free-tier services that sleep on idle break presence; an UptimeRobot monitor on `/api/health`
   every 5 minutes keeps both the instance and Neon's compute warm.
