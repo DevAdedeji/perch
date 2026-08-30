@@ -56,7 +56,18 @@ const widgetEditor = reactive({
   widgetShowBranding: true
 })
 const savingWidget = ref(false)
-const previewDark = computed(() => widgetEditor.widgetTheme === 'dark')
+const prefersDark = ref(false)
+let colorSchemeQuery: MediaQueryList | null = null
+const syncPreferredColorScheme = () => {
+  prefersDark.value = colorSchemeQuery?.matches ?? false
+}
+const previewDark = computed(() => widgetEditor.widgetTheme === 'dark'
+  || (widgetEditor.widgetTheme === 'system' && prefersDark.value))
+const previewWidth = computed(() => ({
+  compact: '13.5rem',
+  standard: '16rem',
+  large: '18rem'
+})[widgetEditor.widgetSize])
 
 // closing tag split so it doesn't terminate this SFC <script> block
 const closeScript = '</' + 'script>'
@@ -88,7 +99,13 @@ async function load() {
     loading.value = false
   }
 }
-onMounted(load)
+onMounted(() => {
+  load()
+  colorSchemeQuery = window.matchMedia('(prefers-color-scheme: dark)')
+  syncPreferredColorScheme()
+  colorSchemeQuery.addEventListener('change', syncPreferredColorScheme)
+})
+onBeforeUnmount(() => colorSchemeQuery?.removeEventListener('change', syncPreferredColorScheme))
 watch(wid, load)
 
 async function patchWorkspace(body: Record<string, unknown>, okMsg?: string) {
@@ -113,15 +130,6 @@ async function togglePrechat(value: boolean) {
     toast.add({ title: 'Could not update', color: 'error' })
   }
 }
-async function setColor(color: string) {
-  widgetEditor.widgetPrimaryColor = color
-  try {
-    await patchWorkspace({ widgetPrimaryColor: color })
-  } catch {
-    toast.add({ title: 'Could not update', color: 'error' })
-  }
-}
-
 watch(workspace, (w) => {
   if (!w) return
   Object.assign(widgetEditor, {
@@ -471,28 +479,6 @@ async function removeLogo() {
                 @update:model-value="togglePrechat"
               />
             </div>
-
-            <div>
-              <p class="text-sm font-medium text-highlighted">
-                Widget color
-              </p>
-              <p class="text-xs text-muted mb-3">
-                The accent your visitors see in the chat widget.
-              </p>
-              <div class="flex items-center gap-2.5 flex-wrap">
-                <button
-                  v-for="c in swatches"
-                  :key="c"
-                  type="button"
-                  :disabled="!isAdmin"
-                  class="size-8 rounded-full ring-2 ring-offset-2 ring-offset-bg transition-transform hover:scale-110 disabled:opacity-60"
-                  :class="workspace?.widgetPrimaryColor === c ? 'ring-highlighted' : 'ring-transparent'"
-                  :style="{ background: c }"
-                  :aria-label="c"
-                  @click="setColor(c)"
-                />
-              </div>
-            </div>
           </div>
         </section>
 
@@ -673,11 +659,12 @@ async function removeLogo() {
 
             <div class="relative min-h-96 overflow-hidden rounded-2xl bg-grid ring-1 ring-default">
               <div
-                class="absolute bottom-4 w-[calc(100%-2rem)] max-w-64 overflow-hidden rounded-2xl shadow-xl ring-1 ring-black/10"
+                class="absolute bottom-4 max-w-[calc(100%-2rem)] overflow-hidden rounded-2xl shadow-xl ring-1 ring-black/10 transition-[width]"
                 :class="[
                   widgetEditor.widgetPosition === 'left' ? 'left-4' : 'right-4',
                   previewDark ? 'dark bg-zinc-950 text-white' : 'bg-white text-zinc-950'
                 ]"
+                :style="{ width: previewWidth }"
               >
                 <div class="flex items-center gap-2.5 border-b border-black/10 px-3.5 py-3 dark:border-white/10">
                   <span
