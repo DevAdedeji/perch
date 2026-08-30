@@ -1,8 +1,16 @@
 export interface PublicHelpArticle {
   id: string
   title: string
+  excerpt: string
+  url: string | null
+}
+
+export interface PublicHelpArticleDetail {
+  id: string
+  title: string
   body: string
   url: string | null
+  group: { id: string, name: string }
 }
 
 export interface PublicHelpGroup {
@@ -26,7 +34,7 @@ export function filterHelpGroups(groups: PublicHelpGroup[], query: string): Publ
     .map(group => ({
       ...group,
       articles: group.articles.filter(article =>
-        [article.title, article.body, group.name, group.description ?? '']
+        [article.title, article.excerpt, group.name, group.description ?? '']
           .some(value => value.toLocaleLowerCase().includes(needle))
       )
     }))

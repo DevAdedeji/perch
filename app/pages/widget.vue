@@ -91,8 +91,15 @@ async function onFilePicked(e: Event) {
 interface HelpArticle {
   id: string
   title: string
+  excerpt: string
+  url: string | null
+}
+interface HelpArticleDetail {
+  id: string
+  title: string
   body: string
   url: string | null
+  group: { id: string, name: string }
 }
 interface HelpGroup {
   id: string
@@ -105,7 +112,9 @@ const tab = ref<'chat' | 'help'>('chat')
 const helpGroups = ref<HelpGroup[]>([])
 const helpStatus = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
 const helpQuery = ref('')
-const activeArticle = ref<HelpArticle | null>(null)
+const activeArticleId = ref<string | null>(null)
+const activeArticle = ref<HelpArticleDetail | null>(null)
+const articleStatus = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
 const chatDot = ref(false)
 
 async function loadHelp() {
@@ -131,6 +140,28 @@ function openTab(next: 'chat' | 'help') {
   }
 }
 
+async function openHelpArticle(articleId: string) {
+  activeArticleId.value = articleId
+  activeArticle.value = null
+  articleStatus.value = 'loading'
+  try {
+    const detail = await $fetch<HelpArticleDetail>(`/api/widget/articles/${articleId}`, {
+      query: { site_id: siteId.value }
+    })
+    if (activeArticleId.value !== articleId) return
+    activeArticle.value = detail
+    articleStatus.value = 'ready'
+  } catch {
+    if (activeArticleId.value === articleId) articleStatus.value = 'error'
+  }
+}
+
+function closeHelpArticle() {
+  activeArticleId.value = null
+  activeArticle.value = null
+  articleStatus.value = 'idle'
+}
+
 const filteredGroups = computed(() => {
   const q = helpQuery.value.trim().toLowerCase()
   if (!q) return helpGroups.value
@@ -138,7 +169,7 @@ const filteredGroups = computed(() => {
     .map(g => ({
       ...g,
       articles: g.articles.filter(a =>
-        a.title.toLowerCase().includes(q) || a.body.toLowerCase().includes(q))
+        a.title.toLowerCase().includes(q) || a.excerpt.toLowerCase().includes(q))
     }))
     .filter(g => g.articles.length > 0)
 })
@@ -463,14 +494,14 @@ onBeforeUnmount(() => {
 
     <!-- help: article detail -->
     <div
-      v-else-if="tab === 'help' && activeArticle"
+      v-else-if="tab === 'help' && activeArticleId"
       class="flex-1 overflow-y-auto overscroll-contain"
     >
       <div class="sticky top-0 flex items-center gap-2 px-3 py-2.5 bg-default/95 backdrop-blur border-b border-default">
         <button
           class="grid place-items-center size-7 rounded-lg text-dimmed hover:text-highlighted hover:bg-elevated transition"
           aria-label="Back to articles"
-          @click="activeArticle = null"
+          @click="closeHelpArticle"
         >
           <UIcon
             name="i-lucide-arrow-left"
@@ -481,7 +512,35 @@ onBeforeUnmount(() => {
           Help
         </p>
       </div>
-      <article class="px-5 py-4">
+      <div
+        v-if="articleStatus === 'loading'"
+        class="grid place-items-center py-12"
+        aria-label="Loading article"
+      >
+        <UIcon
+          name="i-lucide-loader-circle"
+          class="size-5 animate-spin text-dimmed"
+        />
+      </div>
+      <div
+        v-else-if="articleStatus === 'error'"
+        class="px-5 py-12 text-center"
+      >
+        <p class="text-sm text-muted">
+          Couldn’t load this article.
+        </p>
+        <button
+          class="mt-3 text-sm font-medium hover:underline"
+          :style="{ color: accent }"
+          @click="activeArticleId && openHelpArticle(activeArticleId)"
+        >
+          Try again
+        </button>
+      </div>
+      <article
+        v-else-if="activeArticle"
+        class="px-5 py-4"
+      >
         <h1 class="font-display text-base font-bold text-highlighted">
           {{ activeArticle.title }}
         </h1>
@@ -580,7 +639,7 @@ onBeforeUnmount(() => {
             <button
               v-else
               class="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-left hover:bg-elevated transition-colors"
-              @click="activeArticle = a"
+              @click="openHelpArticle(a.id)"
             >
               <span class="min-w-0 flex-1 text-sm font-medium text-highlighted truncate">{{ a.title }}</span>
               <UIcon

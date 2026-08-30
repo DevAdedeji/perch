@@ -221,10 +221,10 @@ watch(() => route.query.q, (value) => {
                     {{ article.title }}
                   </span>
                   <span
-                    v-if="article.body"
+                    v-if="article.excerpt"
                     class="mt-1 line-clamp-2 block text-sm leading-relaxed text-muted"
                   >
-                    {{ helpArticleExcerpt(article.body) }}
+                    {{ helpArticleExcerpt(article.excerpt) }}
                   </span>
                   <span
                     v-else-if="article.url"

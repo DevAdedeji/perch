@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { PublicHelpArticle, PublicHelpGroup } from '~/utils/help-center'
+import type { PublicHelpArticleDetail } from '~/utils/help-center'
 import { helpArticleExcerpt } from '~/utils/help-center'
 
 definePageMeta({ layout: 'help-center' })
@@ -9,33 +9,24 @@ const siteId = computed(() => String(route.params.siteId ?? ''))
 const articleId = computed(() => String(route.params.articleId ?? ''))
 const { url: siteUrl, indexable } = useSiteUrl()
 
-const { data: groups, error, status, refresh } = await useFetch<PublicHelpGroup[]>('/api/widget/articles', {
+const { data: article, error, status, refresh } = await useFetch<PublicHelpArticleDetail>(() => `/api/widget/articles/${articleId.value}`, {
   query: computed(() => ({ site_id: siteId.value }))
 })
 
-const match = computed<{ group: PublicHelpGroup, article: PublicHelpArticle } | null>(() => {
-  for (const group of groups.value ?? []) {
-    const article = group.articles.find(item => item.id === articleId.value)
-    if (article) return { group, article }
-  }
-  return null
-})
-const notFound = computed(() => !error.value && status.value === 'success' && !match.value)
-
-if (import.meta.server && (error.value || !match.value)) {
+if (import.meta.server && (error.value || !article.value)) {
   const statusCode = error.value?.statusCode
   setResponseStatus(useRequestEvent()!, statusCode === 404 || !error.value ? 404 : (statusCode === 429 ? 429 : 503))
 }
 
-const pageTitle = computed(() => match.value ? `${match.value.article.title} · Perch Help Center` : 'Article not found · Perch')
-const description = computed(() => match.value?.article.body
-  ? helpArticleExcerpt(match.value.article.body, 155)
+const pageTitle = computed(() => article.value ? `${article.value.title} · Perch Help Center` : 'Article not found · Perch')
+const description = computed(() => article.value?.body
+  ? helpArticleExcerpt(article.value.body, 155)
   : 'Read this support article in the Perch Help Center.')
 
 useSeoMeta({
   title: pageTitle,
   description,
-  robots: () => indexable.value && !!match.value ? 'index, follow' : 'noindex, nofollow',
+  robots: () => indexable.value && !!article.value ? 'index, follow' : 'noindex, nofollow',
   ogTitle: pageTitle,
   ogDescription: description,
   ogType: 'article',
@@ -72,7 +63,7 @@ function retryLoad() {
       </div>
 
       <div
-        v-else-if="error || notFound"
+        v-else-if="error || !article"
         class="mt-8 rounded-2xl border-glow bg-elevated/30 px-6 py-12 text-center"
       >
         <UIcon
@@ -107,33 +98,33 @@ function retryLoad() {
       </div>
 
       <article
-        v-else-if="match"
+        v-else
         class="mt-8"
       >
         <p class="text-sm font-medium text-amber-700 dark:text-amber-400">
-          {{ match.group.name }}
+          {{ article.group.name }}
         </p>
         <h1 class="mt-2 font-display text-3xl font-bold tracking-tight text-highlighted sm:text-4xl">
-          {{ match.article.title }}
+          {{ article.title }}
         </h1>
 
         <div class="mt-8 rounded-2xl border-glow bg-default p-5 sm:p-8">
           <div
-            v-if="match.article.body"
+            v-if="article.body"
             class="whitespace-pre-line text-[15px] leading-7 text-muted"
           >
-            {{ match.article.body }}
+            {{ article.body }}
           </div>
 
           <div
-            v-if="match.article.url"
-            :class="match.article.body ? 'mt-8 border-t border-default pt-6' : ''"
+            v-if="article.url"
+            :class="article.body ? 'mt-8 border-t border-default pt-6' : ''"
           >
             <p class="text-sm text-muted">
               This answer continues on an external help page.
             </p>
             <UButton
-              :to="match.article.url"
+              :to="article.url"
               target="_blank"
               rel="noopener noreferrer nofollow"
               class="mt-3"
