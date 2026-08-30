@@ -26,20 +26,33 @@ describe('visitor session tokens', () => {
 
 describe('widget embed tickets', () => {
   const secret = 'a-long-test-secret-that-never-leaves-the-server'
+  const hostOrigin = 'https://customer.example'
 
-  it('keeps the installation-preview permission inside the signature', () => {
-    const token = signEmbedTicket('ws_site', secret, { installationPreview: true }, 100)
+  it('keeps the host origin and installation-preview permission inside the signature', () => {
+    const token = signEmbedTicket('ws_site', secret, { hostOrigin, installationPreview: true }, 100)
     expect(verifyEmbedTicket(token, 'ws_site', secret, 101)).toMatchObject({
-      sid: 'ws_site', installationPreview: true
+      sid: 'ws_site', hostOrigin, installationPreview: true
     })
   })
 
   it('rejects a forged preview permission', () => {
-    const token = signEmbedTicket('ws_site', secret, {}, 100)
+    const token = signEmbedTicket('ws_site', secret, { hostOrigin }, 100)
     const [data, signature] = token.split('.')
     const payload = JSON.parse(Buffer.from(data!, 'base64url').toString())
     payload.installationPreview = true
     const forged = `${Buffer.from(JSON.stringify(payload)).toString('base64url')}.${signature}`
     expect(verifyEmbedTicket(forged, 'ws_site', secret, 101)).toBeNull()
+  })
+
+  it('rejects a forged or invalid host origin', () => {
+    const token = signEmbedTicket('ws_site', secret, { hostOrigin }, 100)
+    const [data, signature] = token.split('.')
+    const payload = JSON.parse(Buffer.from(data!, 'base64url').toString())
+    payload.hostOrigin = 'https://spoofed.example'
+    const forged = `${Buffer.from(JSON.stringify(payload)).toString('base64url')}.${signature}`
+    expect(verifyEmbedTicket(forged, 'ws_site', secret, 101)).toBeNull()
+
+    const invalid = signEmbedTicket('ws_site', secret, { hostOrigin: '' }, 100)
+    expect(verifyEmbedTicket(invalid, 'ws_site', secret, 101)).toBeNull()
   })
 })

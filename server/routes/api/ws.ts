@@ -101,6 +101,7 @@ export default defineWebSocketHandler({
       peer.context.role = 'visitor'
       peer.context.wid = subject.wid
       peer.context.vid = subject.vid
+      peer.context.hostOrigin = subject.hostOrigin
       peer.context.installationPreview = subject.installationPreview === true
       // register on the roster SYNCHRONOUSLY — the widget's first
       // `visitor.page` can arrive before an awaited DB fetch resolves, and it
@@ -185,9 +186,12 @@ export default defineWebSocketHandler({
         // the widget reporting the host page it's on (roster + trigger dwell)
         const pageUrl = (msg.payload as { page_url?: unknown } | undefined)?.page_url
         if (ctx.role === 'visitor' && typeof pageUrl === 'string' && pageUrl) {
-          visitorPageUpdate(ctx.wid as string, ctx.vid as string, pageUrl.slice(0, 2000))
-          if (!ctx.installationPreview) {
-            await recordWidgetInstallation(ctx.wid as string, pageUrl)
+          const page = installationPageForOrigin(pageUrl, ctx.hostOrigin)
+          if (page) {
+            visitorPageUpdate(ctx.wid as string, ctx.vid as string, page.url)
+            if (!ctx.installationPreview) {
+              await recordWidgetInstallation(ctx.wid as string, page.url, ctx.hostOrigin)
+            }
           }
         }
         break

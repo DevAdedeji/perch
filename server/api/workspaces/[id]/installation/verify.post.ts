@@ -1,6 +1,10 @@
-import { eq, workspaces } from '@perch/db'
+import { and, eq, widgetInstallationSignals, workspaces } from '@perch/db'
 import { z } from 'zod'
-import { evaluateInstallationSignal, normalizeInstallationPage } from '../../../../utils/installation'
+import {
+  evaluateInstallationSignal,
+  installationPageHash,
+  normalizeInstallationPage
+} from '../../../../utils/installation'
 
 const schema = z.object({
   url: z.string().trim().min(1).max(2_000)
@@ -34,9 +38,12 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  return evaluateInstallationSignal(
-    requested,
-    workspace.widgetInstalledUrl,
-    workspace.widgetInstalledAt
-  )
+  const signal = await useDb().query.widgetInstallationSignals.findFirst({
+    where: and(
+      eq(widgetInstallationSignals.workspaceId, workspaceId),
+      eq(widgetInstallationSignals.pageHash, installationPageHash(requested.url))
+    )
+  })
+
+  return evaluateInstallationSignal(requested, signal?.pageUrl, signal?.lastSeenAt)
 })

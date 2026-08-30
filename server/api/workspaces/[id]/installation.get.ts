@@ -1,11 +1,11 @@
-import { and, conversations, eq, messages, sql, visitors, workspaces } from '@perch/db'
+import { and, conversations, desc, eq, messages, sql, visitors, widgetInstallationSignals, workspaces } from '@perch/db'
 
 export default defineEventHandler(async (event) => {
   const workspaceId = getRouterParam(event, 'id')!
   await requireMembership(event, workspaceId, { admin: true })
 
   const db = useDb()
-  const [workspace, previewMessages] = await Promise.all([
+  const [workspace, previewMessages, latestInstallation] = await Promise.all([
     db.query.workspaces.findFirst({ where: eq(workspaces.id, workspaceId) }),
     db
       .select({ id: messages.id })
@@ -18,7 +18,11 @@ export default defineEventHandler(async (event) => {
         eq(messages.isInternalNote, false),
         sql`${visitors.metadata}->>'installation_preview' = 'true'`
       ))
-      .limit(1)
+      .limit(1),
+    db.query.widgetInstallationSignals.findFirst({
+      where: eq(widgetInstallationSignals.workspaceId, workspaceId),
+      orderBy: desc(widgetInstallationSignals.lastSeenAt)
+    })
   ])
 
   if (!workspace) {
@@ -29,8 +33,8 @@ export default defineEventHandler(async (event) => {
     workspace: serializeWorkspace(workspace),
     hasTestConversation: previewMessages.length > 0,
     installation: {
-      lastSeenAt: workspace.widgetInstalledAt?.toISOString() ?? null,
-      lastSeenUrl: workspace.widgetInstalledUrl
+      lastSeenAt: latestInstallation?.lastSeenAt.toISOString() ?? null,
+      lastSeenUrl: latestInstallation?.pageUrl ?? null
     }
   }
 })

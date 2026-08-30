@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { signTicket, verifyTicket } from '../server/utils/ws-ticket'
 
 const SECRET = 'test-secret-at-least-32-characters-long'
+const HOST_ORIGIN = 'https://customer.example'
 
 describe('WebSocket auth tickets', () => {
   it('round-trips an agent ticket', () => {
@@ -10,14 +11,18 @@ describe('WebSocket auth tickets', () => {
   })
 
   it('round-trips a visitor ticket scoped to workspace + visitor', () => {
-    const token = signTicket({ role: 'visitor', wid: 'ws-1', vid: 'v-1' }, SECRET)
-    expect(verifyTicket(token, SECRET)).toEqual({ role: 'visitor', wid: 'ws-1', vid: 'v-1' })
+    const token = signTicket({ role: 'visitor', wid: 'ws-1', vid: 'v-1', hostOrigin: HOST_ORIGIN }, SECRET)
+    expect(verifyTicket(token, SECRET)).toEqual({
+      role: 'visitor', wid: 'ws-1', vid: 'v-1', hostOrigin: HOST_ORIGIN
+    })
   })
 
   it('preserves a signed installation-preview scope for visitor tickets', () => {
-    const token = signTicket({ role: 'visitor', wid: 'ws-1', vid: 'v-1', installationPreview: true }, SECRET)
+    const token = signTicket({
+      role: 'visitor', wid: 'ws-1', vid: 'v-1', hostOrigin: HOST_ORIGIN, installationPreview: true
+    }, SECRET)
     expect(verifyTicket(token, SECRET)).toEqual({
-      role: 'visitor', wid: 'ws-1', vid: 'v-1', installationPreview: true
+      role: 'visitor', wid: 'ws-1', vid: 'v-1', hostOrigin: HOST_ORIGIN, installationPreview: true
     })
   })
 
@@ -32,11 +37,20 @@ describe('WebSocket auth tickets', () => {
   })
 
   it('rejects a tampered payload — a visitor cannot promote itself to agent', () => {
-    const token = signTicket({ role: 'visitor', wid: 'ws-1', vid: 'v-1' }, SECRET)
+    const token = signTicket({ role: 'visitor', wid: 'ws-1', vid: 'v-1', hostOrigin: HOST_ORIGIN }, SECRET)
     const [data, sig] = token.split('.')
     const payload = JSON.parse(Buffer.from(data!, 'base64url').toString())
     payload.role = 'agent'
     payload.uid = 'user-1'
+    const forged = `${Buffer.from(JSON.stringify(payload)).toString('base64url')}.${sig}`
+    expect(verifyTicket(forged, SECRET)).toBeNull()
+  })
+
+  it('rejects a tampered visitor host origin', () => {
+    const token = signTicket({ role: 'visitor', wid: 'ws-1', vid: 'v-1', hostOrigin: HOST_ORIGIN }, SECRET)
+    const [data, sig] = token.split('.')
+    const payload = JSON.parse(Buffer.from(data!, 'base64url').toString())
+    payload.hostOrigin = 'https://spoofed.example'
     const forged = `${Buffer.from(JSON.stringify(payload)).toString('base64url')}.${sig}`
     expect(verifyTicket(forged, SECRET)).toBeNull()
   })

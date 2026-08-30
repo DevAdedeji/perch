@@ -19,15 +19,20 @@ export default defineEventHandler(async (event) => {
     if (!workspace) throw createError({ statusCode: 404, statusMessage: 'Unknown site' })
 
     const installationPreview = getQuery(event).preview === '1'
+    const embedOrigin = installationPreview
+      ? getRequestURL(event, { xForwardedHost: true, xForwardedProto: true }).origin
+      : observedEmbedOrigin(getHeader(event, 'referer'), getHeader(event, 'origin'))
     if (installationPreview) {
       await requireMembership(event, workspace.id, { admin: true })
     } else {
-      const referer = getHeader(event, 'referer')
-      if (!isDomainAllowed(referer, workspace.allowedDomains)) {
+      if (!embedOrigin || !isDomainAllowed(embedOrigin, workspace.allowedDomains)) {
         throw createError({ statusCode: 403, statusMessage: 'This site is not allowed to embed this chat' })
       }
     }
-    event.context.perchEmbedTicket = issueEmbedTicket(event, siteId, { installationPreview })
+    event.context.perchEmbedTicket = issueEmbedTicket(event, siteId, {
+      hostOrigin: embedOrigin!,
+      installationPreview
+    })
     const ancestors = installationPreview
       ? '\'self\''
       : workspace.allowedDomains.length

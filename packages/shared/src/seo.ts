@@ -11,6 +11,7 @@ export const PERCH_ROBOTS_DISALLOWED_PATHS = [
   '/articles',
   '/auth/',
   '/dashboard',
+  '/installation',
   '/join/',
   '/nest',
   '/onboarding',

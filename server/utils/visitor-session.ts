@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { and, eq, visitors, workspaces } from '@perch/db'
 import type { H3Event } from 'h3'
+import { normalizeInstallationOrigin } from './installation'
 
 const VISITOR_SESSION_TTL_SECONDS = 60 * 60 * 24 * 180
 
@@ -12,6 +13,7 @@ interface VisitorSessionPayload {
 
 export interface EmbedTicketPayload {
   sid: string
+  hostOrigin: string
   exp: number
   installationPreview?: boolean
 }
@@ -65,11 +67,12 @@ export function verifyVisitorSession(token: string, secret: string, nowSeconds =
 export function signEmbedTicket(
   siteId: string,
   secret: string,
-  options: { installationPreview?: boolean } = {},
+  options: { hostOrigin: string, installationPreview?: boolean },
   nowSeconds = Math.floor(Date.now() / 1000)
 ): string {
   const payload: EmbedTicketPayload = {
     sid: siteId,
+    hostOrigin: options.hostOrigin,
     exp: nowSeconds + 5 * 60,
     ...(options.installationPreview ? { installationPreview: true } : {})
   }
@@ -91,6 +94,7 @@ export function verifyEmbedTicket(
   try {
     const payload = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8')) as EmbedTicketPayload
     if (payload.sid !== siteId || typeof payload.exp !== 'number' || payload.exp <= nowSeconds) return null
+    if (normalizeInstallationOrigin(payload.hostOrigin) !== payload.hostOrigin) return null
     if (payload.installationPreview !== undefined && payload.installationPreview !== true) return null
     return payload
   } catch {
@@ -101,7 +105,7 @@ export function verifyEmbedTicket(
 export function issueEmbedTicket(
   event: H3Event,
   siteId: string,
-  options: { installationPreview?: boolean } = {}
+  options: { hostOrigin: string, installationPreview?: boolean }
 ): string {
   return signEmbedTicket(siteId, visitorSessionSecret(event), options)
 }

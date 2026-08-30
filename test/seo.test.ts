@@ -27,6 +27,7 @@ describe('SEO boundaries', () => {
     expect(PERCH_ROBOTS_DISALLOWED_PATHS).toContain('/api/')
     expect(PERCH_ROBOTS_DISALLOWED_PATHS).toContain('/admin/')
     expect(PERCH_ROBOTS_DISALLOWED_PATHS).toContain('/dashboard')
+    expect(PERCH_ROBOTS_DISALLOWED_PATHS).toContain('/installation')
     expect(PERCH_ROBOTS_DISALLOWED_PATHS).not.toContain('/login')
   })
 })

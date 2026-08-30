@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
   evaluateInstallationSignal,
+  InstallationSignalDebouncer,
+  INSTALLATION_SIGNAL_WRITE_DEBOUNCE_MS,
+  installationPageForOrigin,
+  installationPageHash,
   installationPageMatches,
-  normalizeInstallationPage
+  normalizeInstallationPage,
+  observedEmbedOrigin
 } from '../server/utils/installation'
 
 describe('installation page normalization', () => {
@@ -29,6 +34,28 @@ describe('installation page normalization', () => {
     expect(installationPageMatches(requested, normalizeInstallationPage('https://example.com/pricing?x=1')!)).toBe(true)
     expect(installationPageMatches(requested, normalizeInstallationPage('https://example.com/')!)).toBe(false)
     expect(installationPageMatches(requested, normalizeInstallationPage('https://shop.example.com/pricing')!)).toBe(false)
+  })
+
+  it('binds reported pages to the server-observed embed origin', () => {
+    expect(observedEmbedOrigin('https://Customer.Example/pricing', undefined)).toBe('https://customer.example')
+    expect(observedEmbedOrigin(undefined, 'https://customer.example')).toBe('https://customer.example')
+    expect(observedEmbedOrigin('https://customer.example', 'https://spoofed.example')).toBeNull()
+    expect(installationPageForOrigin('https://customer.example/pricing', 'https://customer.example'))
+      .toMatchObject({ url: 'https://customer.example/pricing' })
+    expect(installationPageForOrigin('https://spoofed.example/pricing', 'https://customer.example')).toBeNull()
+  })
+})
+
+describe('installation signal write debouncing', () => {
+  it('keeps concurrent pages independent while suppressing duplicate page writes', () => {
+    const debouncer = new InstallationSignalDebouncer()
+    const pricing = installationPageHash('https://customer.example/pricing')
+    const contact = installationPageHash('https://customer.example/contact')
+
+    expect(debouncer.shouldWrite('workspace-1', pricing, 1_000)).toBe(true)
+    expect(debouncer.shouldWrite('workspace-1', contact, 1_000)).toBe(true)
+    expect(debouncer.shouldWrite('workspace-1', pricing, 2_000)).toBe(false)
+    expect(debouncer.shouldWrite('workspace-1', pricing, 1_000 + INSTALLATION_SIGNAL_WRITE_DEBOUNCE_MS)).toBe(true)
   })
 })
 

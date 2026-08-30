@@ -24,6 +24,7 @@ export default defineEventHandler(async (event) => {
   }
   const { site_id, embed_ticket, visitor_session, page_url, ua } = result.data
   const embed = requireEmbedTicket(event, site_id, embed_ticket)
+  const reportedPage = installationPageForOrigin(page_url, embed.hostOrigin)
 
   const db = useDb()
   const workspace = await db.query.workspaces.findFirst({ where: eq(workspaces.siteId, site_id) })
@@ -32,7 +33,7 @@ export default defineEventHandler(async (event) => {
   }
   const now = new Date()
   const metadata = {
-    ...(page_url ? { page_url } : {}),
+    ...(reportedPage ? { page_url: reportedPage.url } : {}),
     ...(ua ? { ua } : {}),
     installation_preview: embed.installationPreview === true
   }
@@ -91,6 +92,7 @@ export default defineEventHandler(async (event) => {
     role: 'visitor',
     wid: workspace.id,
     vid: visitor!.id,
+    hostOrigin: embed.hostOrigin,
     ...(embed.installationPreview ? { installationPreview: true } : {})
   }, secret)
 
@@ -101,10 +103,6 @@ export default defineEventHandler(async (event) => {
   })
 
   const withinHours = isWithinBusinessHours(workspace.businessHours, workspace.timezone)
-
-  if (!embed.installationPreview) {
-    await recordWidgetInstallation(workspace.id, page_url)
-  }
 
   return {
     workspace: {

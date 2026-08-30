@@ -65,8 +65,6 @@ export const workspaces = pgTable('workspaces', {
   widgetSize: text('widget_size', { enum: ['compact', 'standard', 'large'] }).default('standard').notNull(),
   widgetTheme: text('widget_theme', { enum: ['light', 'dark', 'system'] }).default('system').notNull(),
   widgetShowBranding: boolean('widget_show_branding').default(true).notNull(),
-  widgetInstalledAt: timestamp('widget_installed_at', { withTimezone: true }),
-  widgetInstalledUrl: text('widget_installed_url'),
   autoAssignEnabled: boolean('auto_assign_enabled').default(false).notNull(),
   prechatFormEnabled: boolean('prechat_form_enabled').default(true).notNull(),
   // HMAC secret the business signs Perch.identify() payloads with (lazily generated)
@@ -81,6 +79,18 @@ export const workspaces = pgTable('workspaces', {
   timezone: text('timezone'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull()
 })
+
+export const widgetInstallationSignals = pgTable('widget_installation_signals', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  pageHash: text('page_hash').notNull(),
+  pageUrl: text('page_url').notNull(),
+  pageOrigin: text('page_origin').notNull(),
+  lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).defaultNow().notNull()
+}, t => [
+  uniqueIndex('widget_installation_signals_workspace_page_uq').on(t.workspaceId, t.pageHash),
+  index('widget_installation_signals_workspace_recency_idx').on(t.workspaceId, t.lastSeenAt)
+])
 
 export const workspaceMembers = pgTable('workspace_members', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -434,6 +444,8 @@ export type User = typeof users.$inferSelect
 export type NewUser = typeof users.$inferInsert
 export type Workspace = typeof workspaces.$inferSelect
 export type NewWorkspace = typeof workspaces.$inferInsert
+export type WidgetInstallationSignal = typeof widgetInstallationSignals.$inferSelect
+export type NewWidgetInstallationSignal = typeof widgetInstallationSignals.$inferInsert
 export type WorkspaceMember = typeof workspaceMembers.$inferSelect
 export type NewWorkspaceMember = typeof workspaceMembers.$inferInsert
 export type Invite = typeof invites.$inferSelect

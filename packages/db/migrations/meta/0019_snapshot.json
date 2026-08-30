@@ -1,5 +1,5 @@
 {
-  "id": "7a2fc678-7bf2-4a0b-821d-6f1dd5c93f99",
+  "id": "66d134f9-037a-4a5d-baad-8cd02ce6395b",
   "prevId": "2730fdee-5155-4483-bd72-8dc4f5c11d90",
   "version": "7",
   "dialect": "postgresql",
@@ -1948,6 +1948,114 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.widget_installation_signals": {
+      "name": "widget_installation_signals",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "workspace_id": {
+          "name": "workspace_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "page_hash": {
+          "name": "page_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "page_url": {
+          "name": "page_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "page_origin": {
+          "name": "page_origin",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "last_seen_at": {
+          "name": "last_seen_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "widget_installation_signals_workspace_page_uq": {
+          "name": "widget_installation_signals_workspace_page_uq",
+          "columns": [
+            {
+              "expression": "workspace_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "page_hash",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "widget_installation_signals_workspace_recency_idx": {
+          "name": "widget_installation_signals_workspace_recency_idx",
+          "columns": [
+            {
+              "expression": "workspace_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "last_seen_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "widget_installation_signals_workspace_id_workspaces_id_fk": {
+          "name": "widget_installation_signals_workspace_id_workspaces_id_fk",
+          "tableFrom": "widget_installation_signals",
+          "tableTo": "workspaces",
+          "columnsFrom": [
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.workspace_members": {
       "name": "workspace_members",
       "schema": "",
@@ -2149,18 +2257,6 @@
           "primaryKey": false,
           "notNull": true,
           "default": true
-        },
-        "widget_installed_at": {
-          "name": "widget_installed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "widget_installed_url": {
-          "name": "widget_installed_url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
         },
         "auto_assign_enabled": {
           "name": "auto_assign_enabled",

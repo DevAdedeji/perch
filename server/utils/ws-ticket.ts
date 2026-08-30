@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
+import { normalizeInstallationOrigin } from './installation'
 
 /**
  * Short-lived, HMAC-signed WebSocket auth ticket. Two subjects:
@@ -9,7 +10,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
  */
 export type TicketSubject
   = | { role: 'agent', uid: string }
-    | { role: 'visitor', wid: string, vid: string, installationPreview?: boolean }
+    | { role: 'visitor', wid: string, vid: string, hostOrigin: string, installationPreview?: boolean }
 
 type TicketPayload = TicketSubject & { exp: number }
 
@@ -37,11 +38,13 @@ export function verifyTicket(token: string, secret: string): TicketSubject | nul
     const payload = JSON.parse(Buffer.from(data, 'base64url').toString()) as TicketPayload
     if (typeof payload.exp !== 'number' || payload.exp < Date.now()) return null
     if (payload.role === 'agent' && payload.uid) return { role: 'agent', uid: payload.uid }
-    if (payload.role === 'visitor' && payload.wid && payload.vid) {
+    if (payload.role === 'visitor' && payload.wid && payload.vid
+      && normalizeInstallationOrigin(payload.hostOrigin) === payload.hostOrigin) {
       return {
         role: 'visitor',
         wid: payload.wid,
         vid: payload.vid,
+        hostOrigin: payload.hostOrigin,
         ...(payload.installationPreview === true ? { installationPreview: true } : {})
       }
     }
