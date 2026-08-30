@@ -16,7 +16,7 @@ export default defineEventHandler(async (event) => {
 
   // verify even when the user is missing would leak timing; nuxt-auth-utils'
   // verifyPassword is constant-time enough for this project's threat model.
-  if (!user || !(await verifyPassword(user.passwordHash, password))) {
+  if (!user?.passwordHash || !(await verifyPassword(user.passwordHash, password))) {
     throw createError({ statusCode: 401, statusMessage: 'Invalid email or password' })
   }
 

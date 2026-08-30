@@ -23,7 +23,10 @@ export default defineEventHandler(async (event) => {
 
   const db = useDb()
   const dbUser = await db.query.users.findFirst({ where: eq(users.id, user.id) })
-  if (!dbUser || !(await verifyPassword(dbUser.passwordHash, password))) {
+  if (!dbUser?.passwordHash) {
+    throw createError({ statusCode: 409, statusMessage: 'Set a password before changing your email.' })
+  }
+  if (!(await verifyPassword(dbUser.passwordHash, password))) {
     throw createError({ statusCode: 401, statusMessage: 'Password is incorrect' })
   }
   if (new_email === dbUser.email) {

@@ -34,12 +34,18 @@ export const senderTypeEnum = pgEnum('sender_type', ['visitor', 'agent', 'system
 export const users = pgTable('users', {
   id: uuid('id').defaultRandom().primaryKey(),
   email: text('email').notNull().unique(),
-  passwordHash: text('password_hash').notNull(),
+  // Google-only accounts can add a password later through the reset flow.
+  passwordHash: text('password_hash'),
+  // Google's stable `sub` claim, never the mutable email address, identifies
+  // the connected Google account.
+  googleId: text('google_id'),
   name: text('name').notNull(),
   // null = unverified; existing accounts are grandfathered in the migration
   emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull()
-})
+}, t => [
+  uniqueIndex('users_google_id_uq').on(t.googleId)
+])
 
 export const workspaces = pgTable('workspaces', {
   id: uuid('id').defaultRandom().primaryKey(),

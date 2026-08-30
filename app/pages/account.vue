@@ -4,6 +4,7 @@ useHead({ title: 'Account · Perch' })
 
 const { user, refresh } = useAuth()
 const toast = useToast()
+const passwordSetupPath = computed(() => `/forgot-password?email=${encodeURIComponent(user.value?.email ?? '')}`)
 
 /* profile name */
 const name = ref(user.value?.name ?? '')
@@ -294,45 +295,63 @@ async function changePassword() {
 
         <USeparator class="my-5" />
 
-        <p class="text-sm font-medium text-highlighted">
-          Change email
-        </p>
-        <p class="text-xs text-muted mt-0.5">
-          We'll send a confirmation link to the new address — nothing changes until it's clicked.
-        </p>
-        <UAlert
-          v-if="emailChangePending"
-          class="mt-3"
-          color="info"
-          variant="subtle"
-          icon="i-lucide-mail-check"
-          title="Confirmation pending"
-          description="Open the link we sent to the new address to complete the change."
-        />
-        <div class="mt-4 space-y-4">
-          <UFormField label="New email">
-            <UInput
-              v-model="emailForm.newEmail"
-              type="email"
+        <template v-if="user?.hasPassword">
+          <p class="text-sm font-medium text-highlighted">
+            Change email
+          </p>
+          <p class="text-xs text-muted mt-0.5">
+            We'll send a confirmation link to the new address — nothing changes until it's clicked.
+          </p>
+          <UAlert
+            v-if="emailChangePending"
+            class="mt-3"
+            color="info"
+            variant="subtle"
+            icon="i-lucide-mail-check"
+            title="Confirmation pending"
+            description="Open the link we sent to the new address to complete the change."
+          />
+          <div class="mt-4 space-y-4">
+            <UFormField label="New email">
+              <UInput
+                v-model="emailForm.newEmail"
+                type="email"
+                size="lg"
+                class="w-full"
+                autocomplete="email"
+              />
+            </UFormField>
+            <UFormField label="Current password">
+              <PasswordInput
+                v-model="emailForm.password"
+                autocomplete="current-password"
+              />
+            </UFormField>
+            <UButton
+              color="neutral"
               size="lg"
-              class="w-full"
-              autocomplete="email"
-            />
-          </UFormField>
-          <UFormField label="Current password">
-            <PasswordInput
-              v-model="emailForm.password"
-              autocomplete="current-password"
-            />
-          </UFormField>
+              :loading="changingEmail"
+              :disabled="!emailForm.newEmail || !emailForm.password"
+              @click="changeEmail"
+            >
+              Send confirmation
+            </UButton>
+          </div>
+        </template>
+        <div
+          v-else
+          class="rounded-xl bg-elevated/50 ring-1 ring-default p-4"
+        >
+          <p class="text-sm text-muted">
+            You signed up with Google. Set a password before changing your email so Perch can verify this sensitive action.
+          </p>
           <UButton
+            class="mt-3"
             color="neutral"
-            size="lg"
-            :loading="changingEmail"
-            :disabled="!emailForm.newEmail || !emailForm.password"
-            @click="changeEmail"
+            variant="outline"
+            :to="passwordSetupPath"
           >
-            Send confirmation
+            Set a password
           </UButton>
         </div>
       </section>
@@ -421,11 +440,17 @@ async function changePassword() {
         <h2 class="font-display font-semibold text-highlighted">
           Password
         </h2>
-        <p class="text-sm text-muted mt-0.5">
+        <p
+          v-if="user?.hasPassword"
+          class="text-sm text-muted mt-0.5"
+        >
           Changing your password also invalidates any outstanding reset links.
         </p>
 
-        <div class="mt-5 space-y-4">
+        <div
+          v-if="user?.hasPassword"
+          class="mt-5 space-y-4"
+        >
           <UFormField label="Current password">
             <PasswordInput
               v-model="passwordForm.current"
@@ -457,6 +482,22 @@ async function changePassword() {
             Update password
           </UButton>
         </div>
+        <div
+          v-else
+          class="mt-4 rounded-xl bg-elevated/50 ring-1 ring-default p-4"
+        >
+          <p class="text-sm text-muted">
+            Your Google account currently signs you in. Adding a password gives you an email-and-password fallback and unlocks password-confirmed account changes.
+          </p>
+          <UButton
+            class="mt-3"
+            color="neutral"
+            variant="outline"
+            :to="passwordSetupPath"
+          >
+            Set a password
+          </UButton>
+        </div>
       </section>
 
       <!-- Danger zone -->
@@ -473,11 +514,18 @@ async function changePassword() {
               Deletes your login and any workspace where you're the only member.
               Your assigned chats return to the pool for the rest of the team.
             </p>
+            <p
+              v-if="!user?.hasPassword"
+              class="mt-1 text-xs text-amber-700 dark:text-amber-400"
+            >
+              Set a password first so Perch can confirm this sensitive action.
+            </p>
           </div>
           <UButton
             class="whitespace-nowrap!"
             color="error"
             variant="subtle"
+            :disabled="!user?.hasPassword"
             @click="deleteAccountOpen = true"
           >
             Delete account
