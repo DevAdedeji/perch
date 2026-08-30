@@ -28,7 +28,10 @@ export default defineEventHandler(async (event) => {
 
   const db = useDb()
   const dbUser = await db.query.users.findFirst({ where: eq(users.id, user.id) })
-  if (!dbUser || !(await verifyPassword(dbUser.passwordHash, result.data.password))) {
+  if (!dbUser?.passwordHash) {
+    throw createError({ statusCode: 409, statusMessage: 'Set a password before deleting your account.' })
+  }
+  if (!(await verifyPassword(dbUser.passwordHash, result.data.password))) {
     throw createError({ statusCode: 401, statusMessage: 'Incorrect password' })
   }
 

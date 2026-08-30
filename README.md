@@ -31,7 +31,7 @@ visitor context panel:
 ## What it does
 
 **For the business (the Control Room)**
-- Email/password auth with sealed-cookie sessions; a user can belong to multiple workspaces.
+- Email/password or Google auth with sealed-cookie sessions; a user can belong to multiple workspaces.
 - Real-time inbox — new conversations and messages appear instantly, filterable by `unassigned` / `open` / `resolved`.
 - **Claim / assign / reassign** conversations, with an atomic first-claim-wins race guard.
 - Per-agent unread tracking, internal notes (never leaked to the visitor), resolve/reopen.
@@ -203,6 +203,8 @@ Useful scripts: `pnpm build` (production Nitro bundle), `pnpm preview`, `pnpm li
 |---|---|
 | `NEON_CONNECTION_STRING` | Postgres connection string (Neon or any Postgres) |
 | `NUXT_SESSION_PASSWORD` | 32+ char secret — seals auth cookies **and** signs the HMAC WS tickets |
+| `NUXT_OAUTH_GOOGLE_CLIENT_ID` / `NUXT_OAUTH_GOOGLE_CLIENT_SECRET` | *(optional)* Google OAuth web-client credentials; both are required to enable Google sign-in |
+| `NUXT_OAUTH_GOOGLE_REDIRECT_URL` | *(required with Google OAuth)* Exact callback URL registered in Google Cloud, e.g. `https://useperch.xyz/auth/google` |
 | `REALTIME_SECRET` | *(optional)* separate 32+ char HMAC secret for realtime and visitor tickets; otherwise `NUXT_SESSION_PASSWORD` is reused |
 | `RESEND_API_KEY` | *(optional)* transactional email — password resets + invite emails. Without it, emails are logged to the server console |
 | `RESEND_FROM` | *(optional)* from address, e.g. `Perch <no-reply@yourdomain.com>` |
@@ -214,6 +216,10 @@ Useful scripts: `pnpm build` (production Nitro bundle), `pnpm preview`, `pnpm li
 
 > Nuxt only auto-maps `NUXT_`-prefixed env at runtime. The server reads the documented plain
 > environment variable names directly as production fallbacks.
+
+For Google sign-in, create an OAuth 2.0 **Web application** client in Google Cloud and register the
+exact local and deployed callback URLs (`http://localhost:2222/auth/google` and
+`https://useperch.xyz/auth/google`). Keep the client secret server-side.
 
 ---
 
@@ -246,7 +252,7 @@ Notes from getting this live on a small tier:
 
 ## Status & roadmap
 
-**Built:** auth · workspaces & invites · role-scoped Control Room inbox · atomic claim / assign /
+**Built:** email/password and Google auth · workspaces & invites · role-scoped Control Room inbox · atomic claim / assign /
 reassign · resolve/reopen · per-agent unread · internal notes · live presence · settings & team
 management · the embeddable widget with pre-chat, typing, and presence · notification toast + sound ·
 canned responses · visitor context panel · `Perch.identify()` with HMAC verification · password

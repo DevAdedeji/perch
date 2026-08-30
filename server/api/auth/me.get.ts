@@ -26,7 +26,8 @@ export default defineEventHandler(async (event) => {
       // the session cookie can go stale after an email change — DB is truth
       email: dbUser?.email ?? user.email,
       name: dbUser?.name ?? user.name,
-      emailVerified: !!dbUser?.emailVerifiedAt
+      emailVerified: !!dbUser?.emailVerifiedAt,
+      hasPassword: !!dbUser?.passwordHash
     },
     workspaces: memberships
   }

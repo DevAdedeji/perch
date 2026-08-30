@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { z } from 'zod'
 import type { FormSubmitEvent } from '@nuxt/ui'
+import { safeAuthRedirect } from '@perch/shared'
 
 definePageMeta({ layout: 'auth' })
 useHead({ title: 'Create your account · Perch' })
@@ -18,13 +19,18 @@ type Schema = z.output<typeof schema>
 
 const state = reactive({ name: '', email: '', password: '', confirmPassword: '' })
 const loading = ref(false)
-const error = ref('')
 
 const route = useRoute()
 const { refresh } = useAuth()
+const { data: authMethods } = await useFetch<{ google: boolean }>('/api/auth/methods', {
+  default: () => ({ google: false })
+})
 
 // carry an invite through signup so we land back on the join page
-const redirect = computed(() => (route.query.redirect as string | undefined) || '/onboarding')
+const redirect = computed(() => safeAuthRedirect(route.query.redirect, '/onboarding'))
+const error = ref(route.query.oauth_error
+  ? 'Google sign-up could not be completed. Please try again.'
+  : '')
 
 async function onSubmit(event: FormSubmitEvent<Schema>) {
   loading.value = true
@@ -60,6 +66,20 @@ async function onSubmit(event: FormSubmitEvent<Schema>) {
     </div>
 
     <div class="rounded-2xl border-glow bg-elevated/40 glass p-6 sm:p-7 shadow-xl shadow-black/10">
+      <template v-if="authMethods.google">
+        <GoogleAuthButton
+          label="Sign up with Google"
+          source="signup"
+          :redirect="redirect"
+        />
+
+        <div class="my-5 flex items-center gap-3">
+          <span class="h-px flex-1 bg-border" />
+          <span class="text-xs text-dimmed">or with email</span>
+          <span class="h-px flex-1 bg-border" />
+        </div>
+      </template>
+
       <UForm
         :schema="schema"
         :state="state"

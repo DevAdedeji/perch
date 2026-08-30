@@ -5,12 +5,14 @@ import type { FormSubmitEvent } from '@nuxt/ui'
 definePageMeta({ layout: 'auth' })
 useHead({ title: 'Reset your password · Perch' })
 
+const route = useRoute()
+
 const schema = z.object({
   email: z.string().email('Enter a valid email')
 })
 type Schema = z.output<typeof schema>
 
-const state = reactive({ email: '' })
+const state = reactive({ email: typeof route.query.email === 'string' ? route.query.email : '' })
 const loading = ref(false)
 const error = ref('')
 const sent = ref(false)
