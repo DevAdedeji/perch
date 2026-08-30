@@ -9,7 +9,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
  */
 export type TicketSubject
   = | { role: 'agent', uid: string }
-    | { role: 'visitor', wid: string, vid: string }
+    | { role: 'visitor', wid: string, vid: string, installationPreview?: boolean }
 
 type TicketPayload = TicketSubject & { exp: number }
 
@@ -38,7 +38,12 @@ export function verifyTicket(token: string, secret: string): TicketSubject | nul
     if (typeof payload.exp !== 'number' || payload.exp < Date.now()) return null
     if (payload.role === 'agent' && payload.uid) return { role: 'agent', uid: payload.uid }
     if (payload.role === 'visitor' && payload.wid && payload.vid) {
-      return { role: 'visitor', wid: payload.wid, vid: payload.vid }
+      return {
+        role: 'visitor',
+        wid: payload.wid,
+        vid: payload.vid,
+        ...(payload.installationPreview === true ? { installationPreview: true } : {})
+      }
     }
     return null
   } catch {

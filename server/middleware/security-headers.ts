@@ -18,16 +18,23 @@ export default defineEventHandler(async (event) => {
     const workspace = await useDb().query.workspaces.findFirst({ where: eq(workspaces.siteId, siteId) })
     if (!workspace) throw createError({ statusCode: 404, statusMessage: 'Unknown site' })
 
-    const referer = getHeader(event, 'referer')
-    if (!isDomainAllowed(referer, workspace.allowedDomains)) {
-      throw createError({ statusCode: 403, statusMessage: 'This site is not allowed to embed this chat' })
+    const installationPreview = getQuery(event).preview === '1'
+    if (installationPreview) {
+      await requireMembership(event, workspace.id, { admin: true })
+    } else {
+      const referer = getHeader(event, 'referer')
+      if (!isDomainAllowed(referer, workspace.allowedDomains)) {
+        throw createError({ statusCode: 403, statusMessage: 'This site is not allowed to embed this chat' })
+      }
     }
-    event.context.perchEmbedTicket = issueEmbedTicket(event, siteId)
-    const ancestors = workspace.allowedDomains.length
-      ? workspace.allowedDomains.flatMap(domain => [
-          `https://${domain}`, `https://*.${domain}`, `http://${domain}`, `http://*.${domain}`
-        ]).join(' ')
-      : '*'
+    event.context.perchEmbedTicket = issueEmbedTicket(event, siteId, { installationPreview })
+    const ancestors = installationPreview
+      ? '\'self\''
+      : workspace.allowedDomains.length
+        ? workspace.allowedDomains.flatMap(domain => [
+            `https://${domain}`, `https://*.${domain}`, `http://${domain}`, `http://*.${domain}`
+          ]).join(' ')
+        : '*'
     setResponseHeader(event, 'Content-Security-Policy', `frame-ancestors ${ancestors}`)
   } else {
     setResponseHeader(event, 'X-Frame-Options', 'DENY')

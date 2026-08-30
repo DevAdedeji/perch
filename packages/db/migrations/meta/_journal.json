@@ -134,6 +134,13 @@
       "when": 1788133304746,
       "tag": "0018_simple_automations",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1788131170299,
+      "tag": "0019_installation-verification",
+      "breakpoints": true
     }
   ]
 }

@@ -84,7 +84,7 @@ async function sendInvites() {
 const snippet = computed(() => created.value ? buildEmbedSnippet(origin, created.value.siteId) : '')
 
 async function finish() {
-  await navigateTo('/dashboard')
+  await navigateTo('/installation')
 }
 </script>
 
@@ -369,7 +369,7 @@ async function finish() {
           trailing-icon="i-lucide-arrow-right"
           @click="finish"
         >
-          Go to your Control Room
+          Finish installation
         </UButton>
       </div>
     </div>

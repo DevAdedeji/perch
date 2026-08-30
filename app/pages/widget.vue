@@ -6,11 +6,12 @@ useHead({ title: 'Chat', meta: [{ name: 'robots', content: 'noindex' }] })
 
 const route = useRoute()
 const siteId = computed(() => (route.query.site_id as string) || '')
+const installationPreview = computed(() => route.query.preview === '1')
 const perchUrl = useRequestURL().origin
 const embedTicket = useState<string>('perch-embed-ticket', () =>
   (useRequestEvent()?.context.perchEmbedTicket as string | undefined) ?? '')
 
-const widget = useWidget(siteId.value, embedTicket.value)
+const widget = useWidget(siteId.value, embedTicket.value, { installationPreview: installationPreview.value })
 const {
   workspace, agentName, businessOnline, businessState, awayLabel, conversationId, conversationStatus, csatRating, messages, status, agentTyping, visitorName, agentReadAt
 } = widget
@@ -443,6 +444,7 @@ onBeforeUnmount(() => {
         </p>
       </div>
       <button
+        v-if="!installationPreview"
         class="grid place-items-center size-8 rounded-full text-dimmed hover:text-highlighted hover:bg-elevated active:scale-95 transition"
         aria-label="Close"
         @click="close"

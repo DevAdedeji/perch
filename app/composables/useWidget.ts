@@ -40,7 +40,11 @@ interface SessionResponse {
  * per-site signed session, handshakes, then holds a WS scoped to its own
  * conversation. Messages go over REST; agent replies + typing arrive over WS.
  */
-export function useWidget(siteId: string, embedTicket: string) {
+export function useWidget(
+  siteId: string,
+  embedTicket: string,
+  options: { installationPreview?: boolean } = {}
+) {
   const workspace = ref<WidgetWorkspace | null>(null)
   const agentName = ref<string | null>(null)
   const businessOnline = ref(false)
@@ -80,10 +84,11 @@ export function useWidget(siteId: string, embedTicket: string) {
   // heartbeat — see useRealtime for the rationale
   let pingTimer: ReturnType<typeof setInterval> | undefined
   let lastActivity = 0
+  const visitorSessionKey = `${options.installationPreview ? 'perch:installation-session' : 'perch:session'}:${siteId}`
 
   function loadVisitorSession() {
     try {
-      visitorSession = localStorage.getItem(`perch:session:${siteId}`) ?? ''
+      visitorSession = localStorage.getItem(visitorSessionKey) ?? ''
     } catch {
       visitorSession = ''
     }
@@ -108,7 +113,7 @@ export function useWidget(siteId: string, embedTicket: string) {
       // instead of leaving the widget permanently stuck for this browser.
       visitorSession = ''
       try {
-        localStorage.removeItem(`perch:session:${siteId}`)
+        localStorage.removeItem(visitorSessionKey)
       } catch {
         // Some third-party-cookie policies disable iframe storage.
       }
@@ -119,7 +124,7 @@ export function useWidget(siteId: string, embedTicket: string) {
     visitorSession = res.visitor_session
     visitorSessionRef.value = visitorSession
     try {
-      localStorage.setItem(`perch:session:${siteId}`, visitorSession)
+      localStorage.setItem(visitorSessionKey, visitorSession)
     } catch {
       // The in-memory session still works for the current page.
     }

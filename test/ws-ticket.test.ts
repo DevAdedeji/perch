@@ -14,6 +14,13 @@ describe('WebSocket auth tickets', () => {
     expect(verifyTicket(token, SECRET)).toEqual({ role: 'visitor', wid: 'ws-1', vid: 'v-1' })
   })
 
+  it('preserves a signed installation-preview scope for visitor tickets', () => {
+    const token = signTicket({ role: 'visitor', wid: 'ws-1', vid: 'v-1', installationPreview: true }, SECRET)
+    expect(verifyTicket(token, SECRET)).toEqual({
+      role: 'visitor', wid: 'ws-1', vid: 'v-1', installationPreview: true
+    })
+  })
+
   it('rejects a ticket signed with a different secret', () => {
     const token = signTicket({ role: 'agent', uid: 'user-1' }, 'another-secret-that-is-not-the-real-one')
     expect(verifyTicket(token, SECRET)).toBeNull()

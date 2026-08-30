@@ -10,9 +10,10 @@ interface VisitorSessionPayload {
   exp: number
 }
 
-interface EmbedTicketPayload {
+export interface EmbedTicketPayload {
   sid: string
   exp: number
+  installationPreview?: boolean
 }
 
 function visitorSessionSecret(event?: H3Event): string {
@@ -61,26 +62,56 @@ export function verifyVisitorSession(token: string, secret: string, nowSeconds =
   }
 }
 
-export function issueEmbedTicket(event: H3Event, siteId: string): string {
-  const payload: EmbedTicketPayload = { sid: siteId, exp: Math.floor(Date.now() / 1000) + 5 * 60 }
+export function signEmbedTicket(
+  siteId: string,
+  secret: string,
+  options: { installationPreview?: boolean } = {},
+  nowSeconds = Math.floor(Date.now() / 1000)
+): string {
+  const payload: EmbedTicketPayload = {
+    sid: siteId,
+    exp: nowSeconds + 5 * 60,
+    ...(options.installationPreview ? { installationPreview: true } : {})
+  }
   const encoded = Buffer.from(JSON.stringify(payload)).toString('base64url')
-  return `${encoded}.${signature(encoded, visitorSessionSecret(event)).toString('base64url')}`
+  return `${encoded}.${signature(encoded, secret).toString('base64url')}`
 }
 
-export function requireEmbedTicket(event: H3Event, siteId: string, token: string): void {
+export function verifyEmbedTicket(
+  token: string,
+  siteId: string,
+  secret: string,
+  nowSeconds = Math.floor(Date.now() / 1000)
+): EmbedTicketPayload | null {
   const [encoded, supplied, extra] = token.split('.')
-  if (!encoded || !supplied || extra) throw createError({ statusCode: 401, statusMessage: 'Embed session is invalid' })
-  const expected = signature(encoded, visitorSessionSecret(event))
+  if (!encoded || !supplied || extra) return null
+  const expected = signature(encoded, secret)
   const actual = Buffer.from(supplied, 'base64url')
-  if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
-    throw createError({ statusCode: 401, statusMessage: 'Embed session is invalid' })
-  }
+  if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) return null
   try {
     const payload = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8')) as EmbedTicketPayload
-    if (payload.sid !== siteId || payload.exp <= Math.floor(Date.now() / 1000)) throw new Error('expired')
+    if (payload.sid !== siteId || typeof payload.exp !== 'number' || payload.exp <= nowSeconds) return null
+    if (payload.installationPreview !== undefined && payload.installationPreview !== true) return null
+    return payload
   } catch {
+    return null
+  }
+}
+
+export function issueEmbedTicket(
+  event: H3Event,
+  siteId: string,
+  options: { installationPreview?: boolean } = {}
+): string {
+  return signEmbedTicket(siteId, visitorSessionSecret(event), options)
+}
+
+export function requireEmbedTicket(event: H3Event, siteId: string, token: string): EmbedTicketPayload {
+  const payload = verifyEmbedTicket(token, siteId, visitorSessionSecret(event))
+  if (!payload) {
     throw createError({ statusCode: 401, statusMessage: 'Embed session is invalid or expired' })
   }
+  return payload
 }
 
 /** Resolve a signed widget session to its exact workspace and visitor rows. */

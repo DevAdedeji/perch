@@ -65,6 +65,8 @@ export const workspaces = pgTable('workspaces', {
   widgetSize: text('widget_size', { enum: ['compact', 'standard', 'large'] }).default('standard').notNull(),
   widgetTheme: text('widget_theme', { enum: ['light', 'dark', 'system'] }).default('system').notNull(),
   widgetShowBranding: boolean('widget_show_branding').default(true).notNull(),
+  widgetInstalledAt: timestamp('widget_installed_at', { withTimezone: true }),
+  widgetInstalledUrl: text('widget_installed_url'),
   autoAssignEnabled: boolean('auto_assign_enabled').default(false).notNull(),
   prechatFormEnabled: boolean('prechat_form_enabled').default(true).notNull(),
   // HMAC secret the business signs Perch.identify() payloads with (lazily generated)

@@ -23,7 +23,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Invalid input' })
   }
   const { site_id, embed_ticket, visitor_session, page_url, ua } = result.data
-  requireEmbedTicket(event, site_id, embed_ticket)
+  const embed = requireEmbedTicket(event, site_id, embed_ticket)
 
   const db = useDb()
   const workspace = await db.query.workspaces.findFirst({ where: eq(workspaces.siteId, site_id) })
@@ -31,7 +31,11 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 404, statusMessage: 'Unknown site' })
   }
   const now = new Date()
-  const metadata = { ...(page_url ? { page_url } : {}), ...(ua ? { ua } : {}) }
+  const metadata = {
+    ...(page_url ? { page_url } : {}),
+    ...(ua ? { ua } : {}),
+    installation_preview: embed.installationPreview === true
+  }
   let visitor
   if (visitor_session) {
     const resolved = await requireVisitorSession(event, site_id, visitor_session)
@@ -83,7 +87,12 @@ export default defineEventHandler(async (event) => {
   }
 
   const secret = requireRealtimeSecret(event)
-  const wsTicket = signTicket({ role: 'visitor', wid: workspace.id, vid: visitor!.id }, secret)
+  const wsTicket = signTicket({
+    role: 'visitor',
+    wid: workspace.id,
+    vid: visitor!.id,
+    ...(embed.installationPreview ? { installationPreview: true } : {})
+  }, secret)
 
   // the Help tab only renders when there's something to read
   const published = await db.query.articles.findFirst({
@@ -92,6 +101,10 @@ export default defineEventHandler(async (event) => {
   })
 
   const withinHours = isWithinBusinessHours(workspace.businessHours, workspace.timezone)
+
+  if (!embed.installationPreview) {
+    await recordWidgetInstallation(workspace.id, page_url)
+  }
 
   return {
     workspace: {

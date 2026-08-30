@@ -47,6 +47,7 @@ export interface VisitorDTO {
 
 export interface VisitorMetadata {
   page_url?: string
+  installation_preview?: boolean
   ua?: string
   browser?: string
   device?: string
