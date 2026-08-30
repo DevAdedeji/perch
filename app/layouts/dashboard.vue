@@ -14,6 +14,13 @@ const wid = computed(() => currentWorkspace.value?.workspaceId ?? null)
 const activeConversationId = useState<string | null>('inbox:activeId', () => null)
 // a mention toast can ask the inbox to open a specific conversation
 const pendingSelect = useState<string | null>('inbox:pendingSelect', () => null)
+const shownAutomationNotifications = new Set<string>()
+
+interface AutomationNotification {
+  id: string
+  conversation_id: string
+  created_at: string
+}
 
 function openDrawer() {
   drawerOpen.value = true
@@ -87,6 +94,14 @@ function onEvent(ev: ServerEvent) {
     play()
     return
   }
+  if (ev.type === 'automation.reminder') {
+    showAutomationReminder({
+      id: ev.payload.notification_id,
+      conversation_id: ev.payload.conversation_id,
+      created_at: ev.payload.created_at
+    })
+    return
+  }
   if (ev.type === 'presence') {
     const member = team.value.find(m => m.id === ev.payload.member_id)
     if (member) member.presence = ev.payload.presence
@@ -108,17 +123,53 @@ function onEvent(ev: ServerEvent) {
   play()
 }
 
+function showAutomationReminder(notification: AutomationNotification) {
+  if (shownAutomationNotifications.has(notification.id)) return
+  shownAutomationNotifications.add(notification.id)
+  toast.add({
+    title: 'Conversation needs attention',
+    description: 'There has been no activity for the time your team configured.',
+    icon: 'i-lucide-clock-alert',
+    color: 'warning',
+    actions: [{
+      label: 'View',
+      onClick: () => {
+        pendingSelect.value = notification.conversation_id
+        navigateTo('/dashboard')
+      }
+    }]
+  })
+  play()
+  if (wid.value) {
+    $fetch(`/api/workspaces/${wid.value}/automation-notifications/${notification.id}/read`, { method: 'POST' }).catch(() => {})
+  }
+}
+
+async function loadAutomationNotifications() {
+  if (!wid.value) return
+  try {
+    const notifications = await $fetch<AutomationNotification[]>(`/api/workspaces/${wid.value}/automation-notifications`)
+    notifications.reverse().forEach(showAutomationReminder)
+  } catch {
+    // Realtime delivery still works; the next poll retries persisted reminders.
+  }
+}
+
 let off: (() => void) | undefined
+let automationPoll: ReturnType<typeof setInterval> | undefined
 onMounted(() => {
   rt.connect()
   off = rt.on(onEvent)
   if (wid.value) {
     rt.subscribe(channels.workspace(wid.value))
     loadTeam()
+    loadAutomationNotifications()
   }
+  automationPoll = setInterval(loadAutomationNotifications, 60_000)
 })
 onBeforeUnmount(() => {
   off?.()
+  if (automationPoll) clearInterval(automationPoll)
   if (wid.value) rt.unsubscribe(channels.workspace(wid.value))
 })
 watch(wid, (next, prev) => {
@@ -126,6 +177,8 @@ watch(wid, (next, prev) => {
   if (next) {
     rt.subscribe(channels.workspace(next))
     loadTeam()
+    shownAutomationNotifications.clear()
+    loadAutomationNotifications()
   }
 })
 </script>

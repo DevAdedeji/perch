@@ -127,6 +127,13 @@
       "when": 1788132495637,
       "tag": "0017_inbox_organization",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1788132664129,
+      "tag": "0018_simple_automations",
+      "breakpoints": true
     }
   ]
 }

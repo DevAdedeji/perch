@@ -880,6 +880,12 @@ async function removeLogo() {
           </form>
         </section>
 
+        <!-- Automations -->
+        <AutomationSettings
+          v-if="isAdmin && wid"
+          :workspace-id="wid"
+        />
+
         <!-- Proactive triggers -->
         <section class="rounded-2xl border-glow bg-elevated/30 p-5 sm:p-6">
           <h2 class="font-display font-semibold text-highlighted">

@@ -77,6 +77,15 @@ export interface SavedInboxFilters {
   snoozed: InboxSnoozedFilter
 }
 
+export type AutomationRuleConfig
+  = { member_ids: string[] }
+    | { url_contains: string, member_id: string }
+    | { condition: 'email_domain', value: string, tag_id: string }
+    | { condition: 'email_equals', value: string, tag_id: string }
+    | { condition: 'metadata', metadata_key: 'page_url' | 'referrer' | 'browser' | 'device', value: string, tag_id: string }
+    | { minutes: number }
+    | { hours: number }
+
 export interface MessageDTO {
   id: string
   conversation_id: string

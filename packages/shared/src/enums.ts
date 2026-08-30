@@ -28,6 +28,15 @@ export type ConversationPriority = (typeof CONVERSATION_PRIORITIES)[number]
 export const SENDER_TYPES = ['visitor', 'agent', 'system'] as const
 export type SenderType = (typeof SENDER_TYPES)[number]
 
+export const AUTOMATION_RULE_TYPES = [
+  'round_robin',
+  'page_assignment',
+  'vip_tagging',
+  'inactivity_reminder',
+  'auto_close'
+] as const
+export type AutomationRuleType = (typeof AUTOMATION_RULE_TYPES)[number]
+
 /** Invite lifecycle. */
 export const INVITE_STATUSES = ['pending', 'accepted', 'revoked'] as const
 export type InviteStatus = (typeof INVITE_STATUSES)[number]

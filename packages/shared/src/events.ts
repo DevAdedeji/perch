@@ -148,6 +148,16 @@ export interface ConversationReadReceiptPayload {
   last_read_at: string
 }
 
+export interface AutomationReminderPayload {
+  notification_id: string
+  conversation_id: string
+  created_at: string
+}
+
+export interface ConversationRefreshPayload {
+  conversation_id: string
+}
+
 export interface VisitorOfflinePayload {
   visitor_ref: string
 }
@@ -185,6 +195,8 @@ export type ServerEvent = | { type: 'message.new', payload: MessageDTO }
   | { type: 'conversation.read', payload: ConversationReadReceiptPayload }
   | { type: 'team.message', payload: TeamMessagePayload }
   | { type: 'mention', payload: MentionPayload }
+  | { type: 'automation.reminder', payload: AutomationReminderPayload }
+  | { type: 'conversation.refresh', payload: ConversationRefreshPayload }
   | { type: 'visitor.online', payload: LiveVisitorDTO }
   | { type: 'visitor.offline', payload: VisitorOfflinePayload }
   | { type: 'visitor.page', payload: VisitorPageChangedPayload }

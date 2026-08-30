@@ -19,7 +19,7 @@ import {
   uuid
 } from 'drizzle-orm/pg-core'
 import { sql } from 'drizzle-orm'
-import type { BusinessHours, SavedInboxFilters, VisitorMetadata } from '@perch/shared'
+import type { AutomationRuleConfig, BusinessHours, SavedInboxFilters, VisitorMetadata } from '@perch/shared'
 
 /* Enums (mirror @perch/shared) */
 
@@ -29,6 +29,9 @@ export const inviteStatusEnum = pgEnum('invite_status', ['pending', 'accepted', 
 export const conversationStatusEnum = pgEnum('conversation_status', ['unassigned', 'open', 'resolved'])
 export const conversationPriorityEnum = pgEnum('conversation_priority', ['low', 'normal', 'high', 'urgent'])
 export const senderTypeEnum = pgEnum('sender_type', ['visitor', 'agent', 'system'])
+export const automationRuleTypeEnum = pgEnum('automation_rule_type', [
+  'round_robin', 'page_assignment', 'vip_tagging', 'inactivity_reminder', 'auto_close'
+])
 
 /* Tables */
 
@@ -155,6 +158,52 @@ export const inboxSavedViews = pgTable('inbox_saved_views', {
 }, t => [
   uniqueIndex('inbox_saved_views_member_name_uq').on(t.memberId, t.name),
   index('inbox_saved_views_member_created_idx').on(t.memberId, t.createdAt)
+])
+
+export const automationRules = pgTable('automation_rules', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  type: automationRuleTypeEnum('type').notNull(),
+  config: jsonb('config').$type<AutomationRuleConfig>().notNull(),
+  sortOrder: integer('sort_order').default(0).notNull(),
+  enabled: boolean('enabled').default(true).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
+}, t => [
+  index('automation_rules_workspace_order_idx').on(t.workspaceId, t.sortOrder, t.createdAt)
+])
+
+export const automationRuleCursors = pgTable('automation_rule_cursors', {
+  ruleId: uuid('rule_id').primaryKey().references(() => automationRules.id, { onDelete: 'cascade' }),
+  nextIndex: integer('next_index').default(0).notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
+})
+
+export const automationExecutions = pgTable('automation_executions', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  ruleId: uuid('rule_id').notNull().references(() => automationRules.id, { onDelete: 'cascade' }),
+  conversationId: uuid('conversation_id').notNull().references(() => conversations.id, { onDelete: 'cascade' }),
+  executionKey: text('execution_key').notNull(),
+  detail: jsonb('detail').$type<Record<string, unknown>>().default({}).notNull(),
+  executedAt: timestamp('executed_at', { withTimezone: true }).defaultNow().notNull()
+}, t => [
+  uniqueIndex('automation_executions_key_uq').on(t.executionKey),
+  index('automation_executions_rule_recency_idx').on(t.ruleId, t.executedAt),
+  index('automation_executions_conversation_idx').on(t.conversationId)
+])
+
+export const automationNotifications = pgTable('automation_notifications', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  memberId: uuid('member_id').notNull().references(() => workspaceMembers.id, { onDelete: 'cascade' }),
+  conversationId: uuid('conversation_id').notNull().references(() => conversations.id, { onDelete: 'cascade' }),
+  executionId: uuid('execution_id').notNull().references(() => automationExecutions.id, { onDelete: 'cascade' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  readAt: timestamp('read_at', { withTimezone: true })
+}, t => [
+  uniqueIndex('automation_notifications_execution_uq').on(t.executionId),
+  index('automation_notifications_member_unread_idx').on(t.memberId, t.readAt, t.createdAt)
 ])
 
 /** Workspace-defined conversation labels ("billing", "bug", …). */
@@ -388,6 +437,10 @@ export type Conversation = typeof conversations.$inferSelect
 export type NewConversation = typeof conversations.$inferInsert
 export type InboxSavedView = typeof inboxSavedViews.$inferSelect
 export type NewInboxSavedView = typeof inboxSavedViews.$inferInsert
+export type AutomationRule = typeof automationRules.$inferSelect
+export type NewAutomationRule = typeof automationRules.$inferInsert
+export type AutomationExecution = typeof automationExecutions.$inferSelect
+export type AutomationNotification = typeof automationNotifications.$inferSelect
 export type Message = typeof messages.$inferSelect
 export type NewMessage = typeof messages.$inferInsert
 export type ConversationRead = typeof conversationReads.$inferSelect

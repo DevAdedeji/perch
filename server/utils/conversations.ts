@@ -139,11 +139,25 @@ export async function ingestVisitorMessage(input: IncomingVisitorMessage) {
     }).returning()
     return { visitor: visitor!, conversation, message: message!, isNew }
   })
-  const { visitor, conversation, message, isNew } = result
-
+  const { visitor, message, isNew } = result
+  let conversation = result.conversation
+  let automationTagsChanged = false
+  try {
+    const automated = await runEntryAutomations(conversation, visitor)
+    conversation = automated.conversation
+    automationTagsChanged = automated.tagsChanged
+  } catch (error) {
+    console.error('[automation] entry pass failed', { conversationId: conversation.id, error })
+  }
   // broadcast
   const wsChannel = channels.workspace(input.workspaceId)
   const convChannel = channels.conversation(conversation.id)
+  if (automationTagsChanged && !isNew) {
+    publishFiltered(wsChannel, {
+      type: 'conversation.refresh',
+      payload: { conversation_id: conversation.id }
+    }, inboxScope(conversation.assignedAgentId))
+  }
   if (isNew) {
     publishFiltered(
       wsChannel,

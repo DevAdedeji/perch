@@ -32,12 +32,13 @@ visitor context panel:
 
 **For the business (the Control Room)**
 - Email/password or Google auth with sealed-cookie sessions; a user can belong to multiple workspaces.
-- Real-time inbox — new conversations and messages appear instantly, filterable by `unassigned` / `open` / `resolved`.
+- Real-time inbox with priority, snoozing, advanced filters, tags, and personal saved views.
 - **Claim / assign / reassign** conversations, with an atomic first-claim-wins race guard.
 - Per-agent unread tracking, internal notes (never leaked to the visitor), resolve/reopen.
 - Live team presence (online / away / offline) and role-scoped visibility (agents see unassigned + their own; admins see everything).
 - Settings: workspace name, copyable embed snippet, pre-chat toggle, and team management (invite / remove / change role).
 - In-dashboard toast + notification sound on new messages.
+- Template-driven automations for round-robin and page routing, verified VIP tagging, inactivity reminders, and safe automatic closing.
 
 **For the visitor (the widget)**
 - One `<script>` tag, no build step, isolated in an iframe so it can't collide with the host site.

@@ -289,6 +289,10 @@ const AUDIT_LABELS: Record<string, string> = {
   'trigger.created': 'created a proactive trigger',
   'trigger.updated': 'updated a proactive trigger',
   'trigger.deleted': 'deleted a proactive trigger',
+  'automation.created': 'created an automation',
+  'automation.updated': 'updated an automation',
+  'automation.deleted': 'deleted an automation',
+  'automation.reordered': 'reordered automations',
   'webhook.created': 'added a webhook endpoint',
   'webhook.updated': 'updated a webhook endpoint',
   'webhook.deleted': 'deleted a webhook endpoint'
@@ -309,6 +313,10 @@ function auditDetail(row: AuditRow) {
     case 'trigger.created':
     case 'trigger.updated':
     case 'trigger.deleted': return (d.name as string | undefined) ?? ''
+    case 'automation.created':
+    case 'automation.updated':
+    case 'automation.deleted': return (d.name as string | undefined) ?? ''
+    case 'automation.reordered': return (d.direction as string | undefined) ?? ''
     case 'webhook.created':
     case 'webhook.updated':
     case 'webhook.deleted': return (d.url as string | undefined) ?? ''

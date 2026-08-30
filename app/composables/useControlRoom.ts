@@ -409,6 +409,9 @@ export function useControlRoom() {
         if (activeId.value === ev.payload.conversation_id) deselect()
         loadCounts()
         break
+      case 'conversation.refresh':
+        loadConversations()
+        break
       case 'conversation.updated': {
         const p = ev.payload
         const c = conversations.value.find(x => x.id === p.id)

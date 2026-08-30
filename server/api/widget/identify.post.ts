@@ -1,4 +1,5 @@
-import { eq, visitors } from '@perch/db'
+import { and, conversations, desc, eq, ne, visitors } from '@perch/db'
+import { channels } from '@perch/shared'
 import { z } from 'zod'
 
 const schema = z.object({
@@ -67,6 +68,30 @@ export default defineEventHandler(async (event) => {
       email: updated.email,
       verified: updated.identityVerified
     })
+    const conversation = await db.query.conversations.findFirst({
+      where: and(
+        eq(conversations.workspaceId, workspace.id),
+        eq(conversations.visitorRef, updated.id),
+        ne(conversations.status, 'resolved')
+      ),
+      orderBy: desc(conversations.lastMessageAt)
+    })
+    if (conversation) {
+      try {
+        const automated = await runEntryAutomations(conversation, updated)
+        if (automated.conversation.assignedAgentId !== conversation.assignedAgentId) {
+          publishConversationUpdate(automated.conversation)
+        }
+        if (automated.tagsChanged) {
+          publishFiltered(channels.workspace(workspace.id), {
+            type: 'conversation.refresh',
+            payload: { conversation_id: conversation.id }
+          }, inboxScope(automated.conversation.assignedAgentId))
+        }
+      } catch (error) {
+        console.error('[automation] identify pass failed', { conversationId: conversation.id, error })
+      }
+    }
   }
 
   return { ok: true, verified }
