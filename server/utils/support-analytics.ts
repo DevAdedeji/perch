@@ -63,6 +63,26 @@ export function isMissedSupportConversation(
     && firstVisitorAt <= supportAnalyticsMissedCutoff(now)
 }
 
+export interface SupportOutcomeMessage {
+  senderId: string | null
+  senderType: 'agent' | 'visitor' | 'system'
+  isInternalNote: boolean
+  createdAt: Date
+}
+
+export function supportOutcomeOwner(
+  messages: SupportOutcomeMessage[],
+  occurredAt: Date
+): string | null {
+  let owner: SupportOutcomeMessage | null = null
+  for (const message of messages) {
+    if (message.senderType !== 'agent' || message.isInternalNote || !message.senderId) continue
+    if (message.createdAt > occurredAt) continue
+    if (!owner || message.createdAt > owner.createdAt) owner = message
+  }
+  return owner?.senderId ?? null
+}
+
 export function toFiniteNumber(value: unknown): number {
   const number = Number(value)
   return Number.isFinite(number) ? number : 0

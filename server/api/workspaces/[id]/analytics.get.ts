@@ -209,7 +209,30 @@ export default defineEventHandler(async (event) => {
       limit 6
     `),
     db.execute<MemberRow>(sql`
-      with first_visitors as (
+      with open_workload as (
+        select c.assigned_agent_id as member_id, count(*) as total
+        from ${conversations} c
+        where c.workspace_id = ${workspaceId}::uuid
+          and c.status = 'open'
+          and c.assigned_agent_id is not null
+        group by c.assigned_agent_id
+      ),
+      agent_activity as (
+        select
+          m.sender_id as member_id,
+          count(distinct m.conversation_id) as handled_conversations,
+          count(*) as replies
+        from ${messages} m
+        inner join ${conversations} c on c.id = m.conversation_id
+        where c.workspace_id = ${workspaceId}::uuid
+          and m.sender_type = 'agent'
+          and m.sender_id is not null
+          and m.is_internal_note = false
+          and m.created_at >= (${start}::date::timestamp at time zone ${timezone})
+          and m.created_at < (${end}::date::timestamp at time zone ${timezone})
+        group by m.sender_id
+      ),
+      first_visitors as (
         select m.conversation_id, min(m.created_at) as created_at
         from ${messages} m
         inner join ${conversations} c on c.id = m.conversation_id
@@ -229,73 +252,82 @@ export default defineEventHandler(async (event) => {
         inner join first_visitors fv on fv.conversation_id = m.conversation_id
         where m.sender_type = 'agent'
           and m.is_internal_note = false
+          and m.sender_id is not null
           and m.created_at >= fv.created_at
         order by m.conversation_id, m.created_at asc
+      ),
+      first_response_metrics as (
+        select
+          fa.sender_id as member_id,
+          avg(extract(epoch from (fa.created_at - fv.created_at))) as average_first_response_seconds
+        from first_agents fa
+        inner join first_visitors fv on fv.conversation_id = fa.conversation_id
+        group by fa.sender_id
+      ),
+      resolution_owners as (
+        select distinct on (c.id)
+          c.id as conversation_id,
+          m.sender_id as member_id
+        from ${conversations} c
+        inner join ${messages} m on m.conversation_id = c.id
+        where c.workspace_id = ${workspaceId}::uuid
+          and c.resolved_at >= (${start}::date::timestamp at time zone ${timezone})
+          and c.resolved_at < (${end}::date::timestamp at time zone ${timezone})
+          and m.sender_type = 'agent'
+          and m.sender_id is not null
+          and m.is_internal_note = false
+          and m.created_at <= c.resolved_at
+        order by c.id, m.created_at desc, m.id desc
+      ),
+      resolution_metrics as (
+        select member_id, count(*) as resolved_conversations
+        from resolution_owners
+        group by member_id
+      ),
+      csat_owners as (
+        select distinct on (c.id)
+          c.id as conversation_id,
+          m.sender_id as member_id,
+          c.csat_rating
+        from ${conversations} c
+        inner join ${messages} m on m.conversation_id = c.id
+        where c.workspace_id = ${workspaceId}::uuid
+          and c.csat_at >= (${start}::date::timestamp at time zone ${timezone})
+          and c.csat_at < (${end}::date::timestamp at time zone ${timezone})
+          and m.sender_type = 'agent'
+          and m.sender_id is not null
+          and m.is_internal_note = false
+          and m.created_at <= c.csat_at
+        order by c.id, m.created_at desc, m.id desc
+      ),
+      csat_metrics as (
+        select
+          member_id,
+          count(*) filter (where csat_rating = 'good') as csat_good,
+          count(*) filter (where csat_rating = 'bad') as csat_bad
+        from csat_owners
+        group by member_id
       )
       select
         wm.id,
         u.name,
         wm.role,
-        (
-          select count(*)
-          from ${conversations} c
-          where c.assigned_agent_id = wm.id and c.status = 'open'
-        ) as open_conversations,
-        (
-          select count(distinct m.conversation_id)
-          from ${messages} m
-          inner join ${conversations} c on c.id = m.conversation_id
-          where m.sender_id = wm.id
-            and c.workspace_id = ${workspaceId}::uuid
-            and m.sender_type = 'agent'
-            and m.is_internal_note = false
-            and m.created_at >= (${start}::date::timestamp at time zone ${timezone})
-            and m.created_at < (${end}::date::timestamp at time zone ${timezone})
-        ) as handled_conversations,
-        (
-          select count(*)
-          from ${messages} m
-          inner join ${conversations} c on c.id = m.conversation_id
-          where m.sender_id = wm.id
-            and c.workspace_id = ${workspaceId}::uuid
-            and m.sender_type = 'agent'
-            and m.is_internal_note = false
-            and m.created_at >= (${start}::date::timestamp at time zone ${timezone})
-            and m.created_at < (${end}::date::timestamp at time zone ${timezone})
-        ) as replies,
-        (
-          select count(*)
-          from ${conversations} c
-          where c.assigned_agent_id = wm.id
-            and c.resolved_at >= (${start}::date::timestamp at time zone ${timezone})
-            and c.resolved_at < (${end}::date::timestamp at time zone ${timezone})
-        ) as resolved_conversations,
-        (
-          select avg(extract(epoch from (fa.created_at - fv.created_at)))
-          from first_agents fa
-          inner join first_visitors fv on fv.conversation_id = fa.conversation_id
-          where fa.sender_id = wm.id
-        ) as average_first_response_seconds,
-        (
-          select count(*)
-          from ${conversations} c
-          where c.assigned_agent_id = wm.id
-            and c.csat_rating = 'good'
-            and c.csat_at >= (${start}::date::timestamp at time zone ${timezone})
-            and c.csat_at < (${end}::date::timestamp at time zone ${timezone})
-        ) as csat_good,
-        (
-          select count(*)
-          from ${conversations} c
-          where c.assigned_agent_id = wm.id
-            and c.csat_rating = 'bad'
-            and c.csat_at >= (${start}::date::timestamp at time zone ${timezone})
-            and c.csat_at < (${end}::date::timestamp at time zone ${timezone})
-        ) as csat_bad
+        coalesce(ow.total, 0) as open_conversations,
+        coalesce(aa.handled_conversations, 0) as handled_conversations,
+        coalesce(aa.replies, 0) as replies,
+        coalesce(rm.resolved_conversations, 0) as resolved_conversations,
+        frm.average_first_response_seconds,
+        coalesce(cm.csat_good, 0) as csat_good,
+        coalesce(cm.csat_bad, 0) as csat_bad
       from ${workspaceMembers} wm
       inner join ${users} u on u.id = wm.user_id
+      left join open_workload ow on ow.member_id = wm.id
+      left join agent_activity aa on aa.member_id = wm.id
+      left join first_response_metrics frm on frm.member_id = wm.id
+      left join resolution_metrics rm on rm.member_id = wm.id
+      left join csat_metrics cm on cm.member_id = wm.id
       where wm.workspace_id = ${workspaceId}::uuid
-      order by handled_conversations desc, u.name asc
+      order by coalesce(aa.handled_conversations, 0) desc, u.name asc
     `)
   ])
 

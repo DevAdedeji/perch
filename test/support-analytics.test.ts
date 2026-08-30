@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
 import {
   isMissedSupportConversation,
   resolveSupportAnalyticsWindow,
+  supportOutcomeOwner,
   supportAnalyticsMissedCutoff,
   toFiniteNumber,
   toNullableFiniteNumber
@@ -49,6 +51,66 @@ describe('missed conversation threshold', () => {
     expect(isMissedSupportConversation(firstVisitorAt, new Date('2026-08-30T11:05:00.000Z'), false, now)).toBe(false)
     expect(isMissedSupportConversation(firstVisitorAt, null, true, now)).toBe(false)
     expect(isMissedSupportConversation(null, null, false, now)).toBe(false)
+  })
+})
+
+describe('historical team outcome attribution', () => {
+  const resolvedAt = new Date('2026-08-30T12:00:00.000Z')
+  const messages = [
+    {
+      senderId: 'agent-a',
+      senderType: 'agent' as const,
+      isInternalNote: false,
+      createdAt: new Date('2026-08-30T11:00:00.000Z')
+    },
+    {
+      senderId: 'agent-b',
+      senderType: 'agent' as const,
+      isInternalNote: false,
+      createdAt: new Date('2026-08-30T11:55:00.000Z')
+    },
+    {
+      senderId: 'agent-c',
+      senderType: 'agent' as const,
+      isInternalNote: false,
+      createdAt: new Date('2026-08-30T12:05:00.000Z')
+    }
+  ]
+
+  it('attributes an outcome to the last public agent reply before it occurred', () => {
+    expect(supportOutcomeOwner(messages, resolvedAt)).toBe('agent-b')
+  })
+
+  it('does not depend on the conversation current assignee', () => {
+    const ownerBeforeReassignment = supportOutcomeOwner(messages, resolvedAt)
+    const currentAssigneeAfterReassignment = 'agent-c'
+    expect(ownerBeforeReassignment).toBe('agent-b')
+    expect(ownerBeforeReassignment).not.toBe(currentAssigneeAfterReassignment)
+  })
+
+  it('ignores internal notes and visitor messages', () => {
+    expect(supportOutcomeOwner([
+      { ...messages[0]!, isInternalNote: true },
+      { ...messages[1]!, senderType: 'visitor' }
+    ], resolvedAt)).toBeNull()
+  })
+})
+
+describe('team analytics query shape', () => {
+  const source = readFileSync(new URL('../server/api/workspaces/[id]/analytics.get.ts', import.meta.url), 'utf8')
+  const teamQuery = source.slice(source.indexOf('db.execute<MemberRow>'))
+
+  it('aggregates member metrics once instead of running per-member count subqueries', () => {
+    expect(teamQuery).toContain('agent_activity as')
+    expect(teamQuery).toContain('resolution_metrics as')
+    expect(teamQuery).toContain('csat_metrics as')
+    expect(teamQuery).not.toMatch(/\(\s*select count\(/)
+  })
+
+  it('derives historical outcomes from immutable message timing, not current assignment', () => {
+    expect(teamQuery).toContain('m.created_at <= c.resolved_at')
+    expect(teamQuery).toContain('m.created_at <= c.csat_at')
+    expect(teamQuery).not.toContain('c.assigned_agent_id = wm.id')
   })
 })
 
