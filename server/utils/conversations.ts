@@ -1,7 +1,7 @@
 import { and, conversations, desc, eq, messages, ne, sql, triggerFires, triggers, visitors } from '@perch/db'
 import type { Conversation, Message } from '@perch/db'
 import { channels } from '@perch/shared'
-import type { ConversationDTO, MessageDTO } from '@perch/shared'
+import type { ConversationDTO, MessageDTO, VisitorConversationDTO, VisitorMessageDTO } from '@perch/shared'
 
 /* serialization (rows → §6 wire DTOs) */
 
@@ -32,6 +32,37 @@ export function serializeMessage(m: Message): MessageDTO {
     attachment_type: m.attachmentType,
     is_internal_note: m.isInternalNote,
     created_at: m.createdAt.toISOString()
+  }
+}
+
+export function serializeVisitorMessage(m: Message): VisitorMessageDTO {
+  return {
+    id: m.id,
+    conversation_id: m.conversationId,
+    sender_type: m.senderType,
+    content: m.content,
+    attachment_url: m.attachmentUrl,
+    attachment_type: m.attachmentType,
+    created_at: m.createdAt.toISOString()
+  }
+}
+
+export function serializeVisitorConversation(c: Conversation): VisitorConversationDTO {
+  return { id: c.id, status: c.status }
+}
+
+function publishConversationMessage(channel: string, message: Message, assignedAgentId: string | null) {
+  publishConversationEvent(
+    channel,
+    { type: 'message.new', payload: serializeMessage(message) },
+    assignedAgentId,
+    { agentsOnly: true }
+  )
+  if (!message.isInternalNote) {
+    publishFiltered(channel, {
+      type: 'visitor.message',
+      payload: serializeVisitorMessage(message)
+    }, context => context.role === 'visitor')
   }
 }
 
@@ -170,7 +201,7 @@ export async function ingestVisitorMessage(input: IncomingVisitorMessage) {
   const msgEvent = { type: 'message.new' as const, payload: serializeMessage(message) }
   // scope the inbox copy so agents don't receive chats assigned to someone else
   publishFiltered(wsChannel, msgEvent, inboxScope(conversation.assignedAgentId))
-  publishConversationEvent(convChannel, msgEvent, conversation.assignedAgentId)
+  publishConversationMessage(convChannel, message, conversation.assignedAgentId)
 
   // outbound webhooks (fire-and-forget, after the committed writes)
   if (isNew) {
@@ -234,11 +265,7 @@ export async function addAgentMessage(input: AgentMessageInput) {
   const event = { type: 'message.new' as const, payload: serializeMessage(message) }
   // inbox copy scoped to the assigned agent + admins
   publishFiltered(channels.workspace(input.workspaceId), event, inboxScope(conv.assignedAgentId))
-  // on the shared conversation channel, keep internal notes away from the visitor (§4)
-  publishConversationEvent(
-    channels.conversation(input.conversationId), event, conv.assignedAgentId,
-    { agentsOnly: message.isInternalNote }
-  )
+  publishConversationMessage(channels.conversation(input.conversationId), message, conv.assignedAgentId)
 
   // internal notes never leave the building — not even as webhooks
   if (!message.isInternalNote) {
@@ -262,7 +289,7 @@ interface StartConversationInput {
  * An agent reaches out first (from the live visitor roster). Reuses the
  * visitor's active thread when one exists (claiming it for the sender if
  * unassigned); otherwise creates an `open` conversation pre-assigned to the
- * sender. The visitor's live widget is told via `conversation.started`.
+ * sender. The visitor's live widget is told via a visitor-safe start event.
  */
 export async function startAgentConversation(input: StartConversationInput) {
   const db = useDb()
@@ -328,13 +355,16 @@ export async function startAgentConversation(input: StartConversationInput) {
     publishConversationUpdate(conversation, { previousAssignedAgentId })
   }
   publishFiltered(channels.workspace(input.workspaceId), msgEvent, inboxScope(conversation.assignedAgentId))
-  publishConversationEvent(channels.conversation(conversation.id), msgEvent, conversation.assignedAgentId)
+  publishConversationMessage(channels.conversation(conversation.id), message, conversation.assignedAgentId)
   dispatchWebhooks(input.workspaceId, 'message.created', { message: serializeMessage(message) })
 
   // tell the visitor's live widget to adopt the thread (no-op if they left)
   sendToVisitor(input.workspaceId, input.visitorRef, {
-    type: 'conversation.started',
-    payload: { conversation: serializeConversation(conversation), message: serializeMessage(message) }
+    type: 'visitor.conversation.started',
+    payload: {
+      conversation: serializeVisitorConversation(conversation),
+      message: serializeVisitorMessage(message)
+    }
   })
 
   return { conversation, message }

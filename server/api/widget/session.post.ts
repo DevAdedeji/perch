@@ -1,5 +1,5 @@
 import { and, articles, conversationReads, conversations, desc, eq, messages, sql, visitors, workspaces } from '@perch/db'
-import type { MessageDTO } from '@perch/shared'
+import type { VisitorMessageDTO } from '@perch/shared'
 import { z } from 'zod'
 
 const schema = z.object({
@@ -60,7 +60,7 @@ export default defineEventHandler(async (event) => {
     ]
   })
 
-  let thread: MessageDTO[] = []
+  let thread: VisitorMessageDTO[] = []
   let agentName: string | null = null
   let agentLastReadAt: string | null = null
   if (conversation) {
@@ -77,7 +77,7 @@ export default defineEventHandler(async (event) => {
         .from(conversationReads)
         .where(eq(conversationReads.conversationId, conversation.id))
     ])
-    thread = rows.reverse().map(serializeMessage)
+    thread = rows.reverse().map(serializeVisitorMessage)
     agentName = name
     agentLastReadAt = read?.last ? new Date(read.last).toISOString() : null
   }

@@ -1,5 +1,5 @@
 import { channels } from '@perch/shared'
-import type { MessageDTO, ServerEvent } from '@perch/shared'
+import type { ServerEvent, VisitorMessageDTO } from '@perch/shared'
 
 interface WidgetWorkspace {
   name: string
@@ -28,7 +28,7 @@ interface SessionResponse {
   conversation_status: 'open' | 'unassigned' | 'resolved' | null
   csat_rating: 'good' | 'bad' | null
   agent_last_read_at: string | null
-  messages: MessageDTO[]
+  messages: VisitorMessageDTO[]
   visitor_id: string
   visitor_session: string
   ws_ticket: string
@@ -52,7 +52,7 @@ export function useWidget(siteId: string, embedTicket: string) {
   const conversationStatus = ref<'open' | 'unassigned' | 'resolved' | null>(null)
   const csatRating = ref<'good' | 'bad' | null>(null)
   const conversationId = ref<string | null>(null)
-  const messages = ref<Array<MessageDTO & { pending?: boolean, failed?: boolean }>>([])
+  const messages = ref<Array<VisitorMessageDTO & { pending?: boolean, failed?: boolean }>>([])
   const status = ref<'loading' | 'ready' | 'error'>('loading')
   const agentTyping = ref(false)
   const visitorName = ref<string | null>(null)
@@ -216,8 +216,7 @@ export function useWidget(siteId: string, embedTicket: string) {
 
   function apply(ev: ServerEvent) {
     switch (ev.type) {
-      case 'message.new':
-        // internal notes are filtered server-side; append anything not already present
+      case 'visitor.message':
         if (ev.payload.conversation_id === conversationId.value && !messages.value.some(m => m.id === ev.payload.id)) {
           // WS echo of our own optimistic send — swap the temp bubble in place
           const tempIdx = ev.payload.sender_type === 'visitor'
@@ -260,7 +259,7 @@ export function useWidget(siteId: string, embedTicket: string) {
           agentReadAt.value = ev.payload.last_read_at
         }
         break
-      case 'conversation.started':
+      case 'visitor.conversation.started':
         // an agent reached out first (live roster) — adopt the new thread
         if (ev.payload.conversation.id !== conversationId.value) {
           conversationId.value = ev.payload.conversation.id
@@ -281,11 +280,9 @@ export function useWidget(siteId: string, embedTicket: string) {
             id: localId,
             conversation_id: conversationId.value ?? 'pending',
             sender_type: 'agent',
-            sender_id: null,
             content: ev.payload.message,
             attachment_url: null,
             attachment_type: null,
-            is_internal_note: false,
             created_at: new Date().toISOString()
           })
           pendingTriggerId = ev.payload.trigger_id
@@ -383,11 +380,9 @@ export function useWidget(siteId: string, embedTicket: string) {
       id: tempId,
       conversation_id: conversationId.value ?? 'pending',
       sender_type: 'visitor',
-      sender_id: null,
       content,
       attachment_url: attachment?.url ?? null,
       attachment_type: attachment?.type ?? null,
-      is_internal_note: false,
       created_at: new Date().toISOString(),
       pending: true
     })
@@ -413,7 +408,7 @@ export function useWidget(siteId: string, embedTicket: string) {
       await queuePost(async () => {
         // a pending trigger threads its message into the newly-created convo
         const triggerId = !conversationId.value && pendingTriggerId ? pendingTriggerId : undefined
-        const res = await $fetch<{ conversation_id: string, message: MessageDTO }>('/api/widget/messages', {
+        const res = await $fetch<{ conversation_id: string, message: VisitorMessageDTO }>('/api/widget/messages', {
           method: 'POST',
           body: {
             site_id: siteId,

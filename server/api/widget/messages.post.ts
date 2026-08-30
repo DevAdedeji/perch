@@ -43,5 +43,5 @@ export default defineEventHandler(async (event) => {
   })
 
   setResponseStatus(event, 201)
-  return { conversation_id: conversation.id, message: serializeMessage(message) }
+  return { conversation_id: conversation.id, message: serializeVisitorMessage(message) }
 })

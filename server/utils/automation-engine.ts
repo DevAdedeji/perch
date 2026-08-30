@@ -33,9 +33,31 @@ export function reminderExecutionKey(ruleId: string, conversationId: string, mem
   return `reminder:${ruleId}:${conversationId}:${memberId}:${lastMessageAt.toISOString()}`
 }
 
+export function isInactivityCandidate(
+  conversation: Pick<Conversation, 'status' | 'assignedAgentId' | 'lastMessageAt' | 'snoozedUntil'>,
+  cutoff: Date,
+  now: Date
+) {
+  return conversation.status === 'open'
+    && conversation.assignedAgentId !== null
+    && conversation.lastMessageAt <= cutoff
+    && (!conversation.snoozedUntil || conversation.snoozedUntil <= now)
+}
+
 export function roundRobinIndex(cursor: number, memberCount: number) {
   if (!Number.isInteger(cursor) || cursor < 1 || !Number.isInteger(memberCount) || memberCount < 1) return null
   return (cursor - 1) % memberCount
+}
+
+type ConversationLoader = (id: string, workspaceId: string) => Promise<Conversation | null | undefined>
+
+export async function resolveEntryConversation(
+  fallback: Conversation,
+  load: ConversationLoader = async (id, workspaceId) => useDb().query.conversations.findFirst({
+    where: and(eq(conversations.id, id), eq(conversations.workspaceId, workspaceId))
+  })
+) {
+  return await load(fallback.id, fallback.workspaceId) ?? fallback
 }
 
 async function claimExecution(
@@ -153,10 +175,11 @@ export async function runEntryAutomations(conversation: Conversation, visitor: V
       console.error('[automation] entry rule failed', { ruleId: rule.id, conversationId: conversation.id, error })
     }
   }
+  current = await resolveEntryConversation(current)
   return { conversation: current, tagsChanged }
 }
 
-async function runReminder(rule: AutomationRule, candidate: Conversation) {
+async function runReminder(rule: AutomationRule, candidate: Conversation, now: Date) {
   const result = await useDb().transaction(async (tx) => {
     const [current] = await tx.update(conversations).set({
       updatedAt: sql`${conversations.updatedAt}`
@@ -165,6 +188,7 @@ async function runReminder(rule: AutomationRule, candidate: Conversation) {
       eq(conversations.workspaceId, rule.workspaceId),
       eq(conversations.status, 'open'),
       sql`${conversations.assignedAgentId} is not null`,
+      sql`(${conversations.snoozedUntil} is null or ${conversations.snoozedUntil} <= ${now.toISOString()}::timestamptz)`,
       sql`${conversations.lastMessageAt} = ${candidate.lastMessageAt.toISOString()}::timestamptz`
     )).returning()
     if (!current?.assignedAgentId) return null
@@ -195,7 +219,7 @@ async function runReminder(rule: AutomationRule, candidate: Conversation) {
   }, context => context.role === 'agent' && context.memberId === result.memberId)
 }
 
-async function runAutoClose(rule: AutomationRule, candidate: Conversation, cutoff: Date) {
+async function runAutoClose(rule: AutomationRule, candidate: Conversation, cutoff: Date, now: Date) {
   const key = inactivityExecutionKey(rule.id, candidate.id, candidate.lastMessageAt)
   const closed = await useDb().transaction(async (tx) => {
     const execution = await claimExecution(tx, rule, candidate.id, key)
@@ -210,6 +234,7 @@ async function runAutoClose(rule: AutomationRule, candidate: Conversation, cutof
       eq(conversations.workspaceId, candidate.workspaceId),
       eq(conversations.status, 'open'),
       sql`${conversations.assignedAgentId} is not null`,
+      sql`(${conversations.snoozedUntil} is null or ${conversations.snoozedUntil} <= ${now.toISOString()}::timestamptz)`,
       sql`${conversations.lastMessageAt} <= ${cutoff.toISOString()}::timestamptz`
     )).returning()
     if (!updated) await tx.delete(automationExecutions).where(eq(automationExecutions.id, execution.id))
@@ -244,6 +269,7 @@ export async function runAutomationSweep(now = new Date()) {
         eq(conversations.workspaceId, rule.workspaceId),
         eq(conversations.status, 'open'),
         sql`${conversations.assignedAgentId} is not null`,
+        sql`(${conversations.snoozedUntil} is null or ${conversations.snoozedUntil} <= ${now.toISOString()}::timestamptz)`,
         rule.type === 'inactivity_reminder' ? notExists(previousReminder) : undefined,
         sql`${conversations.lastMessageAt} <= ${cutoff.toISOString()}::timestamptz`
       ),
@@ -252,8 +278,9 @@ export async function runAutomationSweep(now = new Date()) {
     })
     for (const conversation of candidates) {
       try {
-        if (rule.type === 'inactivity_reminder') await runReminder(rule, conversation)
-        else await runAutoClose(rule, conversation, cutoff)
+        if (!isInactivityCandidate(conversation, cutoff, now)) continue
+        if (rule.type === 'inactivity_reminder') await runReminder(rule, conversation, now)
+        else await runAutoClose(rule, conversation, cutoff, now)
       } catch (error) {
         console.error('[automation] inactivity rule failed', { ruleId: rule.id, conversationId: conversation.id, error })
       }

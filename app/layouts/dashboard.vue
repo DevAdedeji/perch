@@ -15,6 +15,7 @@ const activeConversationId = useState<string | null>('inbox:activeId', () => nul
 // a mention toast can ask the inbox to open a specific conversation
 const pendingSelect = useState<string | null>('inbox:pendingSelect', () => null)
 const shownAutomationNotifications = new Set<string>()
+const automationNotifications = ref<AutomationNotification[]>([])
 
 interface AutomationNotification {
   id: string
@@ -123,7 +124,24 @@ function onEvent(ev: ServerEvent) {
   play()
 }
 
+async function openAutomationReminder(notification: AutomationNotification) {
+  if (wid.value) {
+    try {
+      await $fetch(`/api/workspaces/${wid.value}/automation-notifications/${notification.id}/read`, { method: 'POST' })
+      automationNotifications.value = automationNotifications.value.filter(item => item.id !== notification.id)
+      shownAutomationNotifications.delete(notification.id)
+    } catch {
+      // Keep the reminder visible until acknowledgement succeeds.
+    }
+  }
+  pendingSelect.value = notification.conversation_id
+  navigateTo('/dashboard')
+}
+
 function showAutomationReminder(notification: AutomationNotification) {
+  if (!automationNotifications.value.some(item => item.id === notification.id)) {
+    automationNotifications.value.unshift(notification)
+  }
   if (shownAutomationNotifications.has(notification.id)) return
   shownAutomationNotifications.add(notification.id)
   toast.add({
@@ -133,13 +151,7 @@ function showAutomationReminder(notification: AutomationNotification) {
     color: 'warning',
     actions: [{
       label: 'View',
-      onClick: async () => {
-        if (wid.value) {
-          await $fetch(`/api/workspaces/${wid.value}/automation-notifications/${notification.id}/read`, { method: 'POST' }).catch(() => {})
-        }
-        pendingSelect.value = notification.conversation_id
-        navigateTo('/dashboard')
-      }
+      onClick: () => openAutomationReminder(notification)
     }]
   })
   play()
@@ -149,7 +161,8 @@ async function loadAutomationNotifications() {
   if (!wid.value) return
   try {
     const notifications = await $fetch<AutomationNotification[]>(`/api/workspaces/${wid.value}/automation-notifications`)
-    notifications.reverse().forEach(showAutomationReminder)
+    automationNotifications.value = notifications
+    notifications.slice().reverse().forEach(showAutomationReminder)
   } catch {
     // Realtime delivery still works; the next poll retries persisted reminders.
   }
@@ -174,10 +187,11 @@ onBeforeUnmount(() => {
 })
 watch(wid, (next, prev) => {
   if (prev) rt.unsubscribe(channels.workspace(prev))
+  shownAutomationNotifications.clear()
+  automationNotifications.value = []
   if (next) {
     rt.subscribe(channels.workspace(next))
     loadTeam()
-    shownAutomationNotifications.clear()
     loadAutomationNotifications()
   }
 })
@@ -216,6 +230,40 @@ watch(wid, (next, prev) => {
             />
             {{ rt.status.value === 'open' ? 'Live' : 'connecting…' }}
           </span>
+
+          <UPopover v-if="automationNotifications.length">
+            <UButton
+              color="warning"
+              variant="soft"
+              size="xs"
+              icon="i-lucide-clock-alert"
+              :label="String(automationNotifications.length)"
+              aria-label="Open conversation reminders"
+            />
+            <template #content>
+              <div class="w-72 max-w-[90vw] p-2">
+                <p class="px-2 py-1 text-xs font-semibold text-highlighted">
+                  Conversations needing attention
+                </p>
+                <button
+                  v-for="notification in automationNotifications"
+                  :key="notification.id"
+                  type="button"
+                  class="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left hover:bg-elevated focus-visible:outline-2 focus-visible:outline-primary"
+                  @click="openAutomationReminder(notification)"
+                >
+                  <UIcon
+                    name="i-lucide-message-circle-warning"
+                    class="size-4 shrink-0 text-warning"
+                  />
+                  <span class="min-w-0">
+                    <span class="block text-sm font-medium text-highlighted">Conversation needs attention</span>
+                    <span class="block text-xs text-muted">Open the conversation to follow up.</span>
+                  </span>
+                </button>
+              </div>
+            </template>
+          </UPopover>
 
           <UColorModeButton />
         </div>

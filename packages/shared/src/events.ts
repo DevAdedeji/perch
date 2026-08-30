@@ -8,7 +8,7 @@
  */
 
 import type { ConversationPriority, ConversationStatus, Presence, SettablePresence } from './enums'
-import type { ConversationDTO, LiveVisitorDTO, MessageDTO } from './models'
+import type { ConversationDTO, LiveVisitorDTO, MessageDTO, VisitorConversationDTO, VisitorMessageDTO } from './models'
 
 /* §6.1 Channels */
 
@@ -177,12 +177,13 @@ export interface TriggerFirePayload {
 
 /** An agent started a conversation with this visitor (roster → widget). */
 export interface ConversationStartedPayload {
-  conversation: ConversationDTO
-  message: MessageDTO
+  conversation: VisitorConversationDTO
+  message: VisitorMessageDTO
 }
 
 /** Discriminated union of everything the server may broadcast. */
 export type ServerEvent = | { type: 'message.new', payload: MessageDTO }
+  | { type: 'visitor.message', payload: VisitorMessageDTO }
   | { type: 'conversation.new', payload: ConversationDTO }
   | { type: 'conversation.updated', payload: ConversationUpdatedPayload }
   | { type: 'conversation.removed', payload: ConversationRemovedPayload }
@@ -201,7 +202,7 @@ export type ServerEvent = | { type: 'message.new', payload: MessageDTO }
   | { type: 'visitor.offline', payload: VisitorOfflinePayload }
   | { type: 'visitor.page', payload: VisitorPageChangedPayload }
   | { type: 'trigger.fire', payload: TriggerFirePayload }
-  | { type: 'conversation.started', payload: ConversationStartedPayload }
+  | { type: 'visitor.conversation.started', payload: ConversationStartedPayload }
 
 export type ServerEventType = ServerEvent['type']
 

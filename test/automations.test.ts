@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { inactivityExecutionKey, reminderExecutionKey, roundRobinIndex } from '../server/utils/automation-engine'
+import { inactivityExecutionKey, isInactivityCandidate, reminderExecutionKey, resolveEntryConversation, roundRobinIndex } from '../server/utils/automation-engine'
 import { matchesPageRule, matchesVipRule, parseAutomationConfig } from '../server/utils/automation-rules'
+import { serializeVisitorConversation, serializeVisitorMessage } from '../server/utils/conversations'
 
 describe('automation rule validation', () => {
   it('accepts each launch template with safe ranges', () => {
@@ -75,5 +76,46 @@ describe('automation idempotency helpers', () => {
     const firstOwner = reminderExecutionKey('rule', 'conversation', 'agent-a', activity)
     expect(reminderExecutionKey('rule', 'conversation', 'agent-a', activity)).toBe(firstOwner)
     expect(reminderExecutionKey('rule', 'conversation', 'agent-b', activity)).not.toBe(firstOwner)
+  })
+
+  it('reloads the persisted assignee after a concurrent execution claim is lost', async () => {
+    const stale = {
+      id: 'conversation', workspaceId: 'workspace', assignedAgentId: null, status: 'unassigned'
+    } as Parameters<typeof resolveEntryConversation>[0]
+    const assigned = { ...stale, assignedAgentId: 'agent-a', status: 'open' as const }
+    const current = await resolveEntryConversation(stale, async () => assigned)
+    expect(current).toBe(assigned)
+    expect(current.assignedAgentId).toBe('agent-a')
+  })
+
+  it('keeps actively snoozed conversations out of inactivity actions', () => {
+    const now = new Date('2026-08-30T12:00:00Z')
+    const cutoff = new Date('2026-08-30T11:00:00Z')
+    const conversation = {
+      status: 'open' as const,
+      assignedAgentId: 'agent-a',
+      lastMessageAt: new Date('2026-08-30T10:00:00Z'),
+      snoozedUntil: new Date('2026-08-30T13:00:00Z')
+    }
+    expect(isInactivityCandidate(conversation, cutoff, now)).toBe(false)
+    expect(isInactivityCandidate({ ...conversation, snoozedUntil: now }, cutoff, now)).toBe(true)
+  })
+})
+
+describe('visitor-safe serialization', () => {
+  it('does not expose internal conversation or member fields', () => {
+    const conversation = serializeVisitorConversation({
+      id: 'conversation', status: 'open', workspaceId: 'workspace', visitorRef: 'visitor',
+      assignedAgentId: 'member', priority: 'urgent', snoozedUntil: new Date(),
+      lastMessageAt: new Date(), createdAt: new Date(), updatedAt: new Date(), resolvedAt: null,
+      csatRating: null, csatComment: null, csatAt: null
+    })
+    const message = serializeVisitorMessage({
+      id: 'message', conversationId: 'conversation', senderType: 'agent', senderId: 'member',
+      content: 'Hello', attachmentUrl: null, attachmentType: null, isInternalNote: false, createdAt: new Date()
+    })
+    expect(conversation).toEqual({ id: 'conversation', status: 'open' })
+    expect(message).not.toHaveProperty('sender_id')
+    expect(message).not.toHaveProperty('is_internal_note')
   })
 })

@@ -98,6 +98,21 @@ export interface MessageDTO {
   created_at: string
 }
 
+export interface VisitorMessageDTO {
+  id: string
+  conversation_id: string
+  sender_type: SenderType
+  content: string
+  attachment_url: string | null
+  attachment_type: string | null
+  created_at: string
+}
+
+export interface VisitorConversationDTO {
+  id: string
+  status: ConversationStatus
+}
+
 /**
  * A visitor currently connected via the widget — served from the in-memory
  * visitor-presence registry (never the DB), so timestamps are epoch millis.
