@@ -6,6 +6,13 @@ interface WidgetWorkspace {
   color: string
   logo_url: string | null
   prechat_enabled: boolean
+  greeting: string
+  intro: string
+  offline_message: string
+  position: 'left' | 'right'
+  size: 'compact' | 'standard' | 'large'
+  theme: 'light' | 'dark' | 'system'
+  show_branding: boolean
   has_articles: boolean
 }
 

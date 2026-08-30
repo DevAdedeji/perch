@@ -99,6 +99,13 @@ export default defineEventHandler(async (event) => {
       color: workspace.widgetPrimaryColor,
       logo_url: workspace.logoUrl,
       prechat_enabled: workspace.prechatFormEnabled,
+      greeting: workspace.widgetGreeting,
+      intro: workspace.widgetIntro,
+      offline_message: workspace.widgetOfflineMessage,
+      position: workspace.widgetPosition,
+      size: workspace.widgetSize,
+      theme: workspace.widgetTheme,
+      show_branding: workspace.widgetShowBranding,
       has_articles: !!published
     },
     agent: agentName ? { name: agentName } : null,

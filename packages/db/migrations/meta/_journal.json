@@ -113,6 +113,13 @@
       "when": 1788052152196,
       "tag": "0015_add-google-auth",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1788127217008,
+      "tag": "0016_widget-customization",
+      "breakpoints": true
     }
   ]
 }

@@ -15,6 +15,17 @@ export const loginSchema = z.object({
 
 export const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Enter a valid hex color')
 
+export const widgetCustomizationSchema = z.object({
+  widgetPrimaryColor: hexColor.optional(),
+  widgetGreeting: z.string().trim().min(1).max(80).optional(),
+  widgetIntro: z.string().trim().min(1).max(180).optional(),
+  widgetOfflineMessage: z.string().trim().min(1).max(220).optional(),
+  widgetPosition: z.enum(['left', 'right']).optional(),
+  widgetSize: z.enum(['compact', 'standard', 'large']).optional(),
+  widgetTheme: z.enum(['light', 'dark', 'system']).optional(),
+  widgetShowBranding: z.boolean().optional()
+})
+
 export const createWorkspaceSchema = z.object({
   name: z.string().trim().min(1, 'Workspace name is required').max(80),
   widgetPrimaryColor: hexColor.optional(),

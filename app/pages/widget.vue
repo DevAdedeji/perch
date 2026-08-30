@@ -58,6 +58,18 @@ const headerStatusLine = computed(() => {
   return awayLine.value
 })
 
+const systemDark = ref(false)
+let darkQuery: MediaQueryList | null = null
+const syncSystemTheme = () => {
+  systemDark.value = darkQuery?.matches ?? false
+}
+const isDarkTheme = computed(() => workspace.value?.theme === 'dark'
+  || (workspace.value?.theme === 'system' && systemDark.value))
+const greeting = computed(() => workspace.value?.greeting || 'Hi there 👋')
+const intro = computed(() => workspace.value?.intro || 'Tell us a bit about you and how we can help.')
+const offlineMessage = computed(() => workspace.value?.offline_message
+  || 'We’re away right now, but leave a message and we’ll get back to you.')
+
 function isSeen(m: { sender_type: string, created_at: string }) {
   return m.sender_type === 'visitor' && !!agentReadAt.value && m.created_at <= agentReadAt.value
 }
@@ -178,7 +190,15 @@ function post(msg: Record<string, unknown>) {
 
 // hand the brand color to the loader so the launcher bubble matches
 watch(workspace, (w) => {
-  if (w) post({ perch: 'config', color: accent.value, fg: onAccent.value })
+  if (w) {
+    post({
+      perch: 'config',
+      color: accent.value,
+      fg: onAccent.value,
+      position: w.position,
+      size: w.size
+    })
+  }
 }, { immediate: true })
 
 /* message grouping: consecutive same-sender messages within 5 min */
@@ -363,6 +383,9 @@ watch(widget.openRequested, () => {
 })
 
 onMounted(async () => {
+  darkQuery = window.matchMedia('(prefers-color-scheme: dark)')
+  syncSystemTheme()
+  darkQuery.addEventListener('change', syncSystemTheme)
   try {
     hostOrigin = document.referrer ? new URL(document.referrer).origin : ''
   } catch {
@@ -374,13 +397,17 @@ onMounted(async () => {
   scrollToBottom()
 })
 onBeforeUnmount(() => {
+  darkQuery?.removeEventListener('change', syncSystemTheme)
   window.removeEventListener('message', onParentMessage)
   widget.stop()
 })
 </script>
 
 <template>
-  <div class="h-screen flex flex-col bg-default text-default overflow-hidden">
+  <div
+    class="h-screen flex flex-col bg-default text-default overflow-hidden"
+    :class="{ dark: isDarkTheme }"
+  >
     <!-- header -->
     <header class="shrink-0 flex items-center gap-3 px-4 py-3 border-b border-default bg-elevated/50">
       <span class="relative shrink-0">
@@ -610,10 +637,10 @@ onBeforeUnmount(() => {
           />
         </span>
         <p class="font-display text-lg font-semibold text-highlighted">
-          Hi there 👋
+          {{ greeting }}
         </p>
         <p class="mt-1 text-sm text-muted">
-          Tell us a bit about you and how we can help.
+          {{ intro }}
         </p>
       </div>
       <input
@@ -675,14 +702,14 @@ onBeforeUnmount(() => {
             />
           </span>
           <p class="font-display text-base font-semibold text-highlighted">
-            Hi{{ visitorName ? ` ${visitorName}` : ' there' }} 👋
+            {{ greeting }}
           </p>
           <p class="text-sm text-muted max-w-60">
             {{ businessOnline
-              ? 'Ask us anything — we’re online and typically reply in a few minutes.'
+              ? intro
               : awayLabel
-                ? `We’re away right now — ${awayLabel}. Leave a message and we’ll reply then.`
-                : 'We’re away right now, but leave a message and we’ll get back to you.' }}
+                ? `${offlineMessage} ${awayLabel}.`
+                : offlineMessage }}
           </p>
         </div>
 
@@ -986,8 +1013,8 @@ onBeforeUnmount(() => {
       </button>
     </nav>
 
-    <!-- persistent branding (free plan) — removable on a paid plan later -->
     <a
+      v-if="workspace?.show_branding"
       :href="perchUrl"
       target="_blank"
       rel="noopener"

@@ -54,6 +54,13 @@ export const workspaces = pgTable('workspaces', {
   // branding shown in the visitor widget
   logoUrl: text('logo_url'),
   widgetPrimaryColor: text('widget_primary_color').default('#f59e0b').notNull(),
+  widgetGreeting: text('widget_greeting').default('Hi there 👋').notNull(),
+  widgetIntro: text('widget_intro').default('Tell us a bit about you and how we can help.').notNull(),
+  widgetOfflineMessage: text('widget_offline_message').default('We’re away right now, but leave a message and we’ll get back to you.').notNull(),
+  widgetPosition: text('widget_position', { enum: ['left', 'right'] }).default('right').notNull(),
+  widgetSize: text('widget_size', { enum: ['compact', 'standard', 'large'] }).default('standard').notNull(),
+  widgetTheme: text('widget_theme', { enum: ['light', 'dark', 'system'] }).default('system').notNull(),
+  widgetShowBranding: boolean('widget_show_branding').default(true).notNull(),
   autoAssignEnabled: boolean('auto_assign_enabled').default(false).notNull(),
   prechatFormEnabled: boolean('prechat_form_enabled').default(true).notNull(),
   // HMAC secret the business signs Perch.identify() payloads with (lazily generated)

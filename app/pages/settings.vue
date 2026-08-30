@@ -14,6 +14,13 @@ interface WorkspaceDetail {
   siteId: string
   logoUrl: string | null
   widgetPrimaryColor: string
+  widgetGreeting: string
+  widgetIntro: string
+  widgetOfflineMessage: string
+  widgetPosition: 'left' | 'right'
+  widgetSize: 'compact' | 'standard' | 'large'
+  widgetTheme: 'light' | 'dark' | 'system'
+  widgetShowBranding: boolean
   prechatFormEnabled: boolean
   identityVerificationEnabled: boolean
   identitySecret: string | null
@@ -35,6 +42,21 @@ const isAdmin = computed(() => workspace.value?.role === 'admin')
 
 const name = ref('')
 const swatches = ['#8b5cf6', '#6366f1', '#f43f5e', '#ec4899', '#f59e0b', '#10b981', '#0ea5e9', '#0f172a']
+const widgetPositions = ['left', 'right'] as const
+const widgetSizes = ['compact', 'standard', 'large'] as const
+const widgetThemes = ['light', 'dark', 'system'] as const
+const widgetEditor = reactive({
+  widgetPrimaryColor: '#f59e0b',
+  widgetGreeting: 'Hi there 👋',
+  widgetIntro: 'Tell us a bit about you and how we can help.',
+  widgetOfflineMessage: 'We’re away right now, but leave a message and we’ll get back to you.',
+  widgetPosition: 'right' as 'left' | 'right',
+  widgetSize: 'standard' as 'compact' | 'standard' | 'large',
+  widgetTheme: 'system' as 'light' | 'dark' | 'system',
+  widgetShowBranding: true
+})
+const savingWidget = ref(false)
+const previewDark = computed(() => widgetEditor.widgetTheme === 'dark')
 
 // closing tag split so it doesn't terminate this SFC <script> block
 const closeScript = '</' + 'script>'
@@ -92,10 +114,37 @@ async function togglePrechat(value: boolean) {
   }
 }
 async function setColor(color: string) {
+  widgetEditor.widgetPrimaryColor = color
   try {
     await patchWorkspace({ widgetPrimaryColor: color })
   } catch {
     toast.add({ title: 'Could not update', color: 'error' })
+  }
+}
+
+watch(workspace, (w) => {
+  if (!w) return
+  Object.assign(widgetEditor, {
+    widgetPrimaryColor: w.widgetPrimaryColor,
+    widgetGreeting: w.widgetGreeting,
+    widgetIntro: w.widgetIntro,
+    widgetOfflineMessage: w.widgetOfflineMessage,
+    widgetPosition: w.widgetPosition,
+    widgetSize: w.widgetSize,
+    widgetTheme: w.widgetTheme,
+    widgetShowBranding: w.widgetShowBranding
+  })
+}, { immediate: true })
+
+async function saveWidgetCustomization() {
+  if (savingWidget.value || !isAdmin.value) return
+  savingWidget.value = true
+  try {
+    await patchWorkspace({ ...widgetEditor }, 'Widget appearance saved')
+  } catch (e) {
+    toast.add({ title: getErrorMessage(e, 'Could not save widget appearance'), color: 'error' })
+  } finally {
+    savingWidget.value = false
   }
 }
 
@@ -442,6 +491,241 @@ async function removeLogo() {
                   :aria-label="c"
                   @click="setColor(c)"
                 />
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Widget appearance -->
+        <section class="rounded-2xl border-glow bg-elevated/30 p-5 sm:p-6">
+          <div class="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+            <div>
+              <h2 class="font-display font-semibold text-highlighted">
+                Widget appearance
+              </h2>
+              <p class="text-sm text-muted mt-0.5">
+                Match the chat experience to your brand without touching the embed code.
+              </p>
+            </div>
+            <UBadge
+              color="neutral"
+              variant="subtle"
+              class="mt-2 w-fit sm:mt-0"
+            >
+              Live preview
+            </UBadge>
+          </div>
+
+          <div class="mt-5 grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
+            <div class="space-y-5">
+              <div class="grid gap-4 sm:grid-cols-2">
+                <UFormField
+                  label="Greeting"
+                  help="The first line visitors see."
+                >
+                  <UInput
+                    v-model="widgetEditor.widgetGreeting"
+                    :disabled="!isAdmin"
+                    :maxlength="80"
+                    class="w-full"
+                  />
+                </UFormField>
+                <UFormField
+                  label="Intro text"
+                  help="A short invitation to start chatting."
+                >
+                  <UInput
+                    v-model="widgetEditor.widgetIntro"
+                    :disabled="!isAdmin"
+                    :maxlength="180"
+                    class="w-full"
+                  />
+                </UFormField>
+              </div>
+
+              <UFormField
+                label="Offline message"
+                help="Shown when nobody is available."
+              >
+                <UTextarea
+                  v-model="widgetEditor.widgetOfflineMessage"
+                  :disabled="!isAdmin"
+                  :maxlength="220"
+                  :rows="2"
+                  autoresize
+                  class="w-full"
+                />
+              </UFormField>
+
+              <div>
+                <p class="text-sm font-medium text-highlighted">
+                  Brand color
+                </p>
+                <div class="mt-2 flex flex-wrap items-center gap-2.5">
+                  <button
+                    v-for="c in swatches"
+                    :key="`appearance-${c}`"
+                    type="button"
+                    :disabled="!isAdmin"
+                    class="size-8 rounded-full ring-2 ring-offset-2 ring-offset-bg transition-transform hover:scale-110 disabled:opacity-60"
+                    :class="widgetEditor.widgetPrimaryColor === c ? 'ring-highlighted' : 'ring-transparent'"
+                    :style="{ background: c }"
+                    :aria-label="`Use ${c}`"
+                    :aria-pressed="widgetEditor.widgetPrimaryColor === c"
+                    @click="widgetEditor.widgetPrimaryColor = c"
+                  />
+                  <UInput
+                    v-model="widgetEditor.widgetPrimaryColor"
+                    :disabled="!isAdmin"
+                    maxlength="7"
+                    class="w-28 font-mono"
+                    aria-label="Custom widget color"
+                  />
+                </div>
+              </div>
+
+              <div class="grid gap-4 sm:grid-cols-3">
+                <div>
+                  <p class="text-sm font-medium text-highlighted">
+                    Position
+                  </p>
+                  <div class="mt-2 grid grid-cols-2 gap-1 rounded-lg bg-elevated p-1 ring-1 ring-default">
+                    <button
+                      v-for="side in widgetPositions"
+                      :key="side"
+                      type="button"
+                      :disabled="!isAdmin"
+                      :aria-pressed="widgetEditor.widgetPosition === side"
+                      class="rounded-md px-2 py-1.5 text-xs font-medium capitalize transition-colors"
+                      :class="widgetEditor.widgetPosition === side ? 'bg-default text-highlighted shadow-sm' : 'text-muted hover:text-highlighted'"
+                      @click="widgetEditor.widgetPosition = side"
+                    >
+                      {{ side }}
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <p class="text-sm font-medium text-highlighted">
+                    Size
+                  </p>
+                  <div class="mt-2 grid grid-cols-3 gap-1 rounded-lg bg-elevated p-1 ring-1 ring-default">
+                    <button
+                      v-for="size in widgetSizes"
+                      :key="size"
+                      type="button"
+                      :disabled="!isAdmin"
+                      :aria-pressed="widgetEditor.widgetSize === size"
+                      class="rounded-md px-1 py-1.5 text-[11px] font-medium capitalize transition-colors"
+                      :class="widgetEditor.widgetSize === size ? 'bg-default text-highlighted shadow-sm' : 'text-muted hover:text-highlighted'"
+                      @click="widgetEditor.widgetSize = size"
+                    >
+                      {{ size === 'standard' ? 'Regular' : size }}
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <p class="text-sm font-medium text-highlighted">
+                    Theme
+                  </p>
+                  <div class="mt-2 grid grid-cols-3 gap-1 rounded-lg bg-elevated p-1 ring-1 ring-default">
+                    <button
+                      v-for="theme in widgetThemes"
+                      :key="theme"
+                      type="button"
+                      :disabled="!isAdmin"
+                      :aria-pressed="widgetEditor.widgetTheme === theme"
+                      class="rounded-md px-1 py-1.5 text-[11px] font-medium capitalize transition-colors"
+                      :class="widgetEditor.widgetTheme === theme ? 'bg-default text-highlighted shadow-sm' : 'text-muted hover:text-highlighted'"
+                      @click="widgetEditor.widgetTheme = theme"
+                    >
+                      {{ theme }}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="flex items-center justify-between gap-4 rounded-xl bg-default px-3.5 py-3 ring-1 ring-default">
+                <div>
+                  <p class="text-sm font-medium text-highlighted">
+                    Show “Powered by Perch”
+                  </p>
+                  <p class="text-xs text-muted">
+                    Keep it visible or present the widget as fully yours.
+                  </p>
+                </div>
+                <USwitch
+                  v-model="widgetEditor.widgetShowBranding"
+                  :disabled="!isAdmin"
+                />
+              </div>
+
+              <UButton
+                v-if="isAdmin"
+                color="primary"
+                icon="i-lucide-save"
+                :loading="savingWidget"
+                :disabled="!widgetEditor.widgetGreeting.trim() || !widgetEditor.widgetIntro.trim() || !widgetEditor.widgetOfflineMessage.trim()"
+                @click="saveWidgetCustomization"
+              >
+                Save appearance
+              </UButton>
+            </div>
+
+            <div class="relative min-h-96 overflow-hidden rounded-2xl bg-grid ring-1 ring-default">
+              <div
+                class="absolute bottom-4 w-[calc(100%-2rem)] max-w-64 overflow-hidden rounded-2xl shadow-xl ring-1 ring-black/10"
+                :class="[
+                  widgetEditor.widgetPosition === 'left' ? 'left-4' : 'right-4',
+                  previewDark ? 'dark bg-zinc-950 text-white' : 'bg-white text-zinc-950'
+                ]"
+              >
+                <div class="flex items-center gap-2.5 border-b border-black/10 px-3.5 py-3 dark:border-white/10">
+                  <span
+                    class="grid size-8 place-items-center overflow-hidden rounded-lg text-xs font-semibold"
+                    :style="{ background: `${widgetEditor.widgetPrimaryColor}22`, color: widgetEditor.widgetPrimaryColor }"
+                  >
+                    <img
+                      v-if="workspace?.logoUrl"
+                      :src="workspace.logoUrl"
+                      alt=""
+                      class="size-full object-cover"
+                    >
+                    <template v-else>{{ (workspace?.name ?? 'P').charAt(0).toUpperCase() }}</template>
+                  </span>
+                  <div class="min-w-0">
+                    <p class="truncate text-xs font-semibold">
+                      {{ workspace?.name }}
+                    </p>
+                    <p class="text-[10px] opacity-60">
+                      Online · replies in seconds
+                    </p>
+                  </div>
+                </div>
+                <div class="grid min-h-56 place-items-center px-5 text-center">
+                  <div>
+                    <span
+                      class="mx-auto grid size-10 place-items-center rounded-xl"
+                      :style="{ background: `${widgetEditor.widgetPrimaryColor}1a`, color: widgetEditor.widgetPrimaryColor }"
+                    >
+                      <UIcon
+                        name="i-lucide-message-circle"
+                        class="size-5"
+                      />
+                    </span>
+                    <p class="mt-3 text-sm font-semibold">
+                      {{ widgetEditor.widgetGreeting }}
+                    </p>
+                    <p class="mt-1 text-xs opacity-60">
+                      {{ widgetEditor.widgetIntro }}
+                    </p>
+                  </div>
+                </div>
+                <div
+                  v-if="widgetEditor.widgetShowBranding"
+                  class="border-t border-black/10 py-1.5 text-center text-[9px] opacity-50 dark:border-white/10"
+                >
+                  Powered by Perch
+                </div>
               </div>
             </div>
           </div>

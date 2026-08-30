@@ -10,7 +10,7 @@ const schema = z.object({
   name: z.string().trim().min(1).max(80).optional(),
   prechatFormEnabled: z.boolean().optional(),
   identityVerificationEnabled: z.boolean().optional(),
-  widgetPrimaryColor: hexColor.optional(),
+  ...widgetCustomizationSchema.shape,
   allowedDomains: z.array(z.string().trim().min(1).max(253)).max(20).optional(),
   logoUrl: z.string().url().max(500).nullable().optional(),
   businessHours: z.object({

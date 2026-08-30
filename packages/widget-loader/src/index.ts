@@ -63,8 +63,12 @@ function init() {
 @keyframes perch-pop{from{transform:scale(.3)}to{transform:scale(1)}}
 .perch-frame{position:fixed;bottom:calc(88px + env(safe-area-inset-bottom,0px));right:20px;width:380px;height:min(600px,calc(100vh - 120px));max-width:calc(100vw - 40px);border:none;border-radius:16px;box-shadow:0 12px 48px rgba(0,0,0,.28);z-index:${Z};background:transparent;color-scheme:normal;opacity:0;visibility:hidden;pointer-events:none;transform:translateY(16px) scale(.96);transform-origin:bottom right;transition:opacity .2s ease,transform .3s cubic-bezier(.32,.72,.33,1),visibility 0s linear .3s}
 .perch-frame.perch-open{opacity:1;visibility:visible;pointer-events:auto;transform:none;transition:opacity .2s ease,transform .3s cubic-bezier(.32,.72,.33,1)}
+.perch-bubble.perch-left{left:20px;right:auto}
+.perch-frame.perch-left{left:20px;right:auto;transform-origin:bottom left}
+.perch-frame.perch-size-compact{width:340px;height:min(520px,calc(100vh - 120px))}
+.perch-frame.perch-size-large{width:420px;height:min(680px,calc(100vh - 120px))}
 @media (max-width:480px){
-.perch-frame{top:calc(env(safe-area-inset-top,0px) + 16px);left:12px;right:auto;bottom:auto;width:calc(100vw - 24px);height:calc(100vh - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px) - 28px);height:calc(100dvh - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px) - 28px);max-width:none;border-radius:18px;transform:translateY(28px) scale(.98)}
+.perch-frame,.perch-frame.perch-left,.perch-frame.perch-size-compact,.perch-frame.perch-size-large{top:calc(env(safe-area-inset-top,0px) + 16px);left:12px;right:auto;bottom:auto;width:calc(100vw - 24px);height:calc(100vh - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px) - 28px);height:calc(100dvh - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px) - 28px);max-width:none;border-radius:18px;transform:translateY(28px) scale(.98)}
 .perch-frame.perch-open{transform:none}
 .perch-bubble.perch-hide{opacity:0;pointer-events:none;transform:scale(.5)}
 }
@@ -243,6 +247,12 @@ function init() {
       if (typeof d.color === 'string' && HEX.test(d.color)) {
         bubble.style.background = d.color
         if (typeof d.fg === 'string' && HEX.test(d.fg)) bubble.style.color = d.fg
+      }
+      const left = d.position === 'left'
+      bubble.classList.toggle('perch-left', left)
+      iframe?.classList.toggle('perch-left', left)
+      for (const size of ['compact', 'large']) {
+        iframe?.classList.toggle(`perch-size-${size}`, d.size === size)
       }
     }
   }
