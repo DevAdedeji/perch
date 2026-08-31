@@ -3,7 +3,6 @@ import { readFileSync } from 'node:fs'
 import {
   isMissedSupportConversation,
   resolveSupportAnalyticsWindow,
-  supportOutcomeOwner,
   supportAnalyticsMissedCutoff,
   toFiniteNumber,
   toNullableFiniteNumber
@@ -54,51 +53,18 @@ describe('missed conversation threshold', () => {
   })
 })
 
-describe('historical team outcome attribution', () => {
-  const resolvedAt = new Date('2026-08-30T12:00:00.000Z')
-  const messages = [
-    {
-      senderId: 'agent-a',
-      senderType: 'agent' as const,
-      isInternalNote: false,
-      createdAt: new Date('2026-08-30T11:00:00.000Z')
-    },
-    {
-      senderId: 'agent-b',
-      senderType: 'agent' as const,
-      isInternalNote: false,
-      createdAt: new Date('2026-08-30T11:55:00.000Z')
-    },
-    {
-      senderId: 'agent-c',
-      senderType: 'agent' as const,
-      isInternalNote: false,
-      createdAt: new Date('2026-08-30T12:05:00.000Z')
-    }
-  ]
-
-  it('attributes an outcome to the last public agent reply before it occurred', () => {
-    expect(supportOutcomeOwner(messages, resolvedAt)).toBe('agent-b')
-  })
-
-  it('does not depend on the conversation current assignee', () => {
-    const ownerBeforeReassignment = supportOutcomeOwner(messages, resolvedAt)
-    const currentAssigneeAfterReassignment = 'agent-c'
-    expect(ownerBeforeReassignment).toBe('agent-b')
-    expect(ownerBeforeReassignment).not.toBe(currentAssigneeAfterReassignment)
-  })
-
-  it('ignores internal notes and visitor messages', () => {
-    expect(supportOutcomeOwner([
-      { ...messages[0]!, isInternalNote: true },
-      { ...messages[1]!, senderType: 'visitor' }
-    ], resolvedAt)).toBeNull()
-  })
-})
-
-describe('team analytics query shape', () => {
-  const source = readFileSync(new URL('../server/api/workspaces/[id]/analytics.get.ts', import.meta.url), 'utf8')
-  const teamQuery = source.slice(source.indexOf('db.execute<MemberRow>'))
+describe('immutable support outcomes', () => {
+  const analyticsSource = readFileSync(new URL('../server/api/workspaces/[id]/analytics.get.ts', import.meta.url), 'utf8')
+  const teamQuery = analyticsSource.slice(analyticsSource.indexOf('db.execute<MemberRow>'))
+  const conversationsSource = readFileSync(new URL('../server/utils/conversations.ts', import.meta.url), 'utf8')
+  const automationsSource = readFileSync(new URL('../server/utils/automation-engine.ts', import.meta.url), 'utf8')
+  const resolveSource = readFileSync(new URL('../server/api/conversations/[id]/resolve.post.ts', import.meta.url), 'utf8')
+  const csatSource = readFileSync(new URL('../server/api/widget/csat.post.ts', import.meta.url), 'utf8')
+  const schemaSource = readFileSync(new URL('../packages/db/src/schema.ts', import.meta.url), 'utf8')
+  const migrationSource = readFileSync(
+    new URL('../packages/db/migrations/0020_immutable-support-outcomes.sql', import.meta.url),
+    'utf8'
+  )
 
   it('aggregates member metrics once instead of running per-member count subqueries', () => {
     expect(teamQuery).toContain('agent_activity as')
@@ -107,10 +73,49 @@ describe('team analytics query shape', () => {
     expect(teamQuery).not.toMatch(/\(\s*select count\(/)
   })
 
-  it('derives historical outcomes from immutable message timing, not current assignment', () => {
-    expect(teamQuery).toContain('m.created_at <= c.resolved_at')
-    expect(teamQuery).toContain('m.created_at <= c.csat_at')
+  it('records the authenticated resolver exactly once per state transition', () => {
+    expect(resolveSource).toContain(`setConversationStatus(conversationId, 'resolved', member.id)`)
+    expect(conversationsSource).toContain('tx.insert(supportOutcomeEvents)')
+    expect(conversationsSource).toContain(`ne(conversations.status, 'resolved')`)
+    expect(conversationsSource).toContain(`eventType: 'resolution'`)
+    expect(conversationsSource).toContain('actorMemberId: actorMemberId!')
+  })
+
+  it('records automatic resolutions without attributing them to a person', () => {
+    const autoCloseSource = automationsSource.slice(automationsSource.indexOf('async function runAutoClose'))
+    expect(autoCloseSource).toContain('tx.insert(supportOutcomeEvents)')
+    expect(autoCloseSource).toContain(`eventType: 'resolution'`)
+    expect(autoCloseSource).not.toContain('actorMemberId:')
+  })
+
+  it('appends CSAT history while preserving separate current conversation state', () => {
+    expect(csatSource).toContain('.set({ csatRating: rating, csatComment: comment || null, csatAt: now })')
+    expect(csatSource).toContain(`eventType: 'csat'`)
+    expect(csatSource).toContain('actorMemberId: resolution?.actorMemberId ?? null')
+    expect(csatSource).toContain('tx.insert(supportOutcomeEvents)')
+  })
+
+  it('reads historical outcomes only from append-only events', () => {
+    expect(analyticsSource).toContain('from ${supportOutcomeEvents} e')
+    expect(analyticsSource).toContain('latest_csat_events as')
+    expect(analyticsSource).toContain('order by e.conversation_id, e.occurred_at desc, e.id desc')
+    expect(analyticsSource).not.toMatch(/c\.(resolved_at|csat_at|csat_rating)/)
     expect(teamQuery).not.toContain('c.assigned_agent_id = wm.id')
+  })
+
+  it('defines indexes for workspace reporting and per-conversation CSAT lookup', () => {
+    expect(schemaSource).toContain('support_outcome_events_workspace_type_time_idx')
+    expect(schemaSource).toContain('.on(t.workspaceId, t.eventType, t.occurredAt)')
+    expect(schemaSource).toContain('support_outcome_events_conversation_type_time_idx')
+    expect(schemaSource).toContain('.on(t.conversationId, t.eventType, t.occurredAt)')
+  })
+
+  it('backfills the recoverable resolution and CSAT history for existing conversations', () => {
+    expect(migrationSource).toContain('COALESCE(c."resolved_at", c."csat_at")')
+    expect(migrationSource).toContain('c."assigned_agent_id"')
+    expect(migrationSource).toContain(`e."event_type" = 'resolution'`)
+    expect(migrationSource).toContain(`c."csat_rating" IN ('good', 'bad')`)
+    expect(migrationSource).toContain('support_outcome_events_workspace_type_time_idx')
   })
 })
 

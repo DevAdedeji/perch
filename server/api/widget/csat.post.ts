@@ -1,4 +1,4 @@
-import { and, conversations, eq } from '@perch/db'
+import { and, conversations, desc, eq, supportOutcomeEvents } from '@perch/db'
 import { z } from 'zod'
 
 const schema = z.object({
@@ -9,10 +9,7 @@ const schema = z.object({
   comment: z.string().trim().max(500).optional()
 })
 
-/**
- * Post-resolve CSAT from the widget. Overwritable while the widget shows the
- * prompt (people mis-tap); only the visitor who owns the conversation can rate.
- */
+/** Post-resolve CSAT from the visitor who owns the conversation. */
 export default defineEventHandler(async (event) => {
   assertRateLimit('widget-csat:ip', requestIp(event), { max: 10, windowMs: 60 * 1000 })
 
@@ -24,19 +21,46 @@ export default defineEventHandler(async (event) => {
 
   const db = useDb()
   const { visitor } = await requireVisitorSession(event, site_id, visitor_session)
-  const conversation = await db.query.conversations.findFirst({
-    where: and(eq(conversations.id, conversation_id), eq(conversations.visitorRef, visitor.id))
-  })
-  if (!conversation) {
-    throw createError({ statusCode: 404, statusMessage: 'Conversation not found' })
-  }
-  if (conversation.status !== 'resolved') {
-    throw createError({ statusCode: 400, statusMessage: 'Only resolved conversations can be rated' })
-  }
+  await db.transaction(async (tx) => {
+    const now = new Date()
+    const [conversation] = await tx.update(conversations)
+      .set({ csatRating: rating, csatComment: comment || null, csatAt: now })
+      .where(and(
+        eq(conversations.id, conversation_id),
+        eq(conversations.visitorRef, visitor.id),
+        eq(conversations.status, 'resolved')
+      ))
+      .returning()
 
-  await db.update(conversations)
-    .set({ csatRating: rating, csatComment: comment || null, csatAt: new Date() })
-    .where(eq(conversations.id, conversation.id))
+    if (!conversation) {
+      const existing = await tx.query.conversations.findFirst({
+        columns: { status: true },
+        where: and(eq(conversations.id, conversation_id), eq(conversations.visitorRef, visitor.id))
+      })
+      if (!existing) {
+        throw createError({ statusCode: 404, statusMessage: 'Conversation not found' })
+      }
+      throw createError({ statusCode: 400, statusMessage: 'Only resolved conversations can be rated' })
+    }
+
+    const resolution = await tx.query.supportOutcomeEvents.findFirst({
+      columns: { actorMemberId: true },
+      where: and(
+        eq(supportOutcomeEvents.conversationId, conversation.id),
+        eq(supportOutcomeEvents.eventType, 'resolution')
+      ),
+      orderBy: [desc(supportOutcomeEvents.occurredAt), desc(supportOutcomeEvents.id)]
+    })
+
+    await tx.insert(supportOutcomeEvents).values({
+      workspaceId: conversation.workspaceId,
+      conversationId: conversation.id,
+      eventType: 'csat',
+      actorMemberId: resolution?.actorMemberId ?? null,
+      rating,
+      occurredAt: now
+    })
+  })
 
   return { ok: true, rating }
 })

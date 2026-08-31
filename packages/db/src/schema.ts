@@ -8,6 +8,7 @@
 
 import {
   boolean,
+  check,
   index,
   integer,
   jsonb,
@@ -32,6 +33,7 @@ export const senderTypeEnum = pgEnum('sender_type', ['visitor', 'agent', 'system
 export const automationRuleTypeEnum = pgEnum('automation_rule_type', [
   'round_robin', 'page_assignment', 'vip_tagging', 'inactivity_reminder', 'auto_close'
 ])
+export const supportOutcomeEventTypeEnum = pgEnum('support_outcome_event_type', ['resolution', 'csat'])
 
 /* Tables */
 
@@ -223,6 +225,25 @@ export const automationNotifications = pgTable('automation_notifications', {
 }, t => [
   uniqueIndex('automation_notifications_execution_uq').on(t.executionId),
   index('automation_notifications_member_unread_idx').on(t.memberId, t.readAt, t.createdAt)
+])
+
+export const supportOutcomeEvents = pgTable('support_outcome_events', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  conversationId: uuid('conversation_id').notNull().references(() => conversations.id, { onDelete: 'cascade' }),
+  eventType: supportOutcomeEventTypeEnum('event_type').notNull(),
+  // Snapshot ID stays intact if a member leaves; null identifies an automated outcome.
+  actorMemberId: uuid('actor_member_id'),
+  rating: text('rating', { enum: ['good', 'bad'] }),
+  occurredAt: timestamp('occurred_at', { withTimezone: true }).defaultNow().notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull()
+}, t => [
+  check(
+    'support_outcome_events_payload_ck',
+    sql`(${t.eventType} = 'resolution' and ${t.rating} is null) or (${t.eventType} = 'csat' and ${t.rating} in ('good', 'bad'))`
+  ),
+  index('support_outcome_events_workspace_type_time_idx').on(t.workspaceId, t.eventType, t.occurredAt),
+  index('support_outcome_events_conversation_type_time_idx').on(t.conversationId, t.eventType, t.occurredAt)
 ])
 
 /** Workspace-defined conversation labels ("billing", "bug", …). */
@@ -462,6 +483,8 @@ export type AutomationRule = typeof automationRules.$inferSelect
 export type NewAutomationRule = typeof automationRules.$inferInsert
 export type AutomationExecution = typeof automationExecutions.$inferSelect
 export type AutomationNotification = typeof automationNotifications.$inferSelect
+export type SupportOutcomeEvent = typeof supportOutcomeEvents.$inferSelect
+export type NewSupportOutcomeEvent = typeof supportOutcomeEvents.$inferInsert
 export type Message = typeof messages.$inferSelect
 export type NewMessage = typeof messages.$inferInsert
 export type ConversationRead = typeof conversationReads.$inferSelect

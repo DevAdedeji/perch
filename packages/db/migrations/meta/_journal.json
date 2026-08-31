@@ -141,6 +141,13 @@
       "when": 1788136423451,
       "tag": "0019_installation-verification",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1788135097122,
+      "tag": "0020_immutable-support-outcomes",
+      "breakpoints": true
     }
   ]
 }

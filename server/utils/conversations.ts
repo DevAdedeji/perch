@@ -1,4 +1,4 @@
-import { and, conversations, desc, eq, messages, ne, sql, triggerFires, triggers, visitors } from '@perch/db'
+import { and, conversations, desc, eq, messages, ne, sql, supportOutcomeEvents, triggerFires, triggers, visitors } from '@perch/db'
 import type { Conversation, Message } from '@perch/db'
 import { channels } from '@perch/shared'
 import type { ConversationDTO, MessageDTO, VisitorConversationDTO, VisitorMessageDTO } from '@perch/shared'
@@ -416,13 +416,47 @@ export async function assignConversation(conversationId: string, memberId: strin
   return result?.conversation ?? null
 }
 
-export async function setConversationStatus(conversationId: string, status: 'open' | 'resolved'): Promise<Conversation | null> {
+export function setConversationStatus(conversationId: string, status: 'open'): Promise<Conversation | null>
+export function setConversationStatus(conversationId: string, status: 'resolved', actorMemberId: string): Promise<Conversation | null>
+export async function setConversationStatus(
+  conversationId: string,
+  status: 'open' | 'resolved',
+  actorMemberId?: string
+): Promise<Conversation | null> {
+  if (status === 'resolved' && !actorMemberId) {
+    throw new Error('Resolving a conversation requires an acting workspace member')
+  }
+
   const db = useDb()
-  const [conversation] = await db.update(conversations)
-    .set({ status, resolvedAt: status === 'resolved' ? new Date() : null, updatedAt: new Date(), snoozedUntil: null })
-    .where(eq(conversations.id, conversationId))
-    .returning()
-  if (conversation) {
+  const now = new Date()
+  const result = await db.transaction(async (tx) => {
+    const [conversation] = await tx.update(conversations)
+      .set({ status, resolvedAt: status === 'resolved' ? now : null, updatedAt: now, snoozedUntil: null })
+      .where(status === 'resolved'
+        ? and(eq(conversations.id, conversationId), ne(conversations.status, 'resolved'))
+        : eq(conversations.id, conversationId))
+      .returning()
+
+    if (conversation && status === 'resolved') {
+      await tx.insert(supportOutcomeEvents).values({
+        workspaceId: conversation.workspaceId,
+        conversationId: conversation.id,
+        eventType: 'resolution',
+        actorMemberId: actorMemberId!,
+        occurredAt: now
+      })
+    }
+
+    if (conversation) return { conversation, changed: true }
+    if (status === 'resolved') {
+      const current = await tx.query.conversations.findFirst({ where: eq(conversations.id, conversationId) })
+      return { conversation: current ?? null, changed: false }
+    }
+    return { conversation: null, changed: false }
+  })
+
+  const conversation = result.conversation
+  if (conversation && result.changed) {
     publishConversationUpdate(conversation)
     if (status === 'resolved') {
       dispatchWebhooks(conversation.workspaceId, 'conversation.resolved', {
@@ -430,7 +464,7 @@ export async function setConversationStatus(conversationId: string, status: 'ope
       })
     }
   }
-  return conversation ?? null
+  return conversation
 }
 
 export function inboxRemovalScope(previousAssignedAgentId: string | null, assignedAgentId: string | null) {

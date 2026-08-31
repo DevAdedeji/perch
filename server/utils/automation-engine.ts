@@ -12,6 +12,7 @@ import {
   isNull,
   notExists,
   sql,
+  supportOutcomeEvents,
   workspaceMembers
 } from '@perch/db'
 import type { AutomationRule, Conversation, Visitor } from '@perch/db'
@@ -226,9 +227,9 @@ async function runAutoClose(rule: AutomationRule, candidate: Conversation, cutof
     if (!execution) return null
     const [updated] = await tx.update(conversations).set({
       status: 'resolved',
-      resolvedAt: new Date(),
+      resolvedAt: now,
       snoozedUntil: null,
-      updatedAt: new Date()
+      updatedAt: now
     }).where(and(
       eq(conversations.id, candidate.id),
       eq(conversations.workspaceId, candidate.workspaceId),
@@ -237,7 +238,16 @@ async function runAutoClose(rule: AutomationRule, candidate: Conversation, cutof
       sql`(${conversations.snoozedUntil} is null or ${conversations.snoozedUntil} <= ${now.toISOString()}::timestamptz)`,
       sql`${conversations.lastMessageAt} <= ${cutoff.toISOString()}::timestamptz`
     )).returning()
-    if (!updated) await tx.delete(automationExecutions).where(eq(automationExecutions.id, execution.id))
+    if (updated) {
+      await tx.insert(supportOutcomeEvents).values({
+        workspaceId: updated.workspaceId,
+        conversationId: updated.id,
+        eventType: 'resolution',
+        occurredAt: now
+      })
+    } else {
+      await tx.delete(automationExecutions).where(eq(automationExecutions.id, execution.id))
+    }
     return updated ?? null
   })
   if (!closed) return

@@ -1,4 +1,4 @@
-import { conversations, eq, messages, sql, users, workspaceMembers, workspaces } from '@perch/db'
+import { conversations, eq, messages, sql, supportOutcomeEvents, users, workspaceMembers, workspaces } from '@perch/db'
 import {
   resolveSupportAnalyticsWindow,
   supportAnalyticsMissedCutoff,
@@ -93,58 +93,66 @@ export default defineEventHandler(async (event) => {
           limit 1
         ) first_agent on true
         where c.workspace_id = ${workspaceId}::uuid
-          and (
-            (c.created_at >= (${start}::date::timestamp at time zone ${timezone}) and c.created_at < (${end}::date::timestamp at time zone ${timezone}))
-            or (c.resolved_at >= (${start}::date::timestamp at time zone ${timezone}) and c.resolved_at < (${end}::date::timestamp at time zone ${timezone}))
-            or (c.csat_at >= (${start}::date::timestamp at time zone ${timezone}) and c.csat_at < (${end}::date::timestamp at time zone ${timezone}))
-          )
+          and c.created_at >= (${start}::date::timestamp at time zone ${timezone})
+          and c.created_at < (${end}::date::timestamp at time zone ${timezone})
+      ),
+      conversation_metrics as (
+        select
+          count(*) as conversations,
+          count(*) filter (
+            where first_visitor_at is not null and first_agent_at is null
+          ) as unanswered,
+          count(*) filter (
+            where status <> 'resolved'
+              and first_visitor_at is not null
+              and first_agent_at is null
+              and first_visitor_at <= ${missedCutoff}::timestamptz
+          ) as missed,
+          avg(extract(epoch from (first_agent_at - first_visitor_at)))
+            filter (where first_agent_at is not null) as average_first_response_seconds
+        from relevant_conversations
+      ),
+      resolution_metrics as (
+        select
+          count(*) as resolved,
+          avg(extract(epoch from (e.occurred_at - c.created_at)))
+            filter (where e.occurred_at >= c.created_at) as average_resolution_seconds
+        from ${supportOutcomeEvents} e
+        inner join ${conversations} c on c.id = e.conversation_id
+        where e.workspace_id = ${workspaceId}::uuid
+          and e.event_type = 'resolution'
+          and e.occurred_at >= (${start}::date::timestamp at time zone ${timezone})
+          and e.occurred_at < (${end}::date::timestamp at time zone ${timezone})
+      ),
+      latest_csat_events as (
+        select distinct on (e.conversation_id)
+          e.conversation_id,
+          e.rating
+        from ${supportOutcomeEvents} e
+        where e.workspace_id = ${workspaceId}::uuid
+          and e.event_type = 'csat'
+          and e.occurred_at >= (${start}::date::timestamp at time zone ${timezone})
+          and e.occurred_at < (${end}::date::timestamp at time zone ${timezone})
+        order by e.conversation_id, e.occurred_at desc, e.id desc
+      ),
+      csat_metrics as (
+        select
+          count(*) filter (where rating = 'good') as csat_good,
+          count(*) filter (where rating = 'bad') as csat_bad
+        from latest_csat_events
       )
       select
-        count(*) filter (
-          where created_at >= (${start}::date::timestamp at time zone ${timezone})
-            and created_at < (${end}::date::timestamp at time zone ${timezone})
-        ) as conversations,
-        count(*) filter (
-          where resolved_at >= (${start}::date::timestamp at time zone ${timezone})
-            and resolved_at < (${end}::date::timestamp at time zone ${timezone})
-        ) as resolved,
-        count(*) filter (
-          where created_at >= (${start}::date::timestamp at time zone ${timezone})
-            and created_at < (${end}::date::timestamp at time zone ${timezone})
-            and first_visitor_at is not null
-            and first_agent_at is null
-        ) as unanswered,
-        count(*) filter (
-          where created_at >= (${start}::date::timestamp at time zone ${timezone})
-            and created_at < (${end}::date::timestamp at time zone ${timezone})
-            and status <> 'resolved'
-            and first_visitor_at is not null
-            and first_agent_at is null
-            and first_visitor_at <= ${missedCutoff}::timestamptz
-        ) as missed,
-        avg(extract(epoch from (first_agent_at - first_visitor_at)))
-          filter (
-            where created_at >= (${start}::date::timestamp at time zone ${timezone})
-              and created_at < (${end}::date::timestamp at time zone ${timezone})
-              and first_agent_at is not null
-          ) as average_first_response_seconds,
-        avg(extract(epoch from (resolved_at - created_at)))
-          filter (
-            where resolved_at >= (${start}::date::timestamp at time zone ${timezone})
-              and resolved_at < (${end}::date::timestamp at time zone ${timezone})
-              and resolved_at >= created_at
-          ) as average_resolution_seconds,
-        count(*) filter (
-          where csat_rating = 'good'
-            and csat_at >= (${start}::date::timestamp at time zone ${timezone})
-            and csat_at < (${end}::date::timestamp at time zone ${timezone})
-        ) as csat_good,
-        count(*) filter (
-          where csat_rating = 'bad'
-            and csat_at >= (${start}::date::timestamp at time zone ${timezone})
-            and csat_at < (${end}::date::timestamp at time zone ${timezone})
-        ) as csat_bad
-      from relevant_conversations
+        cm.conversations,
+        rm.resolved,
+        cm.unanswered,
+        cm.missed,
+        cm.average_first_response_seconds,
+        rm.average_resolution_seconds,
+        csm.csat_good,
+        csm.csat_bad
+      from conversation_metrics cm
+      cross join resolution_metrics rm
+      cross join csat_metrics csm
     `),
     db.execute<TrendRow>(sql`
       with days as (
@@ -174,11 +182,12 @@ export default defineEventHandler(async (event) => {
         group by 1
       ),
       daily_resolutions as (
-        select (c.resolved_at at time zone ${timezone})::date as day, count(*) as total
-        from ${conversations} c
-        where c.workspace_id = ${workspaceId}::uuid
-          and c.resolved_at >= (${start}::date::timestamp at time zone ${timezone})
-          and c.resolved_at < (${end}::date::timestamp at time zone ${timezone})
+        select (e.occurred_at at time zone ${timezone})::date as day, count(*) as total
+        from ${supportOutcomeEvents} e
+        where e.workspace_id = ${workspaceId}::uuid
+          and e.event_type = 'resolution'
+          and e.occurred_at >= (${start}::date::timestamp at time zone ${timezone})
+          and e.occurred_at < (${end}::date::timestamp at time zone ${timezone})
         group by 1
       )
       select
@@ -264,48 +273,35 @@ export default defineEventHandler(async (event) => {
         inner join first_visitors fv on fv.conversation_id = fa.conversation_id
         group by fa.sender_id
       ),
-      resolution_owners as (
-        select distinct on (c.id)
-          c.id as conversation_id,
-          m.sender_id as member_id
-        from ${conversations} c
-        inner join ${messages} m on m.conversation_id = c.id
-        where c.workspace_id = ${workspaceId}::uuid
-          and c.resolved_at >= (${start}::date::timestamp at time zone ${timezone})
-          and c.resolved_at < (${end}::date::timestamp at time zone ${timezone})
-          and m.sender_type = 'agent'
-          and m.sender_id is not null
-          and m.is_internal_note = false
-          and m.created_at <= c.resolved_at
-        order by c.id, m.created_at desc, m.id desc
-      ),
       resolution_metrics as (
-        select member_id, count(*) as resolved_conversations
-        from resolution_owners
-        group by member_id
+        select e.actor_member_id as member_id, count(*) as resolved_conversations
+        from ${supportOutcomeEvents} e
+        where e.workspace_id = ${workspaceId}::uuid
+          and e.event_type = 'resolution'
+          and e.actor_member_id is not null
+          and e.occurred_at >= (${start}::date::timestamp at time zone ${timezone})
+          and e.occurred_at < (${end}::date::timestamp at time zone ${timezone})
+        group by e.actor_member_id
       ),
-      csat_owners as (
-        select distinct on (c.id)
-          c.id as conversation_id,
-          m.sender_id as member_id,
-          c.csat_rating
-        from ${conversations} c
-        inner join ${messages} m on m.conversation_id = c.id
-        where c.workspace_id = ${workspaceId}::uuid
-          and c.csat_at >= (${start}::date::timestamp at time zone ${timezone})
-          and c.csat_at < (${end}::date::timestamp at time zone ${timezone})
-          and m.sender_type = 'agent'
-          and m.sender_id is not null
-          and m.is_internal_note = false
-          and m.created_at <= c.csat_at
-        order by c.id, m.created_at desc, m.id desc
+      latest_csat_events as (
+        select distinct on (e.conversation_id)
+          e.conversation_id,
+          e.actor_member_id as member_id,
+          e.rating
+        from ${supportOutcomeEvents} e
+        where e.workspace_id = ${workspaceId}::uuid
+          and e.event_type = 'csat'
+          and e.occurred_at >= (${start}::date::timestamp at time zone ${timezone})
+          and e.occurred_at < (${end}::date::timestamp at time zone ${timezone})
+        order by e.conversation_id, e.occurred_at desc, e.id desc
       ),
       csat_metrics as (
         select
           member_id,
-          count(*) filter (where csat_rating = 'good') as csat_good,
-          count(*) filter (where csat_rating = 'bad') as csat_bad
-        from csat_owners
+          count(*) filter (where rating = 'good') as csat_good,
+          count(*) filter (where rating = 'bad') as csat_bad
+        from latest_csat_events
+        where member_id is not null
         group by member_id
       )
       select
