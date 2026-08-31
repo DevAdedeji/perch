@@ -31,4 +31,5 @@ export function isPerchProductionOrigin(value: string) {
 
 export function isPerchIndexablePath(path: string) {
   return PERCH_INDEXABLE_PATHS.includes(path as typeof PERCH_INDEXABLE_PATHS[number])
+    || /^\/help\/ws_[a-f0-9]{10}(?:\/[0-9a-f-]{36})?$/.test(path)
 }

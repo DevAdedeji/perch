@@ -1,5 +1,7 @@
 import { PERCH_INDEXABLE_PATHS } from '@perch/shared'
 
+const MAX_SITEMAP_URLS = 50_000
+
 function xml(value: string) {
   return value
     .replaceAll('&', '&amp;')
@@ -9,9 +11,12 @@ function xml(value: string) {
     .replaceAll(/\u0027/g, '&apos;')
 }
 
-export default defineEventHandler((event) => {
+export default defineEventHandler(async (event) => {
   const origin = publicOrigin(event)
-  const urls = PERCH_INDEXABLE_PATHS.map(path => `  <url>
+  const capacity = MAX_SITEMAP_URLS - PERCH_INDEXABLE_PATHS.length
+  const entries = await listPublishedHelpSitemapEntries(useDb(), capacity)
+  const paths = [...PERCH_INDEXABLE_PATHS, ...publicHelpSitemapPaths(entries, capacity)]
+  const urls = paths.map(path => `  <url>
     <loc>${xml(`${origin}${path === '/' ? '' : path}`)}</loc>
   </url>`).join('\n')
 

@@ -6,7 +6,9 @@ const schema = z.object({
   title: z.string().trim().min(1, 'Give the article a title').max(160),
   body: z.string().trim().max(20000).default(''),
   // link to an FAQ that already lives on the business's own site
-  url: z.string().trim().url('Enter a valid link (https://…)').max(500).optional(),
+  url: z.string().trim().url('Enter a valid link (https://…)').max(500)
+    .refine(value => normalizePublicArticleUrl(value) !== null, 'Use a public HTTP(S) link without credentials')
+    .optional(),
   status: z.enum(['draft', 'published']).default('draft')
 }).refine(d => d.body.length > 0 || d.url, { message: 'Write a body or add a link' })
 

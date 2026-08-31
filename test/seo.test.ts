@@ -11,6 +11,10 @@ describe('SEO boundaries', () => {
   it('indexes only intentional public pages', () => {
     expect(PERCH_INDEXABLE_PATHS).toEqual(['/', '/privacy', '/terms'])
     expect(isPerchIndexablePath('/')).toBe(true)
+    expect(isPerchIndexablePath('/help/ws_18c6715c14')).toBe(true)
+    expect(isPerchIndexablePath('/help/ws_18c6715c14/550e8400-e29b-41d4-a716-446655440000')).toBe(true)
+    expect(isPerchIndexablePath('/help/not-a-site')).toBe(false)
+    expect(isPerchIndexablePath('/help/ws_18c6715c14/not-an-article')).toBe(false)
     expect(isPerchIndexablePath('/dashboard')).toBe(false)
     expect(isPerchIndexablePath('/login')).toBe(false)
     expect(isPerchIndexablePath('/join/private-token')).toBe(false)
