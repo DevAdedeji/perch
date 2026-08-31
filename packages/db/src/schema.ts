@@ -86,10 +86,12 @@ export const widgetInstallationSignals = pgTable('widget_installation_signals', 
   pageHash: text('page_hash').notNull(),
   pageUrl: text('page_url').notNull(),
   pageOrigin: text('page_origin').notNull(),
+  firstSeenAt: timestamp('first_seen_at', { withTimezone: true }).defaultNow().notNull(),
   lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).defaultNow().notNull()
 }, t => [
   uniqueIndex('widget_installation_signals_workspace_page_uq').on(t.workspaceId, t.pageHash),
-  index('widget_installation_signals_workspace_recency_idx').on(t.workspaceId, t.lastSeenAt)
+  index('widget_installation_signals_workspace_recency_idx').on(t.workspaceId, t.lastSeenAt),
+  index('widget_installation_signals_workspace_first_seen_idx').on(t.workspaceId, t.firstSeenAt)
 ])
 
 export const workspaceMembers = pgTable('workspace_members', {

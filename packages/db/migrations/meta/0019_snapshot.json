@@ -1,5 +1,5 @@
 {
-  "id": "403e1d19-8da9-4366-b8e7-23ef2a314642",
+  "id": "477a620a-355f-4dc7-8e2f-9a4bd57c44dd",
   "prevId": "84b32b56-084f-49c3-95ca-5e4e676e0bb1",
   "version": "7",
   "dialect": "postgresql",
@@ -2685,6 +2685,13 @@
           "primaryKey": false,
           "notNull": true
         },
+        "first_seen_at": {
+          "name": "first_seen_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
         "last_seen_at": {
           "name": "last_seen_at",
           "type": "timestamp with time zone",
@@ -2726,6 +2733,27 @@
             },
             {
               "expression": "last_seen_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "widget_installation_signals_workspace_first_seen_idx": {
+          "name": "widget_installation_signals_workspace_first_seen_idx",
+          "columns": [
+            {
+              "expression": "workspace_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "first_seen_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

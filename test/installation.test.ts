@@ -3,6 +3,8 @@ import {
   evaluateInstallationSignal,
   InstallationSignalDebouncer,
   INSTALLATION_SIGNAL_WRITE_DEBOUNCE_MS,
+  MAX_INSTALLATION_PAGES_PER_WORKSPACE,
+  MAX_NEW_INSTALLATION_PAGES_PER_HOUR,
   installationPageForOrigin,
   installationPageHash,
   installationPageMatches,
@@ -56,6 +58,11 @@ describe('installation signal write debouncing', () => {
     expect(debouncer.shouldWrite('workspace-1', contact, 1_000)).toBe(true)
     expect(debouncer.shouldWrite('workspace-1', pricing, 2_000)).toBe(false)
     expect(debouncer.shouldWrite('workspace-1', pricing, 1_000 + INSTALLATION_SIGNAL_WRITE_DEBOUNCE_MS)).toBe(true)
+  })
+
+  it('keeps the durable observation set and new-page budget bounded', () => {
+    expect(MAX_INSTALLATION_PAGES_PER_WORKSPACE).toBe(100)
+    expect(MAX_NEW_INSTALLATION_PAGES_PER_HOUR).toBeLessThan(MAX_INSTALLATION_PAGES_PER_WORKSPACE)
   })
 })
 

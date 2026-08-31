@@ -19,16 +19,26 @@ export default defineEventHandler(async (event) => {
     if (!workspace) throw createError({ statusCode: 404, statusMessage: 'Unknown site' })
 
     const installationPreview = getQuery(event).preview === '1'
-    const embedOrigin = installationPreview
-      ? getRequestURL(event, { xForwardedHost: true, xForwardedProto: true }).origin
-      : observedEmbedOrigin(getHeader(event, 'referer'), getHeader(event, 'origin'))
+    const suppliedTicket = getQuery(event).embed_ticket
+    let embedOrigin: string | null
     if (installationPreview) {
       await requireMembership(event, workspace.id, { admin: true })
+      embedOrigin = getRequestURL(event, { xForwardedHost: true, xForwardedProto: true }).origin
     } else {
+      if (typeof suppliedTicket === 'string' && suppliedTicket) {
+        const ticket = requireEmbedTicket(event, siteId, suppliedTicket)
+        if (ticket.installationPreview) {
+          throw createError({ statusCode: 403, statusMessage: 'Invalid embed session' })
+        }
+        embedOrigin = ticket.hostOrigin
+      } else {
+        embedOrigin = observedEmbedOrigin(getHeader(event, 'referer'), getHeader(event, 'origin'))
+      }
       if (!embedOrigin || !isDomainAllowed(embedOrigin, workspace.allowedDomains)) {
         throw createError({ statusCode: 403, statusMessage: 'This site is not allowed to embed this chat' })
       }
     }
+    event.context.perchEmbedOrigin = embedOrigin!
     event.context.perchEmbedTicket = issueEmbedTicket(event, siteId, {
       hostOrigin: embedOrigin!,
       installationPreview

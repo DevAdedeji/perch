@@ -190,7 +190,18 @@ export default defineWebSocketHandler({
           if (page) {
             visitorPageUpdate(ctx.wid as string, ctx.vid as string, page.url)
             if (!ctx.installationPreview) {
-              await recordWidgetInstallation(ctx.wid as string, page.url, ctx.hostOrigin)
+              const installationSignalAllowed = consumeRateLimit(
+                'installation-signal:visitor',
+                `${ctx.wid as string}:${ctx.vid as string}`,
+                { max: 12, windowMs: 60_000 }
+              ) && consumeRateLimit(
+                'installation-signal:workspace',
+                ctx.wid as string,
+                { max: 120, windowMs: 60_000 }
+              )
+              if (installationSignalAllowed) {
+                await recordWidgetInstallation(ctx.wid as string, page.url, ctx.hostOrigin)
+              }
             }
           }
         }

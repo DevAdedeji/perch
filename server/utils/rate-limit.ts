@@ -35,6 +35,19 @@ export function assertRateLimit(
   key: string,
   opts: { max: number, windowMs: number }
 ): void {
+  if (!consumeRateLimit(name, key, opts)) {
+    throw createError({
+      statusCode: 429,
+      statusMessage: 'Too many requests — slow down and try again shortly'
+    })
+  }
+}
+
+export function consumeRateLimit(
+  name: string,
+  key: string,
+  opts: { max: number, windowMs: number }
+): boolean {
   const now = Date.now()
   const id = `${name}:${key}`
   let bucket = buckets.get(id)
@@ -57,13 +70,8 @@ export function assertRateLimit(
 
   if (!bucket) {
     buckets.set(id, { count: 1, resetAt: now + opts.windowMs })
-    return
+    return true
   }
   bucket.count++
-  if (bucket.count > opts.max) {
-    throw createError({
-      statusCode: 429,
-      statusMessage: 'Too many requests — slow down and try again shortly'
-    })
-  }
+  return bucket.count <= opts.max
 }

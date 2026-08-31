@@ -10,6 +10,8 @@ const installationPreview = computed(() => route.query.preview === '1')
 const perchUrl = useRequestURL().origin
 const embedTicket = useState<string>('perch-embed-ticket', () =>
   (useRequestEvent()?.context.perchEmbedTicket as string | undefined) ?? '')
+const embeddedHostOrigin = useState<string>('perch-embed-origin', () =>
+  (useRequestEvent()?.context.perchEmbedOrigin as string | undefined) ?? '')
 
 const widget = useWidget(siteId.value, embedTicket.value, { installationPreview: installationPreview.value })
 const {
@@ -184,9 +186,9 @@ function initial(name: string | null | undefined) {
   return (name || 'A').charAt(0).toUpperCase()
 }
 
-let hostOrigin = ''
+let hostOrigin = embeddedHostOrigin.value
 function post(msg: Record<string, unknown>) {
-  window.parent?.postMessage({ source: 'perch-widget', ...msg }, hostOrigin || '*')
+  if (hostOrigin) window.parent?.postMessage({ source: 'perch-widget', ...msg }, hostOrigin)
 }
 
 // hand the brand color to the loader so the launcher bubble matches
@@ -357,7 +359,7 @@ watch(agentTyping, (v) => {
 })
 
 function onParentMessage(e: MessageEvent) {
-  if (e.source !== window.parent || (hostOrigin && e.origin !== hostOrigin)) return
+  if (!hostOrigin || e.source !== window.parent || e.origin !== hostOrigin) return
   const data = e.data
   if (!data || data.source !== 'perch-host') return
   if (data.perch === 'open') {
@@ -387,10 +389,12 @@ onMounted(async () => {
   darkQuery = window.matchMedia('(prefers-color-scheme: dark)')
   syncSystemTheme()
   darkQuery.addEventListener('change', syncSystemTheme)
-  try {
-    hostOrigin = document.referrer ? new URL(document.referrer).origin : ''
-  } catch {
-    hostOrigin = ''
+  if (!hostOrigin) {
+    try {
+      hostOrigin = document.referrer ? new URL(document.referrer).origin : ''
+    } catch {
+      hostOrigin = ''
+    }
   }
   window.addEventListener('message', onParentMessage)
   await widget.start()

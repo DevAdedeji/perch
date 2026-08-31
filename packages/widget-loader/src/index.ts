@@ -96,17 +96,35 @@ function init() {
   let destroyed = false
   let iconTimer: ReturnType<typeof setTimeout> | undefined
 
-  function ensureIframe(): HTMLIFrameElement {
-    if (iframe) return iframe
-    const f = document.createElement('iframe')
-    f.src = `${origin}/widget?site_id=${encodeURIComponent(siteId!)}`
-    f.title = 'Chat'
-    f.className = 'perch-frame'
-    f.setAttribute('allow', 'clipboard-write')
-    f.setAttribute('sandbox', 'allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-same-origin')
-    document.body.appendChild(f)
-    iframe = f
-    return f
+  let iframeRequest: Promise<HTMLIFrameElement | null> | null = null
+
+  function ensureIframe(): Promise<HTMLIFrameElement | null> {
+    if (iframe) return Promise.resolve(iframe)
+    if (iframeRequest) return iframeRequest
+    iframeRequest = fetch(`${origin}/api/widget/embed-ticket?site_id=${encodeURIComponent(siteId!)}`, {
+      method: 'POST',
+      mode: 'cors',
+      credentials: 'omit'
+    }).then(async (response) => {
+      if (!response.ok) throw new Error('Could not authorize the chat widget')
+      const data = await response.json() as { embed_ticket?: unknown }
+      if (typeof data.embed_ticket !== 'string' || !data.embed_ticket) {
+        throw new Error('The chat widget returned an invalid session')
+      }
+      if (destroyed) return null
+      const f = document.createElement('iframe')
+      f.src = `${origin}/widget?site_id=${encodeURIComponent(siteId!)}&embed_ticket=${encodeURIComponent(data.embed_ticket)}`
+      f.title = 'Chat'
+      f.className = 'perch-frame'
+      f.setAttribute('allow', 'clipboard-write')
+      f.setAttribute('sandbox', 'allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-same-origin')
+      document.body.appendChild(f)
+      iframe = f
+      return f
+    }).catch(() => null).finally(() => {
+      iframeRequest = null
+    })
+    return iframeRequest
   }
 
   function swapIcon(nextOpen: boolean) {
@@ -121,18 +139,22 @@ function init() {
     }, 140)
   }
 
-  function setOpen(next: boolean) {
+  async function setOpen(next: boolean) {
     if (open === next) return
     open = next
-    const f = ensureIframe()
-    f.classList.toggle('perch-open', next)
-    bubble.classList.toggle('perch-hide', next)
-    if (next) badge.style.display = 'none'
-    swapIcon(next)
-    f.contentWindow?.postMessage({ source: 'perch-host', perch: next ? 'open' : 'close' }, origin)
+    const f = await ensureIframe()
+    if (!f) {
+      if (next) open = false
+      return
+    }
+    f.classList.toggle('perch-open', open)
+    bubble.classList.toggle('perch-hide', open)
+    if (open) badge.style.display = 'none'
+    swapIcon(open)
+    f.contentWindow?.postMessage({ source: 'perch-host', perch: open ? 'open' : 'close' }, origin)
   }
 
-  const onBubbleClick = () => setOpen(!open)
+  const onBubbleClick = () => void setOpen(!open)
   bubble.addEventListener('click', onBubbleClick)
 
   // public API: window.Perch.identify({ name, email })
@@ -209,8 +231,8 @@ function init() {
       identity = { user_id: userId, name, email, hash }
       sendIdentity()
     },
-    open: () => setOpen(true),
-    close: () => setOpen(false),
+    open: () => void setOpen(true),
+    close: () => void setOpen(false),
     destroy
   }
   w.Perch = api
@@ -232,10 +254,10 @@ function init() {
         badge.style.display = 'none'
       }
     } else if (d.perch === 'close') {
-      setOpen(false)
+      void setOpen(false)
     } else if (d.perch === 'open') {
       // the widget asked to open itself (proactive trigger fired)
-      setOpen(true)
+      void setOpen(true)
     } else if (d.perch === 'ready') {
       // frame (re)mounted — resync open state + identity + page in case a message was missed
       iframe?.contentWindow?.postMessage({ source: 'perch-host', perch: open ? 'open' : 'close' }, origin)
@@ -259,7 +281,7 @@ function init() {
   window.addEventListener('message', onWidgetMessage)
 
   document.body.appendChild(bubble)
-  ensureIframe()
+  void ensureIframe()
   trackNavigation()
 }
 

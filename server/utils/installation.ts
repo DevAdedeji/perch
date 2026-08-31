@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { and, eq, lt, sql, widgetInstallationSignals } from '@perch/db'
+import { and, eq, sql, widgetInstallationSignals } from '@perch/db'
 
 export interface InstallationPage {
   url: string
@@ -10,8 +10,8 @@ export interface InstallationPage {
 export const INSTALLATION_SIGNAL_FRESHNESS_MS = 15 * 60 * 1000
 export const INSTALLATION_SIGNAL_WRITE_DEBOUNCE_MS = 60 * 1000
 export const INSTALLATION_SIGNAL_RETENTION_MS = 24 * 60 * 60 * 1000
-const MAX_INSTALLATION_PAGES_PER_WORKSPACE = 100
-const INSTALLATION_CLEANUP_INTERVAL_MS = 60 * 60 * 1000
+export const MAX_INSTALLATION_PAGES_PER_WORKSPACE = 100
+export const MAX_NEW_INSTALLATION_PAGES_PER_HOUR = 30
 
 export type InstallationSignalReason = 'installed' | 'not_seen' | 'different_page' | 'stale'
 
@@ -117,34 +117,6 @@ export function evaluateInstallationSignal(
 }
 
 const installationSignalDebouncer = new InstallationSignalDebouncer()
-const lastCleanupByWorkspace = new Map<string, number>()
-
-async function pruneInstallationSignals(workspaceId: string, now: number): Promise<void> {
-  const previous = lastCleanupByWorkspace.get(workspaceId)
-  if (previous !== undefined && now - previous < INSTALLATION_CLEANUP_INTERVAL_MS) return
-  lastCleanupByWorkspace.set(workspaceId, now)
-
-  const db = useDb()
-  try {
-    await db.delete(widgetInstallationSignals).where(and(
-      eq(widgetInstallationSignals.workspaceId, workspaceId),
-      lt(widgetInstallationSignals.lastSeenAt, sql`now() - interval '24 hours'`)
-    ))
-    await db.execute(sql`
-      delete from ${widgetInstallationSignals}
-      where ${widgetInstallationSignals.id} in (
-        select ${widgetInstallationSignals.id}
-        from ${widgetInstallationSignals}
-        where ${widgetInstallationSignals.workspaceId} = ${workspaceId}::uuid
-        order by ${widgetInstallationSignals.lastSeenAt} desc
-        offset ${MAX_INSTALLATION_PAGES_PER_WORKSPACE}
-      )
-    `)
-  } catch (error) {
-    if (lastCleanupByWorkspace.get(workspaceId) === now) lastCleanupByWorkspace.delete(workspaceId)
-    console.error('[installation] could not prune widget load signals', { workspaceId, error })
-  }
-}
 
 export async function recordWidgetInstallation(
   workspaceId: string,
@@ -159,15 +131,55 @@ export async function recordWidgetInstallation(
   if (!installationSignalDebouncer.shouldWrite(workspaceId, pageHash, writeTime)) return false
 
   try {
-    await useDb()
-      .insert(widgetInstallationSignals)
-      .values({ workspaceId, pageHash, pageUrl: page.url, pageOrigin: page.origin })
-      .onConflictDoUpdate({
-        target: [widgetInstallationSignals.workspaceId, widgetInstallationSignals.pageHash],
-        set: { pageUrl: page.url, pageOrigin: page.origin, lastSeenAt: sql`now()` }
+    return await useDb().transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`installation:${workspaceId}`}))`)
+
+      const [existing] = await tx.select({ id: widgetInstallationSignals.id })
+        .from(widgetInstallationSignals)
+        .where(and(
+          eq(widgetInstallationSignals.workspaceId, workspaceId),
+          eq(widgetInstallationSignals.pageHash, pageHash)
+        ))
+        .limit(1)
+
+      if (existing) {
+        await tx.update(widgetInstallationSignals)
+          .set({ pageUrl: page.url, pageOrigin: page.origin, lastSeenAt: sql`now()` })
+          .where(eq(widgetInstallationSignals.id, existing.id))
+        return true
+      }
+
+      await tx.execute(sql`
+        delete from ${widgetInstallationSignals}
+        where ${widgetInstallationSignals.workspaceId} = ${workspaceId}::uuid
+          and ${widgetInstallationSignals.lastSeenAt} < now() - interval '24 hours'
+      `)
+      const [budget] = await tx.select({ count: sql<number>`count(*)::int` })
+        .from(widgetInstallationSignals)
+        .where(and(
+          eq(widgetInstallationSignals.workspaceId, workspaceId),
+          sql`${widgetInstallationSignals.firstSeenAt} >= now() - interval '1 hour'`
+        ))
+      if ((budget?.count ?? 0) >= MAX_NEW_INSTALLATION_PAGES_PER_HOUR) return false
+
+      await tx.execute(sql`
+        delete from ${widgetInstallationSignals}
+        where ${widgetInstallationSignals.id} in (
+          select ${widgetInstallationSignals.id}
+          from ${widgetInstallationSignals}
+          where ${widgetInstallationSignals.workspaceId} = ${workspaceId}::uuid
+          order by ${widgetInstallationSignals.lastSeenAt} desc
+          offset ${MAX_INSTALLATION_PAGES_PER_WORKSPACE - 1}
+        )
+      `)
+      await tx.insert(widgetInstallationSignals).values({
+        workspaceId,
+        pageHash,
+        pageUrl: page.url,
+        pageOrigin: page.origin
       })
-    void pruneInstallationSignals(workspaceId, writeTime)
-    return true
+      return true
+    })
   } catch (error) {
     installationSignalDebouncer.forget(workspaceId, pageHash, writeTime)
     console.error('[installation] could not record widget load', { workspaceId, error })

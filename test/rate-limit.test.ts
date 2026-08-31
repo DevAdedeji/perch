@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { assertRateLimit } from '../server/utils/rate-limit'
+import { assertRateLimit, consumeRateLimit } from '../server/utils/rate-limit'
 
 describe('assertRateLimit', () => {
   beforeEach(() => {
@@ -35,5 +35,12 @@ describe('assertRateLimit', () => {
 
     vi.advanceTimersByTime(61_000)
     expect(() => assertRateLimit('reset', key, { max: 3, windowMs: 60_000 })).not.toThrow()
+  })
+
+  it('supports non-throwing rate checks for websocket signals', () => {
+    const key = `ws-${Math.random()}`
+    expect(consumeRateLimit('signal', key, { max: 2, windowMs: 60_000 })).toBe(true)
+    expect(consumeRateLimit('signal', key, { max: 2, windowMs: 60_000 })).toBe(true)
+    expect(consumeRateLimit('signal', key, { max: 2, windowMs: 60_000 })).toBe(false)
   })
 })
