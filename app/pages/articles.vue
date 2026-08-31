@@ -183,9 +183,9 @@ async function togglePublish(article: Article) {
 
 <template>
   <div class="h-full overflow-y-auto">
-    <div class="max-w-2xl mx-auto p-5 sm:p-8 space-y-8">
+    <div class="max-w-4xl mx-auto p-5 sm:p-8 space-y-8">
       <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
+        <div class="min-w-0 max-w-2xl">
           <h1 class="font-display text-2xl font-bold text-highlighted">
             Help Center
           </h1>
@@ -194,7 +194,7 @@ async function togglePublish(article: Article) {
             common questions before they become conversations.
           </p>
         </div>
-        <div class="flex flex-wrap gap-2 sm:justify-end">
+        <div class="flex flex-wrap gap-2 sm:shrink-0 sm:flex-nowrap sm:justify-end">
           <UButton
             v-if="publicHelpUrl"
             :to="publicHelpUrl"
@@ -203,6 +203,7 @@ async function togglePublish(article: Article) {
             color="neutral"
             variant="soft"
             trailing-icon="i-lucide-external-link"
+            class="shrink-0 whitespace-nowrap"
           >
             View public page
           </UButton>
@@ -210,6 +211,7 @@ async function togglePublish(article: Article) {
             v-if="isAdmin"
             color="primary"
             icon="i-lucide-plus"
+            class="shrink-0 whitespace-nowrap"
             @click="openGroupModal(null)"
           >
             New group

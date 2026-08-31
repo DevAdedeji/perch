@@ -42,9 +42,20 @@ const isAdmin = computed(() => workspace.value?.role === 'admin')
 
 const name = ref('')
 const swatches = ['#8b5cf6', '#6366f1', '#f43f5e', '#ec4899', '#f59e0b', '#10b981', '#0ea5e9', '#0f172a']
-const widgetPositions = ['left', 'right'] as const
-const widgetSizes = ['compact', 'standard', 'large'] as const
-const widgetThemes = ['light', 'dark', 'system'] as const
+const widgetPositionOptions = [
+  { value: 'left', label: 'Left', icon: 'i-lucide-panel-left' },
+  { value: 'right', label: 'Right', icon: 'i-lucide-panel-right' }
+] as const
+const widgetSizeOptions = [
+  { value: 'compact', label: 'Compact', icon: 'i-lucide-minimize-2' },
+  { value: 'standard', label: 'Regular', icon: 'i-lucide-square' },
+  { value: 'large', label: 'Large', icon: 'i-lucide-maximize-2' }
+] as const
+const widgetThemeOptions = [
+  { value: 'light', label: 'Light', icon: 'i-lucide-sun' },
+  { value: 'dark', label: 'Dark', icon: 'i-lucide-moon' },
+  { value: 'system', label: 'System', icon: 'i-lucide-monitor' }
+] as const
 const widgetEditor = reactive({
   widgetPrimaryColor: '#f59e0b',
   widgetGreeting: 'Hi there 👋',
@@ -368,7 +379,7 @@ async function removeLogo() {
 
 <template>
   <div class="h-full overflow-y-auto">
-    <div class="max-w-2xl mx-auto p-5 sm:p-8 space-y-8">
+    <div class="max-w-5xl mx-auto p-5 sm:p-8 space-y-8">
       <h1 class="font-display text-2xl font-bold text-highlighted">
         Settings
       </h1>
@@ -496,13 +507,14 @@ async function removeLogo() {
             <UBadge
               color="neutral"
               variant="subtle"
+              icon="i-lucide-eye"
               class="mt-2 w-fit sm:mt-0"
             >
               Live preview
             </UBadge>
           </div>
 
-          <div class="mt-5 grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
+          <div class="mt-5 grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(280px,320px)]">
             <div class="space-y-5">
               <div class="grid gap-4 sm:grid-cols-2">
                 <UFormField
@@ -570,23 +582,27 @@ async function removeLogo() {
                 </div>
               </div>
 
-              <div class="grid gap-4 sm:grid-cols-3">
+              <div class="grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">
                 <div>
                   <p class="text-sm font-medium text-highlighted">
                     Position
                   </p>
                   <div class="mt-2 grid grid-cols-2 gap-1 rounded-lg bg-elevated p-1 ring-1 ring-default">
                     <button
-                      v-for="side in widgetPositions"
-                      :key="side"
+                      v-for="option in widgetPositionOptions"
+                      :key="option.value"
                       type="button"
                       :disabled="!isAdmin"
-                      :aria-pressed="widgetEditor.widgetPosition === side"
-                      class="rounded-md px-2 py-1.5 text-xs font-medium capitalize transition-colors"
-                      :class="widgetEditor.widgetPosition === side ? 'bg-default text-highlighted shadow-sm' : 'text-muted hover:text-highlighted'"
-                      @click="widgetEditor.widgetPosition = side"
+                      :aria-pressed="widgetEditor.widgetPosition === option.value"
+                      class="flex min-w-0 items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-colors"
+                      :class="widgetEditor.widgetPosition === option.value ? 'bg-default text-highlighted shadow-sm' : 'text-muted hover:text-highlighted'"
+                      @click="widgetEditor.widgetPosition = option.value"
                     >
-                      {{ side }}
+                      <UIcon
+                        :name="option.icon"
+                        class="size-3.5 shrink-0"
+                      />
+                      <span>{{ option.label }}</span>
                     </button>
                   </div>
                 </div>
@@ -596,16 +612,20 @@ async function removeLogo() {
                   </p>
                   <div class="mt-2 grid grid-cols-3 gap-1 rounded-lg bg-elevated p-1 ring-1 ring-default">
                     <button
-                      v-for="size in widgetSizes"
-                      :key="size"
+                      v-for="option in widgetSizeOptions"
+                      :key="option.value"
                       type="button"
                       :disabled="!isAdmin"
-                      :aria-pressed="widgetEditor.widgetSize === size"
-                      class="rounded-md px-1 py-1.5 text-[11px] font-medium capitalize transition-colors"
-                      :class="widgetEditor.widgetSize === size ? 'bg-default text-highlighted shadow-sm' : 'text-muted hover:text-highlighted'"
-                      @click="widgetEditor.widgetSize = size"
+                      :aria-pressed="widgetEditor.widgetSize === option.value"
+                      class="flex min-w-0 items-center justify-center gap-1 rounded-md px-1.5 py-1.5 text-[11px] font-medium transition-colors"
+                      :class="widgetEditor.widgetSize === option.value ? 'bg-default text-highlighted shadow-sm' : 'text-muted hover:text-highlighted'"
+                      @click="widgetEditor.widgetSize = option.value"
                     >
-                      {{ size === 'standard' ? 'Regular' : size }}
+                      <UIcon
+                        :name="option.icon"
+                        class="size-3 shrink-0"
+                      />
+                      <span class="truncate">{{ option.label }}</span>
                     </button>
                   </div>
                 </div>
@@ -615,16 +635,20 @@ async function removeLogo() {
                   </p>
                   <div class="mt-2 grid grid-cols-3 gap-1 rounded-lg bg-elevated p-1 ring-1 ring-default">
                     <button
-                      v-for="theme in widgetThemes"
-                      :key="theme"
+                      v-for="option in widgetThemeOptions"
+                      :key="option.value"
                       type="button"
                       :disabled="!isAdmin"
-                      :aria-pressed="widgetEditor.widgetTheme === theme"
-                      class="rounded-md px-1 py-1.5 text-[11px] font-medium capitalize transition-colors"
-                      :class="widgetEditor.widgetTheme === theme ? 'bg-default text-highlighted shadow-sm' : 'text-muted hover:text-highlighted'"
-                      @click="widgetEditor.widgetTheme = theme"
+                      :aria-pressed="widgetEditor.widgetTheme === option.value"
+                      class="flex min-w-0 items-center justify-center gap-1 rounded-md px-1.5 py-1.5 text-[11px] font-medium transition-colors"
+                      :class="widgetEditor.widgetTheme === option.value ? 'bg-default text-highlighted shadow-sm' : 'text-muted hover:text-highlighted'"
+                      @click="widgetEditor.widgetTheme = option.value"
                     >
-                      {{ theme }}
+                      <UIcon
+                        :name="option.icon"
+                        class="size-3 shrink-0"
+                      />
+                      <span class="truncate">{{ option.label }}</span>
                     </button>
                   </div>
                 </div>
