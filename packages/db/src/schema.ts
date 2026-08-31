@@ -232,6 +232,7 @@ export const supportOutcomeEvents = pgTable('support_outcome_events', {
   workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
   conversationId: uuid('conversation_id').notNull().references(() => conversations.id, { onDelete: 'cascade' }),
   eventType: supportOutcomeEventTypeEnum('event_type').notNull(),
+  requestId: uuid('request_id'),
   // Snapshot ID stays intact if a member leaves; null identifies an automated outcome.
   actorMemberId: uuid('actor_member_id'),
   rating: text('rating', { enum: ['good', 'bad'] }),
@@ -240,8 +241,9 @@ export const supportOutcomeEvents = pgTable('support_outcome_events', {
 }, t => [
   check(
     'support_outcome_events_payload_ck',
-    sql`(${t.eventType} = 'resolution' and ${t.rating} is null) or (${t.eventType} = 'csat' and ${t.rating} in ('good', 'bad'))`
+    sql`(${t.eventType} = 'resolution' and ${t.requestId} is null and ${t.rating} is null) or (${t.eventType} = 'csat' and ${t.requestId} is not null and ${t.rating} in ('good', 'bad'))`
   ),
+  uniqueIndex('support_outcome_events_conversation_request_uq').on(t.conversationId, t.requestId),
   index('support_outcome_events_workspace_type_time_idx').on(t.workspaceId, t.eventType, t.occurredAt),
   index('support_outcome_events_conversation_type_time_idx').on(t.conversationId, t.eventType, t.occurredAt)
 ])
@@ -288,7 +290,13 @@ export const messages = pgTable('messages', {
   isInternalNote: boolean('is_internal_note').default(false).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull()
 }, t => [
-  index('messages_conversation_created_idx').on(t.conversationId, t.createdAt)
+  index('messages_conversation_created_idx').on(t.conversationId, t.createdAt),
+  index('messages_public_conversation_sender_time_idx')
+    .on(t.conversationId, t.senderType, t.createdAt)
+    .where(sql`${t.isInternalNote} = false`),
+  index('messages_public_sender_time_conversation_idx')
+    .on(t.senderType, t.createdAt, t.conversationId, t.senderId)
+    .where(sql`${t.isInternalNote} = false`)
 ])
 
 /** Per-agent read tracking; unread is derived (last_message_at > last_read_at). */

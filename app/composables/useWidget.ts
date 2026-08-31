@@ -480,8 +480,15 @@ export function useWidget(
     return performSend(tempId).catch(() => {})
   }
 
+  let pendingCsat: { signature: string, requestId: string } | null = null
+
   async function sendCsat(rating: 'good' | 'bad', comment?: string) {
     if (!conversationId.value) return
+    const normalizedComment = comment?.trim() || ''
+    const signature = `${conversationId.value}:${rating}:${normalizedComment}`
+    if (pendingCsat?.signature !== signature) {
+      pendingCsat = { signature, requestId: crypto.randomUUID() }
+    }
     csatRating.value = rating // optimistic — mis-taps can re-rate
     await $fetch('/api/widget/csat', {
       method: 'POST',
@@ -489,10 +496,12 @@ export function useWidget(
         site_id: siteId,
         visitor_session: visitorSession,
         conversation_id: conversationId.value,
+        request_id: pendingCsat.requestId,
         rating,
-        comment: comment?.trim() || undefined
+        comment: normalizedComment || undefined
       }
     })
+    pendingCsat = null
   }
 
   function sendTyping(isTyping: boolean, preview?: string) {

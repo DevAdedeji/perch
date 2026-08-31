@@ -60,6 +60,7 @@ describe('immutable support outcomes', () => {
   const automationsSource = readFileSync(new URL('../server/utils/automation-engine.ts', import.meta.url), 'utf8')
   const resolveSource = readFileSync(new URL('../server/api/conversations/[id]/resolve.post.ts', import.meta.url), 'utf8')
   const csatSource = readFileSync(new URL('../server/api/widget/csat.post.ts', import.meta.url), 'utf8')
+  const widgetSource = readFileSync(new URL('../app/composables/useWidget.ts', import.meta.url), 'utf8')
   const schemaSource = readFileSync(new URL('../packages/db/src/schema.ts', import.meta.url), 'utf8')
   const migrationSource = readFileSync(
     new URL('../packages/db/migrations/0020_immutable-support-outcomes.sql', import.meta.url),
@@ -95,6 +96,17 @@ describe('immutable support outcomes', () => {
     expect(csatSource).toContain('tx.insert(supportOutcomeEvents)')
   })
 
+  it('serializes, rate-limits, caps, and deduplicates CSAT revisions', () => {
+    expect(csatSource).toContain(`request_id: z.string().uuid()`)
+    expect(csatSource).toContain(`.for('update')`)
+    expect(csatSource).toContain(`'widget-csat:visitor'`)
+    expect(csatSource).toContain(`'widget-csat:workspace'`)
+    expect(csatSource).toContain('>= 10')
+    expect(csatSource.indexOf(`.for('update')`)).toBeLessThan(csatSource.indexOf('const now = new Date()'))
+    expect(widgetSource).toContain('crypto.randomUUID()')
+    expect(widgetSource).toContain('request_id: pendingCsat.requestId')
+  })
+
   it('reads historical outcomes only from append-only events', () => {
     expect(analyticsSource).toContain('from ${supportOutcomeEvents} e')
     expect(analyticsSource).toContain('latest_csat_events as')
@@ -108,12 +120,15 @@ describe('immutable support outcomes', () => {
     expect(schemaSource).toContain('.on(t.workspaceId, t.eventType, t.occurredAt)')
     expect(schemaSource).toContain('support_outcome_events_conversation_type_time_idx')
     expect(schemaSource).toContain('.on(t.conversationId, t.eventType, t.occurredAt)')
+    expect(schemaSource).toContain('support_outcome_events_conversation_request_uq')
+    expect(schemaSource).toContain('messages_public_conversation_sender_time_idx')
+    expect(schemaSource).toContain('messages_public_sender_time_conversation_idx')
   })
 
   it('backfills the recoverable resolution and CSAT history for existing conversations', () => {
     expect(migrationSource).toContain('COALESCE(c."resolved_at", c."csat_at")')
-    expect(migrationSource).toContain('c."assigned_agent_id"')
-    expect(migrationSource).toContain(`e."event_type" = 'resolution'`)
+    expect(migrationSource).not.toContain('c."assigned_agent_id"')
+    expect(migrationSource).toContain('NULL,')
     expect(migrationSource).toContain(`c."csat_rating" IN ('good', 'bad')`)
     expect(migrationSource).toContain('support_outcome_events_workspace_type_time_idx')
   })

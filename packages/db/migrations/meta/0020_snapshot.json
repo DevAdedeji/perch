@@ -1,6 +1,6 @@
 {
-  "id": "6afea3ad-de86-4fe3-92a1-e864c3754722",
-  "prevId": "403e1d19-8da9-4366-b8e7-23ef2a314642",
+  "id": "f8b62a4f-28e6-43cb-9e99-208a7578372a",
+  "prevId": "477a620a-355f-4dc7-8e2f-9a4bd57c44dd",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1704,6 +1704,68 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "messages_public_conversation_sender_time_idx": {
+          "name": "messages_public_conversation_sender_time_idx",
+          "columns": [
+            {
+              "expression": "conversation_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "sender_type",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"messages\".\"is_internal_note\" = false",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "messages_public_sender_time_conversation_idx": {
+          "name": "messages_public_sender_time_conversation_idx",
+          "columns": [
+            {
+              "expression": "sender_type",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "conversation_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "sender_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "where": "\"messages\".\"is_internal_note\" = false",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -1931,6 +1993,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "request_id": {
+          "name": "request_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "actor_member_id": {
           "name": "actor_member_id",
           "type": "uuid",
@@ -1959,6 +2027,27 @@
         }
       },
       "indexes": {
+        "support_outcome_events_conversation_request_uq": {
+          "name": "support_outcome_events_conversation_request_uq",
+          "columns": [
+            {
+              "expression": "conversation_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "request_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "support_outcome_events_workspace_type_time_idx": {
           "name": "support_outcome_events_workspace_type_time_idx",
           "columns": [
@@ -2048,7 +2137,7 @@
       "checkConstraints": {
         "support_outcome_events_payload_ck": {
           "name": "support_outcome_events_payload_ck",
-          "value": "(\"support_outcome_events\".\"event_type\" = 'resolution' and \"support_outcome_events\".\"rating\" is null) or (\"support_outcome_events\".\"event_type\" = 'csat' and \"support_outcome_events\".\"rating\" in ('good', 'bad'))"
+          "value": "(\"support_outcome_events\".\"event_type\" = 'resolution' and \"support_outcome_events\".\"request_id\" is null and \"support_outcome_events\".\"rating\" is null) or (\"support_outcome_events\".\"event_type\" = 'csat' and \"support_outcome_events\".\"request_id\" is not null and \"support_outcome_events\".\"rating\" in ('good', 'bad'))"
         }
       },
       "isRLSEnabled": false
@@ -2837,6 +2926,13 @@
           "primaryKey": false,
           "notNull": true
         },
+        "first_seen_at": {
+          "name": "first_seen_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
         "last_seen_at": {
           "name": "last_seen_at",
           "type": "timestamp with time zone",
@@ -2878,6 +2974,27 @@
             },
             {
               "expression": "last_seen_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "widget_installation_signals_workspace_first_seen_idx": {
+          "name": "widget_installation_signals_workspace_first_seen_idx",
+          "columns": [
+            {
+              "expression": "workspace_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "first_seen_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
