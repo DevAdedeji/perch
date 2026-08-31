@@ -55,6 +55,11 @@ const verification = ref<VerificationResult | null>(null)
 const verifying = ref(false)
 const verificationError = ref('')
 const previewFrame = ref<HTMLIFrameElement | null>(null)
+const widgetEditor = ref(widgetAppearanceDefaults())
+const customizing = ref(false)
+const savingWidget = ref(false)
+// bumped after a save so the iframe remounts and reloads the real widget
+const previewNonce = ref(0)
 
 const storageKey = computed(() => `perch:installation:${wid.value ?? 'none'}`)
 const snippet = computed(() => data.value ? buildEmbedSnippet(origin, data.value.workspace.siteId) : '')
@@ -103,10 +108,27 @@ async function load(options: { silent?: boolean } = {}) {
   }
   try {
     data.value = await $fetch<InstallationData>(`/api/workspaces/${wid.value}/installation`)
+    // the status poll lands here too — don't clobber edits in progress
+    if (!customizing.value) widgetEditor.value = pickWidgetAppearance(data.value.workspace)
   } catch {
     if (!options.silent) loadError.value = true
   } finally {
     if (!options.silent) loading.value = false
+  }
+}
+
+async function saveAppearance() {
+  if (savingWidget.value || !wid.value || !isAdmin.value) return
+  savingWidget.value = true
+  try {
+    await $fetch(`/api/workspaces/${wid.value}`, { method: 'PATCH', body: { ...widgetEditor.value } })
+    await load({ silent: true })
+    previewNonce.value += 1
+    toast.add({ title: 'Widget appearance saved', icon: 'i-lucide-check', color: 'success' })
+  } catch (e) {
+    toast.add({ title: getErrorMessage(e, 'Could not save widget appearance'), color: 'error' })
+  } finally {
+    savingWidget.value = false
   }
 }
 
@@ -397,11 +419,13 @@ watch(wid, async () => {
                   </p>
                 </div>
                 <UButton
-                  to="/settings"
                   color="neutral"
-                  variant="ghost"
+                  :variant="customizing ? 'subtle' : 'ghost'"
                   size="sm"
                   icon="i-lucide-palette"
+                  :trailing-icon="customizing ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
+                  :aria-expanded="customizing"
+                  @click="customizing = !customizing"
                 >
                   Customize
                 </UButton>
@@ -416,6 +440,7 @@ watch(wid, async () => {
                     <span class="ml-2 truncate font-mono text-[10px] text-dimmed">Live widget preview</span>
                   </div>
                   <iframe
+                    :key="previewNonce"
                     ref="previewFrame"
                     :src="previewUrl"
                     title="Interactive Perch widget preview"
@@ -424,6 +449,27 @@ watch(wid, async () => {
                     @load="openPreview"
                   />
                 </div>
+              </div>
+
+              <div
+                v-if="customizing"
+                class="mt-4 rounded-xl bg-default p-4 ring-1 ring-default sm:p-5"
+              >
+                <p class="text-sm font-medium text-highlighted">
+                  Widget appearance
+                </p>
+                <p class="mt-0.5 text-xs text-muted">
+                  {{ isAdmin
+                    ? 'Save to see your changes in the preview above.'
+                    : 'Only admins can change how the widget looks.' }}
+                </p>
+                <WidgetAppearanceEditor
+                  v-model="widgetEditor"
+                  class="mt-4"
+                  :disabled="!isAdmin"
+                  :saving="savingWidget"
+                  @save="saveAppearance"
+                />
               </div>
 
               <div class="mt-4 flex flex-col gap-3 rounded-xl bg-default p-3.5 ring-1 ring-default sm:flex-row sm:items-center">
