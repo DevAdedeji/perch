@@ -137,7 +137,7 @@ async function startConversation() {
   <div class="h-full flex flex-col">
     <!-- header -->
     <div class="shrink-0 flex items-center gap-3 px-5 py-3.5 border-b border-default bg-default">
-      <span class="grid place-items-center size-9 rounded-xl avatar-amber">
+      <span class="grid place-items-center size-9 rounded-xl avatar-primary">
         <UIcon
           name="i-lucide-radar"
           class="size-5"
@@ -175,7 +175,7 @@ async function startConversation() {
         v-else-if="!roster.length"
         class="h-full flex flex-col items-center justify-center text-center gap-1"
       >
-        <span class="grid place-items-center size-12 rounded-2xl avatar-amber mb-2">
+        <span class="grid place-items-center size-12 rounded-2xl avatar-primary mb-2">
           <UIcon
             name="i-lucide-radar"
             class="size-6"
@@ -198,7 +198,7 @@ async function startConversation() {
           :key="v.visitor_ref"
           class="group flex items-center gap-3 px-4 py-3"
         >
-          <span class="relative grid place-items-center size-9 shrink-0 rounded-xl avatar-amber text-[11px] font-bold">
+          <span class="relative grid place-items-center size-9 shrink-0 rounded-xl avatar-primary text-[11px] font-bold">
             {{ initials(v) }}
             <span class="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full bg-green-500 ring-2 ring-default" />
           </span>
@@ -209,7 +209,7 @@ async function startConversation() {
               <UIcon
                 v-if="v.identity_verified"
                 name="i-lucide-badge-check"
-                class="size-3.5 text-amber-500 shrink-0"
+                class="size-3.5 text-primary-500 shrink-0"
                 title="Verified identity"
               />
             </p>

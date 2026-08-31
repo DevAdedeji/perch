@@ -414,7 +414,7 @@ async function removeLogo() {
                 Shown in your widget's header and message bubbles instead of your initial.
               </p>
               <div class="flex items-center gap-3">
-                <span class="grid place-items-center size-12 shrink-0 rounded-xl overflow-hidden avatar-amber text-base font-bold">
+                <span class="grid place-items-center size-12 shrink-0 rounded-xl overflow-hidden avatar-primary text-base font-bold">
                   <img
                     v-if="workspace?.logoUrl"
                     :src="workspace.logoUrl"
@@ -844,7 +844,7 @@ async function removeLogo() {
               :key="c.id"
               class="group flex items-start gap-3 px-3.5 py-2.5 bg-default"
             >
-              <span class="shrink-0 rounded-md bg-amber-500/10 ring-1 ring-amber-500/25 px-1.5 py-0.5 font-mono text-xs font-semibold text-amber-700 dark:text-amber-400">
+              <span class="shrink-0 rounded-md bg-primary-500/10 ring-1 ring-primary-500/25 px-1.5 py-0.5 font-mono text-xs font-semibold text-primary-700 dark:text-primary-400">
                 /{{ c.shortcut }}
               </span>
               <p class="min-w-0 flex-1 text-sm text-muted line-clamp-2">
@@ -1041,7 +1041,7 @@ async function removeLogo() {
 
           <div class="mt-5">
             <p class="text-sm font-medium text-highlighted">
-              Know who you’re talking to <span class="ml-1 rounded-md bg-amber-500/10 ring-1 ring-amber-500/25 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-400">optional</span>
+              Know who you’re talking to <span class="ml-1 rounded-md bg-primary-500/10 ring-1 ring-primary-500/25 px-1.5 py-0.5 text-[10px] font-semibold text-primary-700 dark:text-primary-400">optional</span>
             </p>
             <p class="text-xs text-muted mt-0.5">
               If your visitors sign in on your site, pass their details and Perch skips the
@@ -1076,7 +1076,7 @@ async function removeLogo() {
             Looking for allowed domains, identity verification, the audit log, or workspace deletion?
             They live on the <NuxtLink
               to="/admin"
-              class="text-amber-600 dark:text-amber-400 hover:underline"
+              class="text-primary-600 dark:text-primary-400 hover:underline"
             >Admin page</NuxtLink>.
           </p>
         </section>

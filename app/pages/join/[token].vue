@@ -42,22 +42,19 @@ const joinRedirect = `/join/${token}`
 </script>
 
 <template>
-  <div class="w-full max-w-sm text-center">
+  <div class="w-full max-w-sm">
     <!-- invalid / expired -->
-    <div
-      v-if="fetchError || !invite || invite.status !== 'pending'"
-      class="rounded-2xl border-glow bg-elevated/40 glass p-8 shadow-xl shadow-black/10"
-    >
-      <div class="mx-auto grid place-items-center size-12 rounded-xl bg-elevated ring-1 ring-default">
+    <div v-if="fetchError || !invite || invite.status !== 'pending'">
+      <div class="grid size-11 place-items-center rounded-2xl bg-elevated ring-1 ring-default">
         <UIcon
           name="i-lucide-link-2-off"
-          class="size-6 text-dimmed"
+          class="size-5.5 text-dimmed"
         />
       </div>
-      <h1 class="mt-4 font-display text-xl font-bold text-highlighted">
+      <h1 class="mt-4 font-display text-3xl font-bold tracking-tight text-highlighted">
         Invite unavailable
       </h1>
-      <p class="mt-1.5 text-sm text-muted">
+      <p class="mt-2 text-sm text-muted">
         {{ invite?.status === 'accepted' ? 'This invite has already been used.'
           : invite?.status === 'expired' ? 'This invite has expired.'
             : 'This invite link is invalid or has been revoked.' }}
@@ -75,21 +72,17 @@ const joinRedirect = `/join/${token}`
     </div>
 
     <!-- valid invite -->
-    <div
-      v-else
-      class="rounded-2xl border-glow bg-elevated/40 glass p-8 shadow-xl shadow-black/10"
-    >
+    <div v-else>
       <WorkspaceAvatar
         :name="invite.workspace?.name"
         :color="invite.workspace?.widgetPrimaryColor ?? '#f59e0b'"
         :logo-url="invite.workspace?.logoUrl"
-        :size="64"
-        class="mx-auto"
+        :size="56"
       />
-      <h1 class="mt-5 font-display text-xl font-bold text-highlighted">
+      <h1 class="mt-5 font-display text-3xl font-bold tracking-tight text-highlighted">
         Join {{ invite.workspace?.name ?? 'the workspace' }}
       </h1>
-      <p class="mt-1.5 text-sm text-muted">
+      <p class="mt-2 text-sm text-muted">
         You’ve been invited as
         <span class="font-medium text-highlighted">{{ invite.role }}</span>
         ({{ invite.email }}).
@@ -99,7 +92,7 @@ const joinRedirect = `/join/${token}`
         v-if="emailMismatch"
         color="warning"
         variant="subtle"
-        class="mt-5 text-left"
+        class="mt-5"
         icon="i-lucide-triangle-alert"
         :title="`Signed in as ${user?.email}`"
         :description="`This invite is for ${invite.email}. Sign out and use that email to accept.`"

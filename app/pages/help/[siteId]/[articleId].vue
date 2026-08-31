@@ -101,7 +101,7 @@ function retryLoad() {
         v-else
         class="mt-8"
       >
-        <p class="text-sm font-medium text-amber-700 dark:text-amber-400">
+        <p class="text-sm font-medium text-primary-700 dark:text-primary-400">
           {{ article.group.name }}
         </p>
         <h1 class="mt-2 font-display text-3xl font-bold tracking-tight text-highlighted sm:text-4xl">

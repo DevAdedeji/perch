@@ -58,7 +58,7 @@ watch(() => route.query.q, (value) => {
   <UContainer class="py-10 sm:py-16">
     <div class="mx-auto max-w-3xl">
       <div class="text-center">
-        <span class="mx-auto grid size-12 place-items-center rounded-2xl avatar-amber">
+        <span class="mx-auto grid size-12 place-items-center rounded-2xl avatar-primary">
           <UIcon
             name="i-lucide-life-buoy"
             class="size-6"

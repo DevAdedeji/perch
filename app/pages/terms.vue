@@ -73,7 +73,7 @@ const contact = 'adedejitewogbade2@gmail.com'
             changes can happen. Support is by email at
             <a
               :href="`mailto:${contact}`"
-              class="text-amber-600 dark:text-amber-400 hover:underline"
+              class="text-primary-600 dark:text-primary-400 hover:underline"
             >{{ contact }}</a>.
           </p>
         </section>

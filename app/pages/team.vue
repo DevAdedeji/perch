@@ -255,7 +255,7 @@ function csatTone(m: Member): string {
                 >
                   <td class="px-4 sm:px-5 py-3">
                     <div class="flex items-center gap-3 min-w-44">
-                      <span class="grid place-items-center size-9 shrink-0 rounded-xl avatar-amber text-xs font-bold">
+                      <span class="grid place-items-center size-9 shrink-0 rounded-xl avatar-primary text-xs font-bold">
                         {{ initials(m.name) }}
                       </span>
                       <div class="min-w-0">
@@ -283,7 +283,7 @@ function csatTone(m: Member): string {
                   </td>
                   <td
                     class="px-3 py-3 text-center tabular-nums"
-                    :class="m.openCount > 0 ? 'font-semibold text-amber-600 dark:text-amber-400' : 'text-dimmed'"
+                    :class="m.openCount > 0 ? 'font-semibold text-primary-600 dark:text-primary-400' : 'text-dimmed'"
                   >
                     {{ m.openCount }}
                   </td>

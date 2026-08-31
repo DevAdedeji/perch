@@ -254,7 +254,7 @@ function ruleSummary(rule: AutomationRule) {
           class="flex items-start gap-2 bg-default px-3 py-3"
           :class="{ 'opacity-60': !rule.enabled }"
         >
-          <span class="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg bg-amber-500/10 text-amber-700 dark:text-amber-400">
+          <span class="mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg bg-primary-500/10 text-primary-700 dark:text-primary-400">
             <UIcon
               :name="templates.find(template => template.type === rule.type)?.icon"
               class="size-4"
@@ -331,12 +331,12 @@ function ruleSummary(rule: AutomationRule) {
             v-for="template in templates"
             :key="template.type"
             type="button"
-            class="flex items-start gap-3 rounded-xl bg-default p-3 text-left ring-1 ring-default transition hover:ring-amber-500/50"
+            class="flex items-start gap-3 rounded-xl bg-default p-3 text-left ring-1 ring-default transition hover:ring-primary-500/50"
             @click="chooseTemplate(template.type)"
           >
             <UIcon
               :name="template.icon"
-              class="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400"
+              class="mt-0.5 size-4 shrink-0 text-primary-600 dark:text-primary-400"
             />
             <span class="min-w-0">
               <span class="block text-sm font-medium text-highlighted">{{ template.title }}</span>
@@ -354,7 +354,7 @@ function ruleSummary(rule: AutomationRule) {
         <div class="flex items-center gap-3">
           <UIcon
             :name="templates.find(template => template.type === selectedType)?.icon"
-            class="size-5 text-amber-600 dark:text-amber-400"
+            class="size-5 text-primary-600 dark:text-primary-400"
           />
           <p class="font-medium text-highlighted">
             {{ editingId ? 'Edit automation' : templates.find(template => template.type === selectedType)?.title }}
@@ -399,7 +399,7 @@ function ruleSummary(rule: AutomationRule) {
                 v-model="memberIds"
                 type="checkbox"
                 :value="member.id"
-                class="accent-amber-500"
+                class="accent-primary-500"
               >{{ member.name }}
             </label>
           </div>
@@ -488,7 +488,7 @@ function ruleSummary(rule: AutomationRule) {
           </label>
           <p
             v-if="!tags.length"
-            class="text-xs text-amber-700 dark:text-amber-400 sm:col-span-2"
+            class="text-xs text-primary-700 dark:text-primary-400 sm:col-span-2"
           >
             Create a conversation tag first, then return here.
           </p>

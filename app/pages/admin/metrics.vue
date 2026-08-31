@@ -113,7 +113,7 @@ function dayLabel(iso: string) {
               :title="`${dayLabel(d.day)} — ${d.messages} messages, ${d.signups} signups`"
             >
               <div
-                class="w-full rounded-t bg-amber-500/70 group-hover:bg-amber-500 transition-colors"
+                class="w-full rounded-t bg-primary-500/70 group-hover:bg-primary-500 transition-colors"
                 :style="{ height: `${Math.max(2, (Number(d.messages) / maxDaily) * 100)}%` }"
               />
             </div>
@@ -127,7 +127,7 @@ function dayLabel(iso: string) {
               v-for="d in metrics.daily"
               :key="d.day"
               class="text-[10px] font-mono"
-              :class="Number(d.signups) > 0 ? 'text-amber-600 dark:text-amber-400 font-semibold' : 'text-dimmed'"
+              :class="Number(d.signups) > 0 ? 'text-primary-600 dark:text-primary-400 font-semibold' : 'text-dimmed'"
             >{{ d.signups }}</span>
           </div>
           <p class="mt-1 text-center text-[10px] uppercase tracking-wider text-dimmed">

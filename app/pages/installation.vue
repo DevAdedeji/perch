@@ -167,7 +167,7 @@ function verificationCopy(result: VerificationResult): { title: string, body: st
     return {
       title: 'This domain is not allowed yet',
       body: 'Add the domain to Settings, then open the page again so Perch can load.',
-      tone: 'bg-amber-500/10 ring-amber-500/25 text-amber-700 dark:text-amber-400',
+      tone: 'bg-primary-500/10 ring-primary-500/25 text-primary-700 dark:text-primary-400',
       icon: 'i-lucide-shield-alert'
     }
   }
@@ -175,7 +175,7 @@ function verificationCopy(result: VerificationResult): { title: string, body: st
     return {
       title: 'Perch loaded on a different page',
       body: `We last saw it on ${result.observed?.url ?? 'another page'}. Open the exact URL above and retry.`,
-      tone: 'bg-amber-500/10 ring-amber-500/25 text-amber-700 dark:text-amber-400',
+      tone: 'bg-primary-500/10 ring-primary-500/25 text-primary-700 dark:text-primary-400',
       icon: 'i-lucide-route'
     }
   }
@@ -183,14 +183,14 @@ function verificationCopy(result: VerificationResult): { title: string, body: st
     return {
       title: 'Reload the page for a fresh check',
       body: `Perch was last seen there at ${observedWhen(result.observedAt)}. Reload that page, then retry within 15 minutes.`,
-      tone: 'bg-amber-500/10 ring-amber-500/25 text-amber-700 dark:text-amber-400',
+      tone: 'bg-primary-500/10 ring-primary-500/25 text-primary-700 dark:text-primary-400',
       icon: 'i-lucide-history'
     }
   }
   return {
     title: 'Perch has not loaded there yet',
     body: 'Deploy the install code, open or reload that exact page, then retry this check.',
-    tone: 'bg-amber-500/10 ring-amber-500/25 text-amber-700 dark:text-amber-400',
+    tone: 'bg-primary-500/10 ring-primary-500/25 text-primary-700 dark:text-primary-400',
     icon: 'i-lucide-search-x'
   }
 }
@@ -281,7 +281,7 @@ watch(wid, async () => {
       <template v-else>
         <header class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <p class="text-xs font-medium uppercase tracking-[0.18em] text-amber-600 dark:text-amber-400">
+            <p class="text-xs font-medium uppercase tracking-[0.18em] text-primary-600 dark:text-primary-400">
               Launch checklist
             </p>
             <h1 class="mt-1 font-display text-2xl font-bold text-highlighted">
@@ -303,7 +303,7 @@ watch(wid, async () => {
 
         <div class="mt-5 h-2 overflow-hidden rounded-full bg-elevated ring-1 ring-default">
           <div
-            class="h-full rounded-full bg-amber-500 transition-[width] duration-500"
+            class="h-full rounded-full bg-primary-500 transition-[width] duration-500"
             :style="{ width: `${(completedSteps / steps.length) * 100}%` }"
           />
         </div>

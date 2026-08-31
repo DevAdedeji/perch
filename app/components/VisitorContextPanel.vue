@@ -34,7 +34,7 @@ const pageHost = computed(() => {
   <div class="flex flex-col h-full overflow-y-auto">
     <!-- identity -->
     <div class="p-5 border-b border-default text-center">
-      <span class="mx-auto grid place-items-center size-14 rounded-2xl avatar-amber text-lg font-bold">
+      <span class="mx-auto grid place-items-center size-14 rounded-2xl avatar-primary text-lg font-bold">
         {{ initials(displayName) }}
       </span>
       <p class="mt-3 flex items-center justify-center gap-1.5 text-sm font-semibold text-highlighted">
@@ -124,7 +124,7 @@ const pageHost = computed(() => {
                 :href="context.visitor.page_url!"
                 target="_blank"
                 rel="noopener"
-                class="inline-flex items-center gap-1 max-w-full text-highlighted hover:text-amber-600 dark:hover:text-amber-400 transition-colors"
+                class="inline-flex items-center gap-1 max-w-full text-highlighted hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
               >
                 <span class="truncate">{{ pageHost }}</span>
                 <UIcon

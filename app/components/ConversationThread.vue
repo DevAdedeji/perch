@@ -170,8 +170,8 @@ async function loadOlder() {
         v-else-if="row.kind === 'note'"
         class="flex justify-end my-2"
       >
-        <div class="max-w-[72%] rounded-xl rounded-br-md bg-amber-500/10 ring-1 ring-amber-500/30 px-3.5 py-2 text-sm text-highlighted whitespace-pre-wrap wrap-break-word">
-          <p class="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400 mb-1">
+        <div class="max-w-[72%] rounded-xl rounded-br-md bg-primary-500/10 ring-1 ring-primary-500/30 px-3.5 py-2 text-sm text-highlighted whitespace-pre-wrap wrap-break-word">
+          <p class="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-primary-700 dark:text-primary-400 mb-1">
             <UIcon
               name="i-lucide-lock"
               class="size-3"
@@ -207,7 +207,7 @@ async function loadOlder() {
           <template v-if="row.message.sender_type === 'agent'">
             <span
               v-if="row.last"
-              class="grid place-items-center size-6 shrink-0 rounded-lg avatar-amber text-[10px] font-semibold"
+              class="grid place-items-center size-6 shrink-0 rounded-lg avatar-primary text-[10px] font-semibold"
             >{{ initials(memberName(row.message.sender_id)) }}</span>
             <span
               v-else
@@ -219,7 +219,7 @@ async function loadOlder() {
             :class="[
               ...bubbleShape(row),
               row.message.sender_type === 'agent'
-                ? 'bg-amber-500 text-slate-950 shadow-sm'
+                ? 'bg-primary-500 text-slate-950 shadow-sm'
                 : 'bg-default ring-1 ring-default text-highlighted',
               { 'opacity-60': row.message.pending, 'ring-2 ring-red-500/60': row.message.failed }
             ]"

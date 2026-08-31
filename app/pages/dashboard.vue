@@ -376,7 +376,7 @@ const statusBadge = {
                     </p>
                     <button
                       v-if="activeAdvancedFilters"
-                      class="text-xs text-amber-700 dark:text-amber-400 hover:underline"
+                      class="text-xs text-primary-700 dark:text-primary-400 hover:underline"
                       @click="clearAdvancedFilters"
                     >
                       Clear all
@@ -386,7 +386,7 @@ const statusBadge = {
                     <span class="mb-1.5 block text-xs font-medium text-muted">Assignee</span>
                     <select
                       v-model="cr.assigneeFilter.value"
-                      class="h-9 w-full rounded-lg border border-default bg-default px-2.5 text-sm text-highlighted outline-none focus:ring-2 focus:ring-amber-500/50"
+                      class="h-9 w-full rounded-lg border border-default bg-default px-2.5 text-sm text-highlighted outline-none focus:ring-2 focus:ring-primary-500/50"
                     >
                       <option
                         v-for="option in assigneeOptions"
@@ -405,7 +405,7 @@ const statusBadge = {
                         :key="priority.value"
                         type="button"
                         class="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs ring-1 ring-default transition-colors"
-                        :class="cr.priorityFilters.value.includes(priority.value) ? 'bg-amber-500/12 text-amber-700 dark:text-amber-400' : 'text-muted hover:bg-elevated'"
+                        :class="cr.priorityFilters.value.includes(priority.value) ? 'bg-primary-500/12 text-primary-700 dark:text-primary-400' : 'text-muted hover:bg-elevated'"
                         @click="togglePriorityFilter(priority.value)"
                       >
                         <UIcon
@@ -425,7 +425,7 @@ const statusBadge = {
                         :key="tag.id"
                         type="button"
                         class="rounded-lg px-2 py-1 font-mono text-xs ring-1 ring-default transition-colors"
-                        :class="cr.tagFilters.value.includes(tag.id) ? 'bg-amber-500/12 text-amber-700 dark:text-amber-400' : 'text-muted hover:bg-elevated'"
+                        :class="cr.tagFilters.value.includes(tag.id) ? 'bg-primary-500/12 text-primary-700 dark:text-primary-400' : 'text-muted hover:bg-elevated'"
                         @click="toggleTagFilter(tag.id)"
                       >
                         #{{ tag.name }}
@@ -436,7 +436,7 @@ const statusBadge = {
                     <span class="mb-1.5 block text-xs font-medium text-muted">Snoozed conversations</span>
                     <select
                       v-model="cr.snoozedFilter.value"
-                      class="h-9 w-full rounded-lg border border-default bg-default px-2.5 text-sm text-highlighted outline-none focus:ring-2 focus:ring-amber-500/50"
+                      class="h-9 w-full rounded-lg border border-default bg-default px-2.5 text-sm text-highlighted outline-none focus:ring-2 focus:ring-primary-500/50"
                     >
                       <option value="exclude">Hide until they return</option>
                       <option value="include">Include in this inbox</option>
@@ -464,7 +464,7 @@ const statusBadge = {
             :key="f.value"
             class="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium whitespace-nowrap transition-colors"
             :class="cr.filter.value === f.value
-              ? 'bg-amber-500/12 text-amber-700 dark:text-amber-400'
+              ? 'bg-primary-500/12 text-primary-700 dark:text-primary-400'
               : 'text-muted hover:text-highlighted'"
             @click="cr.filter.value = f.value"
           >
@@ -472,14 +472,14 @@ const statusBadge = {
             <span
               class="rounded-full px-1.5 text-xs font-semibold tabular-nums"
               :class="f.value === 'unassigned' && tabCount('unassigned') > 0
-                ? 'bg-amber-500 text-slate-950'
-                : cr.filter.value === f.value ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400' : 'bg-elevated text-dimmed'"
+                ? 'bg-primary-500 text-slate-950'
+                : cr.filter.value === f.value ? 'bg-primary-500/15 text-primary-700 dark:text-primary-400' : 'bg-elevated text-dimmed'"
             >{{ tabCount(f.value) }}</span>
           </button>
         </div>
 
         <!-- search: name, email, or anything anyone said -->
-        <div class="mt-2.5 flex items-center gap-2 rounded-lg bg-elevated/60 ring-1 ring-default px-2.5 py-1.5 focus-within:ring-amber-500/60 transition-shadow">
+        <div class="mt-2.5 flex items-center gap-2 rounded-lg bg-elevated/60 ring-1 ring-default px-2.5 py-1.5 focus-within:ring-primary-500/60 transition-shadow">
           <UIcon
             :name="searching ? 'i-lucide-loader-circle' : 'i-lucide-search'"
             class="size-4 shrink-0 text-dimmed"
@@ -511,7 +511,7 @@ const statusBadge = {
         >
           <span class="rounded-md bg-elevated px-2 py-0.5 text-[11px] text-muted">{{ activeAdvancedFilters }} active</span>
           <button
-            class="whitespace-nowrap text-[11px] text-amber-700 dark:text-amber-400 hover:underline"
+            class="whitespace-nowrap text-[11px] text-primary-700 dark:text-primary-400 hover:underline"
             @click="filterOpen = true"
           >
             Edit filters
@@ -544,10 +544,10 @@ const statusBadge = {
             >
               <button
                 class="relative w-full flex gap-3 px-4 py-3 text-left transition-colors"
-                :class="cr.activeId.value === r.id ? 'bg-amber-500/6' : 'hover:bg-elevated/50'"
+                :class="cr.activeId.value === r.id ? 'bg-primary-500/6' : 'hover:bg-elevated/50'"
                 @click="openSearchResult(r.id)"
               >
-                <span class="grid place-items-center size-9 shrink-0 rounded-xl avatar-amber text-xs font-bold">
+                <span class="grid place-items-center size-9 shrink-0 rounded-xl avatar-primary text-xs font-bold">
                   {{ initials(r.visitor.name) }}
                 </span>
                 <div class="min-w-0 flex-1">
@@ -580,10 +580,10 @@ const statusBadge = {
             v-else-if="!cr.conversations.value.length"
             class="p-8 text-center"
           >
-            <div class="mx-auto grid place-items-center size-12 rounded-xl bg-amber-500/10 ring-1 ring-amber-500/25">
+            <div class="mx-auto grid place-items-center size-12 rounded-xl bg-primary-500/10 ring-1 ring-primary-500/25">
               <UIcon
                 name="i-lucide-inbox"
-                class="size-6 text-amber-600 dark:text-amber-400"
+                class="size-6 text-primary-600 dark:text-primary-400"
               />
             </div>
             <p class="mt-3 text-sm font-medium text-highlighted">
@@ -605,14 +605,14 @@ const statusBadge = {
             >
               <button
                 class="relative w-full flex gap-3 px-4 py-3 text-left transition-colors"
-                :class="cr.activeId.value === c.id ? 'bg-amber-500/6' : 'hover:bg-elevated/50'"
+                :class="cr.activeId.value === c.id ? 'bg-primary-500/6' : 'hover:bg-elevated/50'"
                 @click="cr.select(c.id)"
               >
                 <span
                   v-if="cr.activeId.value === c.id"
-                  class="absolute inset-y-0 left-0 w-0.5 bg-amber-500"
+                  class="absolute inset-y-0 left-0 w-0.5 bg-primary-500"
                 />
-                <span class="grid place-items-center size-9 shrink-0 rounded-xl avatar-amber text-xs font-bold">
+                <span class="grid place-items-center size-9 shrink-0 rounded-xl avatar-primary text-xs font-bold">
                   {{ initials(c.visitor.name) }}
                 </span>
                 <div class="min-w-0 flex-1">
@@ -675,7 +675,7 @@ const statusBadge = {
                 </div>
                 <span
                   v-if="c.unread"
-                  class="mt-1.5 size-2 shrink-0 rounded-full bg-amber-500"
+                  class="mt-1.5 size-2 shrink-0 rounded-full bg-primary-500"
                 />
               </button>
               <!-- quick claim straight from the list -->
@@ -747,7 +747,7 @@ const statusBadge = {
             aria-label="Back to inbox"
             @click="cr.deselect()"
           />
-          <span class="hidden sm:grid place-items-center size-9 shrink-0 rounded-xl avatar-amber text-sm font-bold">
+          <span class="hidden sm:grid place-items-center size-9 shrink-0 rounded-xl avatar-primary text-sm font-bold">
             {{ initials(cr.activeConversation.value.visitor.name) }}
           </span>
           <div class="min-w-0 flex-1">
@@ -841,7 +841,7 @@ const statusBadge = {
                         v-model="customSnooze"
                         required
                         type="datetime-local"
-                        class="h-9 min-w-0 flex-1 rounded-lg border border-default bg-default px-2 text-xs text-highlighted outline-none focus:ring-2 focus:ring-amber-500/50"
+                        class="h-9 min-w-0 flex-1 rounded-lg border border-default bg-default px-2 text-xs text-highlighted outline-none focus:ring-2 focus:ring-primary-500/50"
                       >
                       <UButton
                         type="submit"
@@ -960,7 +960,7 @@ const statusBadge = {
           <span
             v-for="t in cr.activeConversation.value.tags"
             :key="t.id"
-            class="group/tag inline-flex items-center gap-1 rounded-md bg-amber-500/10 ring-1 ring-amber-500/25 pl-1.5 pr-1 py-0.5 font-mono text-[11px] text-amber-700 dark:text-amber-400"
+            class="group/tag inline-flex items-center gap-1 rounded-md bg-primary-500/10 ring-1 ring-primary-500/25 pl-1.5 pr-1 py-0.5 font-mono text-[11px] text-primary-700 dark:text-primary-400"
           >
             #{{ t.name }}
             <button
@@ -1013,7 +1013,7 @@ const statusBadge = {
                 </ul>
                 <button
                   v-if="tagInput.trim() && !cr.workspaceTags.value.some(t => t.name === tagInput.trim().toLowerCase())"
-                  class="mt-1.5 w-full rounded-md px-2 py-1 text-left text-xs text-amber-700 dark:text-amber-400 hover:bg-amber-500/10 transition-colors"
+                  class="mt-1.5 w-full rounded-md px-2 py-1 text-left text-xs text-primary-700 dark:text-primary-400 hover:bg-primary-500/10 transition-colors"
                   :disabled="addingTag"
                   @click="createAndApplyTag"
                 >

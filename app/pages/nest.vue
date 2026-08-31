@@ -154,7 +154,7 @@ function initials(n: string) {
   <div class="h-full flex flex-col">
     <!-- header -->
     <div class="shrink-0 flex items-center gap-3 px-5 py-3.5 border-b border-default bg-default">
-      <span class="grid place-items-center size-9 rounded-xl avatar-amber">
+      <span class="grid place-items-center size-9 rounded-xl avatar-primary">
         <UIcon
           name="i-lucide-bird"
           class="size-5"
@@ -196,7 +196,7 @@ function initials(n: string) {
         v-else-if="!thread.length"
         class="h-full flex flex-col items-center justify-center text-center gap-1"
       >
-        <span class="grid place-items-center size-12 rounded-2xl avatar-amber mb-2">
+        <span class="grid place-items-center size-12 rounded-2xl avatar-primary mb-2">
           <UIcon
             name="i-lucide-bird"
             class="size-6"
@@ -232,7 +232,7 @@ function initials(n: string) {
           >
             <span
               v-if="row.first"
-              class="grid place-items-center size-8 shrink-0 rounded-xl avatar-amber text-[11px] font-bold"
+              class="grid place-items-center size-8 shrink-0 rounded-xl avatar-primary text-[11px] font-bold"
             >
               {{ initials(row.m.member_name) }}
             </span>

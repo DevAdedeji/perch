@@ -130,26 +130,26 @@ const claimSql = 'UPDATE conversations\nSET assigned_agent_id = $me, status = \'
   <main class="relative">
     <!-- ═══════════════ HERO — LIVE THEATER ═══════════════ -->
     <section class="relative pt-32 pb-20 sm:pt-40 sm:pb-24 overflow-hidden">
-      <!-- backdrop: faint grid + a warm amber bloom -->
+      <!-- backdrop: faint grid + a warm brand bloom -->
       <div class="pointer-events-none absolute inset-0 -z-10">
         <div class="absolute inset-0 bg-grid mask-[radial-gradient(ellipse_70%_55%_at_50%_0%,#000_30%,transparent_85%)]" />
         <div
           class="absolute -top-40 left-1/2 -translate-x-1/2 h-130 w-208 max-w-full rounded-full opacity-25 dark:opacity-20 blur-3xl"
-          style="background: radial-gradient(closest-side, var(--color-amber-500), transparent 70%)"
+          style="background: radial-gradient(closest-side, var(--ui-color-primary-500), transparent 70%)"
         />
       </div>
 
       <UContainer>
         <div class="text-center max-w-3xl mx-auto">
-          <div class="inline-flex items-center gap-2 rounded-full glass ring-1 ring-amber-500/30 px-3 py-1.5 text-xs">
+          <div class="inline-flex items-center gap-2 rounded-full glass ring-1 ring-primary-500/30 px-3 py-1.5 text-xs">
             <span class="relative flex size-2">
-              <span class="absolute inline-flex size-full rounded-full bg-amber-500 opacity-60 animate-ping" />
-              <span class="relative inline-flex size-2 rounded-full bg-amber-500" />
+              <span class="absolute inline-flex size-full rounded-full bg-primary-500 opacity-60 animate-ping" />
+              <span class="relative inline-flex size-2 rounded-full bg-primary-500" />
             </span>
             <span class="text-muted">Live demo — this page runs Perch. <span class="text-highlighted font-medium">Say hi</span></span>
             <UIcon
               name="i-lucide-arrow-down-right"
-              class="size-3.5 text-amber-600 dark:text-amber-400"
+              class="size-3.5 text-primary-600 dark:text-primary-400"
             />
           </div>
 
@@ -169,7 +169,7 @@ const claimSql = 'UPDATE conversations\nSET assigned_agent_id = $me, status = \'
               size="xl"
               color="primary"
               trailing-icon="i-lucide-arrow-right"
-              class="font-semibold shadow-lg shadow-amber-500/25"
+              class="font-semibold shadow-lg shadow-primary-500/25"
             >
               Get started free
             </UButton>
@@ -236,10 +236,10 @@ const claimSql = 'UPDATE conversations\nSET assigned_agent_id = $me, status = \'
             :key="b.title"
             class="flex gap-4"
           >
-            <span class="grid place-items-center size-11 shrink-0 rounded-xl bg-amber-500/10 ring-1 ring-amber-500/25">
+            <span class="grid place-items-center size-11 shrink-0 rounded-xl bg-primary-500/10 ring-1 ring-primary-500/25">
               <UIcon
                 :name="b.icon"
-                class="size-5 text-amber-600 dark:text-amber-400"
+                class="size-5 text-primary-600 dark:text-primary-400"
               />
             </span>
             <div>
@@ -288,7 +288,7 @@ const claimSql = 'UPDATE conversations\nSET assigned_agent_id = $me, status = \'
                 @click="copySnippet"
               />
             </div>
-            <pre class="p-5 text-sm font-mono leading-relaxed overflow-x-auto"><code><span class="text-dimmed">&lt;</span><span class="text-highlighted">script</span> <span class="text-highlighted">src</span>=<span class="text-muted">"{{ PERCH_PRODUCTION_ORIGIN }}/widget.js"</span> <span class="text-highlighted">data-site-id</span>=<span class="text-amber-600 dark:text-amber-400">"ws_abc123"</span> <span class="text-highlighted">async</span><span class="text-dimmed">&gt;&lt;/</span><span class="text-highlighted">script</span><span class="text-dimmed">&gt;</span></code></pre>
+            <pre class="p-5 text-sm font-mono leading-relaxed overflow-x-auto"><code><span class="text-dimmed">&lt;</span><span class="text-highlighted">script</span> <span class="text-highlighted">src</span>=<span class="text-muted">"{{ PERCH_PRODUCTION_ORIGIN }}/widget.js"</span> <span class="text-highlighted">data-site-id</span>=<span class="text-primary-600 dark:text-primary-400">"ws_abc123"</span> <span class="text-highlighted">async</span><span class="text-dimmed">&gt;&lt;/</span><span class="text-highlighted">script</span><span class="text-dimmed">&gt;</span></code></pre>
           </div>
           <p class="mt-5 text-center text-sm text-muted">
             Works on any website — Shopify, WordPress, Webflow, plain HTML.
@@ -304,7 +304,7 @@ const claimSql = 'UPDATE conversations\nSET assigned_agent_id = $me, status = \'
         <div class="rounded-3xl border-glow bg-elevated/30 glass overflow-hidden">
           <div class="grid lg:grid-cols-2 gap-10 items-center px-8 py-12 sm:px-14">
             <div>
-              <p class="font-mono text-sm text-amber-600 dark:text-amber-400">
+              <p class="font-mono text-sm text-primary-600 dark:text-primary-400">
                 under the hood
               </p>
               <h2 class="mt-3 font-display text-3xl sm:text-4xl font-bold tracking-tight text-highlighted">
@@ -387,10 +387,10 @@ const claimSql = 'UPDATE conversations\nSET assigned_agent_id = $me, status = \'
         <div class="relative overflow-hidden rounded-3xl border-glow bg-elevated/40 glass px-8 py-16 sm:px-16 text-center">
           <div class="pointer-events-none absolute inset-0 -z-10 bg-grid mask-[radial-gradient(ellipse_60%_80%_at_50%_50%,#000,transparent)]" />
 
-          <div class="mx-auto mb-6 grid place-items-center size-16 rounded-2xl bg-amber-500/10 ring-1 ring-amber-500/25">
+          <div class="mx-auto mb-6 grid place-items-center size-16 rounded-2xl bg-primary-500/10 ring-1 ring-primary-500/25">
             <UIcon
               name="i-lucide-bird"
-              class="size-8 text-amber-600 dark:text-amber-400"
+              class="size-8 text-primary-600 dark:text-primary-400"
             />
           </div>
           <h2 class="font-display text-4xl sm:text-5xl font-bold tracking-tight text-highlighted">
@@ -406,7 +406,7 @@ const claimSql = 'UPDATE conversations\nSET assigned_agent_id = $me, status = \'
               size="xl"
               color="primary"
               trailing-icon="i-lucide-arrow-right"
-              class="font-semibold shadow-lg shadow-amber-500/25"
+              class="font-semibold shadow-lg shadow-primary-500/25"
             >
               Get started free
             </UButton>

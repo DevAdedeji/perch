@@ -50,129 +50,121 @@ async function onSubmit(event: FormSubmitEvent<Schema>) {
 
 <template>
   <div class="w-full max-w-sm">
-    <div class="text-center mb-7">
-      <div class="mx-auto mb-4 grid place-items-center size-12 rounded-2xl avatar-amber">
-        <UIcon
-          name="i-lucide-bird"
-          class="size-6"
-        />
-      </div>
-      <h1 class="font-display text-2xl font-bold text-highlighted">
+    <div class="mb-7">
+      <h1 class="font-display text-3xl font-bold tracking-tight text-highlighted">
         Create your account
       </h1>
-      <p class="mt-1.5 text-sm text-muted">
+      <p class="mt-2 text-sm text-muted">
         Spin up a workspace in under two minutes.
       </p>
     </div>
 
-    <div class="rounded-2xl border-glow bg-elevated/40 glass p-6 sm:p-7 shadow-xl shadow-black/10">
-      <template v-if="authMethods.google">
-        <GoogleAuthButton
-          label="Sign up with Google"
-          source="signup"
-          :redirect="redirect"
-        />
+    <template v-if="authMethods.google">
+      <GoogleAuthButton
+        label="Sign up with Google"
+        source="signup"
+        :redirect="redirect"
+      />
 
-        <div class="my-5 flex items-center gap-3">
-          <span class="h-px flex-1 bg-border" />
-          <span class="text-xs text-dimmed">or with email</span>
-          <span class="h-px flex-1 bg-border" />
-        </div>
-      </template>
+      <div class="my-5 flex items-center gap-3">
+        <span class="h-px flex-1 bg-border" />
+        <span class="text-xs text-dimmed">or with email</span>
+        <span class="h-px flex-1 bg-border" />
+      </div>
+    </template>
 
-      <UForm
-        :schema="schema"
-        :state="state"
-        class="space-y-4"
-        @submit="onSubmit"
+    <UForm
+      :schema="schema"
+      :state="state"
+      class="space-y-4"
+      @submit="onSubmit"
+    >
+      <UAlert
+        v-if="error"
+        color="error"
+        variant="subtle"
+        :title="error"
+        icon="i-lucide-triangle-alert"
+      />
+
+      <UFormField
+        label="Name"
+        name="name"
       >
-        <UAlert
-          v-if="error"
-          color="error"
-          variant="subtle"
-          :title="error"
-          icon="i-lucide-triangle-alert"
-        />
-
-        <UFormField
-          label="Name"
-          name="name"
-        >
-          <UInput
-            v-model="state.name"
-            placeholder="Ada Lovelace"
-            autocomplete="name"
-            size="lg"
-            class="w-full"
-          />
-        </UFormField>
-
-        <UFormField
-          label="Email"
-          name="email"
-        >
-          <UInput
-            v-model="state.email"
-            type="email"
-            placeholder="you@company.com"
-            autocomplete="email"
-            size="lg"
-            class="w-full"
-          />
-        </UFormField>
-
-        <UFormField
-          label="Password"
-          name="password"
-          hint="Min. 8 characters"
-        >
-          <PasswordInput
-            v-model="state.password"
-            autocomplete="new-password"
-          />
-        </UFormField>
-
-        <UFormField
-          label="Confirm password"
-          name="confirmPassword"
-        >
-          <PasswordInput
-            v-model="state.confirmPassword"
-            autocomplete="new-password"
-          />
-        </UFormField>
-
-        <UButton
-          type="submit"
-          color="primary"
+        <UInput
+          v-model="state.name"
+          placeholder="Ada Lovelace"
+          autocomplete="name"
           size="lg"
-          block
-          :loading="loading"
-          class="font-semibold"
-        >
-          Create account
-        </UButton>
+          class="w-full"
+        />
+      </UFormField>
 
-        <p class="text-center text-xs text-dimmed">
-          By creating an account you agree to the
-          <NuxtLink
-            to="/terms"
-            class="underline hover:text-muted"
-          >Terms</NuxtLink>
-          and
-          <NuxtLink
-            to="/privacy"
-            class="underline hover:text-muted"
-          >Privacy Policy</NuxtLink>.
-        </p>
-      </UForm>
-    </div>
+      <UFormField
+        label="Email"
+        name="email"
+      >
+        <UInput
+          v-model="state.email"
+          type="email"
+          placeholder="you@company.com"
+          autocomplete="email"
+          size="lg"
+          class="w-full"
+        />
+      </UFormField>
 
-    <p class="mt-6 text-center text-sm text-muted">
+      <UFormField
+        label="Password"
+        name="password"
+        hint="Min. 8 characters"
+      >
+        <PasswordInput
+          v-model="state.password"
+          autocomplete="new-password"
+        />
+      </UFormField>
+
+      <UFormField
+        label="Confirm password"
+        name="confirmPassword"
+      >
+        <PasswordInput
+          v-model="state.confirmPassword"
+          autocomplete="new-password"
+        />
+      </UFormField>
+
+      <UButton
+        type="submit"
+        color="primary"
+        size="lg"
+        block
+        :loading="loading"
+        class="font-semibold"
+      >
+        Create account
+      </UButton>
+
+      <p class="text-xs text-dimmed">
+        By creating an account you agree to the
+        <NuxtLink
+          to="/terms"
+          class="underline hover:text-muted"
+        >Terms</NuxtLink>
+        and
+        <NuxtLink
+          to="/privacy"
+          class="underline hover:text-muted"
+        >Privacy Policy</NuxtLink>.
+      </p>
+    </UForm>
+
+    <p class="mt-8 text-sm text-muted">
       Already have an account?
       <NuxtLink
         to="/login"
-        class="font-medium text-amber-600 dark:text-amber-400 hover:underline"
+        class="font-medium text-primary-600 hover:underline dark:text-primary-400"
       >Sign in</NuxtLink>
     </p>
   </div>

@@ -331,7 +331,7 @@ const hasActivity = computed(() => analytics.value?.trend.some(day =>
               </p>
             </div>
             <div class="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
-              <span class="flex items-center gap-1.5"><span class="size-2 rounded-full bg-amber-500" />Conversations</span>
+              <span class="flex items-center gap-1.5"><span class="size-2 rounded-full bg-primary-500" />Conversations</span>
               <span class="flex items-center gap-1.5"><span class="size-2 rounded-full bg-sky-500" />Visitor messages</span>
               <span class="flex items-center gap-1.5"><span class="size-2 rounded-full bg-emerald-500" />Resolved</span>
             </div>
@@ -370,7 +370,7 @@ const hasActivity = computed(() => analytics.value?.trend.some(day =>
               >
                 <div class="flex h-40 items-end justify-center gap-px">
                   <span
-                    class="w-1/3 min-w-0 rounded-t bg-amber-500/85 transition-colors group-hover:bg-amber-500"
+                    class="w-1/3 min-w-0 rounded-t bg-primary-500/85 transition-colors group-hover:bg-primary-500"
                     :style="{ height: `${Math.max(day.conversations ? 3 : 0, (day.conversations / maxTrend) * 100)}%` }"
                   />
                   <span
@@ -455,7 +455,7 @@ const hasActivity = computed(() => analytics.value?.trend.some(day =>
                 class="rounded-xl ring-1 ring-default bg-default p-3.5"
               >
                 <div class="flex items-center gap-3">
-                  <span class="grid size-9 shrink-0 place-items-center rounded-xl avatar-amber text-xs font-bold">
+                  <span class="grid size-9 shrink-0 place-items-center rounded-xl avatar-primary text-xs font-bold">
                     {{ initials(member.name) }}
                   </span>
                   <div class="min-w-0 flex-1">

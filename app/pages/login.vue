@@ -44,97 +44,89 @@ async function onSubmit(event: FormSubmitEvent<Schema>) {
 
 <template>
   <div class="w-full max-w-sm">
-    <div class="text-center mb-7">
-      <div class="mx-auto mb-4 grid place-items-center size-12 rounded-2xl avatar-amber">
-        <UIcon
-          name="i-lucide-bird"
-          class="size-6"
-        />
-      </div>
-      <h1 class="font-display text-2xl font-bold text-highlighted">
+    <div class="mb-7">
+      <h1 class="font-display text-3xl font-bold tracking-tight text-highlighted">
         Welcome back
       </h1>
-      <p class="mt-1.5 text-sm text-muted">
+      <p class="mt-2 text-sm text-muted">
         Sign in to your Control Room.
       </p>
     </div>
 
-    <div class="rounded-2xl border-glow bg-elevated/40 glass p-6 sm:p-7 shadow-xl shadow-black/10">
-      <template v-if="authMethods.google">
-        <GoogleAuthButton :redirect="redirect" />
+    <template v-if="authMethods.google">
+      <GoogleAuthButton :redirect="redirect" />
 
-        <div class="my-5 flex items-center gap-3">
-          <span class="h-px flex-1 bg-border" />
-          <span class="text-xs text-dimmed">or with email</span>
-          <span class="h-px flex-1 bg-border" />
-        </div>
-      </template>
+      <div class="my-5 flex items-center gap-3">
+        <span class="h-px flex-1 bg-border" />
+        <span class="text-xs text-dimmed">or with email</span>
+        <span class="h-px flex-1 bg-border" />
+      </div>
+    </template>
 
-      <UForm
-        :schema="schema"
-        :state="state"
-        class="space-y-4"
-        @submit="onSubmit"
+    <UForm
+      :schema="schema"
+      :state="state"
+      class="space-y-4"
+      @submit="onSubmit"
+    >
+      <UAlert
+        v-if="error"
+        color="error"
+        variant="subtle"
+        :title="error"
+        icon="i-lucide-triangle-alert"
+      />
+
+      <UFormField
+        label="Email"
+        name="email"
       >
-        <UAlert
-          v-if="error"
-          color="error"
-          variant="subtle"
-          :title="error"
-          icon="i-lucide-triangle-alert"
-        />
-
-        <UFormField
-          label="Email"
-          name="email"
-        >
-          <UInput
-            v-model="state.email"
-            type="email"
-            placeholder="you@company.com"
-            autocomplete="email"
-            size="lg"
-            class="w-full"
-          />
-        </UFormField>
-
-        <UFormField
-          label="Password"
-          name="password"
-        >
-          <PasswordInput
-            v-model="state.password"
-            autocomplete="current-password"
-          />
-        </UFormField>
-
-        <div class="flex justify-end -mt-1">
-          <NuxtLink
-            to="/forgot-password"
-            class="text-xs font-medium text-muted hover:text-amber-600 dark:hover:text-amber-400 transition-colors"
-          >
-            Forgot password?
-          </NuxtLink>
-        </div>
-
-        <UButton
-          type="submit"
-          color="primary"
+        <UInput
+          v-model="state.email"
+          type="email"
+          placeholder="you@company.com"
+          autocomplete="email"
           size="lg"
-          block
-          :loading="loading"
-          class="font-semibold"
-        >
-          Sign in
-        </UButton>
-      </UForm>
-    </div>
+          class="w-full"
+        />
+      </UFormField>
 
-    <p class="mt-6 text-center text-sm text-muted">
+      <UFormField
+        label="Password"
+        name="password"
+      >
+        <PasswordInput
+          v-model="state.password"
+          autocomplete="current-password"
+        />
+      </UFormField>
+
+      <div class="-mt-1 flex justify-end">
+        <NuxtLink
+          to="/forgot-password"
+          class="text-xs font-medium text-muted transition-colors hover:text-primary-600 dark:hover:text-primary-400"
+        >
+          Forgot password?
+        </NuxtLink>
+      </div>
+
+      <UButton
+        type="submit"
+        color="primary"
+        size="lg"
+        block
+        :loading="loading"
+        class="font-semibold"
+      >
+        Sign in
+      </UButton>
+    </UForm>
+
+    <p class="mt-8 text-sm text-muted">
       New to Perch?
       <NuxtLink
         to="/signup"
-        class="font-medium text-amber-600 dark:text-amber-400 hover:underline"
+        class="font-medium text-primary-600 hover:underline dark:text-primary-400"
       >Create an account</NuxtLink>
     </p>
   </div>

@@ -176,7 +176,7 @@ function presenceDot(status: TeamMember['presence']) {
           >
             <button
               class="w-full flex items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors"
-              :class="index === mentionIndex ? 'bg-amber-500/10 text-highlighted' : 'text-muted hover:bg-elevated'"
+              :class="index === mentionIndex ? 'bg-primary-500/10 text-highlighted' : 'text-muted hover:bg-elevated'"
               @click="applyMention(member)"
             >
               <span
@@ -203,11 +203,11 @@ function presenceDot(status: TeamMember['presence']) {
           >
             <button
               class="w-full flex items-baseline gap-2.5 px-3 py-2 text-left transition-colors"
-              :class="index === cannedIndex ? 'bg-amber-500/10' : 'hover:bg-elevated/60'"
+              :class="index === cannedIndex ? 'bg-primary-500/10' : 'hover:bg-elevated/60'"
               @mouseenter="cannedIndex = index"
               @click="applyCanned(response)"
             >
-              <span class="shrink-0 font-mono text-xs font-semibold text-amber-700 dark:text-amber-400">/{{ response.shortcut }}</span>
+              <span class="shrink-0 font-mono text-xs font-semibold text-primary-700 dark:text-primary-400">/{{ response.shortcut }}</span>
               <span class="truncate text-xs text-muted">{{ response.content }}</span>
             </button>
           </li>
@@ -217,8 +217,8 @@ function presenceDot(status: TeamMember['presence']) {
       <div
         class="rounded-xl ring-1 transition-colors focus-within:ring-2"
         :class="internalNote
-          ? 'ring-amber-500/40 bg-amber-500/5 focus-within:ring-amber-500/60'
-          : 'ring-default bg-elevated/40 focus-within:ring-amber-500/60'"
+          ? 'ring-primary-500/40 bg-primary-500/5 focus-within:ring-primary-500/60'
+          : 'ring-default bg-elevated/40 focus-within:ring-primary-500/60'"
       >
         <UTextarea
           ref="composerElement"
@@ -254,7 +254,7 @@ function presenceDot(status: TeamMember['presence']) {
           />
           <span
             class="text-xs"
-            :class="internalNote ? 'text-amber-700 dark:text-amber-400 font-medium' : 'text-muted'"
+            :class="internalNote ? 'text-primary-700 dark:text-primary-400 font-medium' : 'text-muted'"
           >Internal note</span>
           <span class="hidden sm:block ml-3 text-[11px] text-dimmed">
             <span class="font-mono">↵</span> send · <span class="font-mono">⇧↵</span> newline · <span class="font-mono">/</span> canned reply

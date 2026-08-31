@@ -26,7 +26,7 @@ const contact = 'adedejitewogbade2@gmail.com'
             their own websites. This policy explains what we collect, why, and what happens to it.
             Questions go to <a
               :href="`mailto:${contact}`"
-              class="text-amber-600 dark:text-amber-400 hover:underline"
+              class="text-primary-600 dark:text-primary-400 hover:underline"
             >{{ contact }}</a>.
           </p>
         </section>

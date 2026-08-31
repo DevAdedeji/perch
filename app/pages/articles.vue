@@ -326,7 +326,7 @@ async function togglePublish(article: Article) {
               class="size-4 shrink-0 text-dimmed"
             />
             <button
-              class="min-w-0 flex-1 text-left text-sm font-medium text-highlighted truncate hover:text-amber-600 dark:hover:text-amber-400 transition-colors"
+              class="min-w-0 flex-1 text-left text-sm font-medium text-highlighted truncate hover:text-primary-600 dark:hover:text-primary-400 transition-colors"
               @click="isAdmin ? openArticleModal(group, article) : undefined"
             >
               {{ article.title }}

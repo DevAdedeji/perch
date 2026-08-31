@@ -34,20 +34,20 @@
   box-shadow: inset 0 0 0 1px var(--ui-border);
 }
 
-/* Brand avatar — flat amber tint, hairline ring, amber text (used across the dashboard) */
-.avatar-amber {
-  background: color-mix(in oklab, var(--color-amber-500) 12%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--color-amber-500) 25%, transparent);
-  color: var(--color-amber-600);
+/* Brand avatar — flat primary tint, hairline ring, primary text (used across the dashboard) */
+.avatar-primary {
+  background: color-mix(in oklab, var(--ui-color-primary-500) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ui-color-primary-500) 25%, transparent);
+  color: var(--ui-color-primary-600);
 }
 
-.dark .avatar-amber {
-  color: var(--color-amber-400);
+.dark .avatar-primary {
+  color: var(--ui-color-primary-400);
 }
 
-/* Brand emphasis text — amber/gold gradient */
+/* Brand emphasis text — primary gradient */
 .text-accent {
-  background: linear-gradient(100deg, var(--color-amber-500), var(--color-amber-400) 55%, var(--color-amber-600));
+  background: linear-gradient(100deg, var(--ui-color-primary-500), var(--ui-color-primary-400) 55%, var(--ui-color-primary-600));
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;

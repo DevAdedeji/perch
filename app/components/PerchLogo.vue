@@ -12,7 +12,7 @@ withDefaults(defineProps<{
     <span class="grid place-items-center size-9 rounded-xl bg-elevated ring-1 ring-default">
       <UIcon
         name="i-lucide-bird"
-        class="size-5 text-highlighted"
+        class="size-5 text-primary-600 dark:text-primary-400"
       />
     </span>
     <span

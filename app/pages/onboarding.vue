@@ -1,5 +1,5 @@
 <script setup lang="ts">
-definePageMeta({ layout: 'auth' })
+definePageMeta({ layout: 'onboarding' })
 useHead({ title: 'Set up your workspace · Perch' })
 
 const toast = useToast()
@@ -91,7 +91,7 @@ async function finish() {
 <template>
   <div class="w-full max-w-xl">
     <!-- stepper -->
-    <ol class="flex items-center justify-center gap-2 mb-8">
+    <ol class="flex items-center justify-center gap-2 mb-12">
       <li
         v-for="(label, i) in steps"
         :key="label"
@@ -99,7 +99,9 @@ async function finish() {
       >
         <span
           class="grid place-items-center size-7 rounded-full text-xs font-semibold ring-1 transition-colors"
-          :class="i <= step ? 'bg-inverted text-inverted ring-inverted' : 'bg-elevated text-dimmed ring-default'"
+          :class="i < step ? 'bg-primary-500 text-slate-900 ring-primary-500'
+            : i === step ? 'bg-inverted text-inverted ring-inverted'
+              : 'bg-elevated text-dimmed ring-default'"
         >
           <UIcon
             v-if="i < step"
@@ -115,7 +117,7 @@ async function finish() {
         <span
           v-if="i < steps.length - 1"
           class="w-6 sm:w-10 h-px"
-          :class="i < step ? 'bg-inverted' : 'bg-(--ui-border-accented)'"
+          :class="i < step ? 'bg-primary-500' : 'bg-(--ui-border-accented)'"
         />
       </li>
     </ol>

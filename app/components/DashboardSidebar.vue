@@ -138,7 +138,7 @@ function pickWorkspace(id: string) {
         :to="item.to"
         class="flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors"
         :class="route.path === item.to
-          ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400 font-medium'
+          ? 'bg-primary-500/10 text-primary-700 dark:text-primary-400 font-medium'
           : 'text-muted hover:text-highlighted hover:bg-elevated/60'"
         @click="emit('navigate')"
       >

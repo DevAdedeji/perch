@@ -112,10 +112,10 @@ onBeforeUnmount(() => {
       <!-- the visitor's widget -->
       <div class="relative rounded-2xl border-glow glass shadow-2xl shadow-black/20 overflow-hidden flex flex-col h-105 min-w-0">
         <div class="flex items-center gap-3 px-4 py-3 border-b border-default bg-elevated/50 shrink-0">
-          <span class="grid place-items-center size-9 rounded-xl bg-amber-500/15 ring-1 ring-amber-500/30">
+          <span class="grid place-items-center size-9 rounded-xl bg-primary-500/15 ring-1 ring-primary-500/30">
             <UIcon
               name="i-lucide-bird"
-              class="size-4.5 text-amber-600 dark:text-amber-400"
+              class="size-4.5 text-primary-600 dark:text-primary-400"
             />
           </span>
           <div class="min-w-0">
@@ -154,9 +154,9 @@ onBeforeUnmount(() => {
           >
             <span class="theater-avatar">M</span>
             <div class="flex items-center gap-1 rounded-2xl rounded-bl-md bg-default ring-1 ring-default px-3.5 py-3">
-              <span class="size-1.5 rounded-full bg-amber-500 animate-bounce [animation-delay:-0.3s]" />
-              <span class="size-1.5 rounded-full bg-amber-500 animate-bounce [animation-delay:-0.15s]" />
-              <span class="size-1.5 rounded-full bg-amber-500 animate-bounce" />
+              <span class="size-1.5 rounded-full bg-primary-500 animate-bounce [animation-delay:-0.3s]" />
+              <span class="size-1.5 rounded-full bg-primary-500 animate-bounce [animation-delay:-0.15s]" />
+              <span class="size-1.5 rounded-full bg-primary-500 animate-bounce" />
             </div>
           </div>
           <div
@@ -178,10 +178,10 @@ onBeforeUnmount(() => {
             >{{ typedVisitor || 'Type a message…' }}</span>
             <span
               v-if="typedVisitor"
-              class="ml-0.5 inline-block w-0.5 h-3.5 bg-amber-500 animate-pulse shrink-0"
+              class="ml-0.5 inline-block w-0.5 h-3.5 bg-primary-500 animate-pulse shrink-0"
             />
           </div>
-          <span class="grid place-items-center size-9 rounded-xl bg-amber-500 text-slate-950 shrink-0">
+          <span class="grid place-items-center size-9 rounded-xl bg-primary-500 text-slate-950 shrink-0">
             <UIcon
               name="i-lucide-arrow-up"
               class="size-4"
@@ -196,13 +196,13 @@ onBeforeUnmount(() => {
           <div class="h-px w-full border-t border-dashed border-accented" />
           <span
             v-if="dir"
-            class="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 size-2 rounded-full bg-amber-500 shadow-[0_0_12px_2px] shadow-amber-500/50"
+            class="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 size-2 rounded-full bg-primary-500 shadow-[0_0_12px_2px] shadow-primary-500/50"
             :class="dir === 'ltr' ? 'wire-ltr' : 'wire-rtl'"
           />
         </div>
         <UIcon
           name="i-lucide-zap"
-          class="size-4 text-amber-500"
+          class="size-4 text-primary-500"
         />
       </div>
 
@@ -235,22 +235,22 @@ onBeforeUnmount(() => {
             <div
               v-if="rowVisible"
               class="relative px-3 py-2.5 row-in"
-              :class="claimed ? 'bg-amber-500/6' : ''"
+              :class="claimed ? 'bg-primary-500/6' : ''"
             >
               <span
                 v-if="claimed"
-                class="absolute inset-y-0 left-0 w-0.5 bg-amber-500"
+                class="absolute inset-y-0 left-0 w-0.5 bg-primary-500"
               />
               <div class="flex items-center gap-2">
-                <span class="grid place-items-center size-7 shrink-0 rounded-lg avatar-amber text-[10px] font-bold">A</span>
+                <span class="grid place-items-center size-7 shrink-0 rounded-lg avatar-primary text-[10px] font-bold">A</span>
                 <span class="truncate text-xs font-semibold text-highlighted">Ava Thompson</span>
                 <span
                   v-if="!claimed"
-                  class="ml-auto size-2 shrink-0 rounded-full bg-amber-500"
+                  class="ml-auto size-2 shrink-0 rounded-full bg-primary-500"
                 />
                 <span
                   v-else
-                  class="ml-auto grid place-items-center size-4.5 shrink-0 rounded-full bg-amber-500/15 text-[8px] font-bold text-amber-700 dark:text-amber-400"
+                  class="ml-auto grid place-items-center size-4.5 shrink-0 rounded-full bg-primary-500/15 text-[8px] font-bold text-primary-700 dark:text-primary-400"
                 >M</span>
               </div>
               <p class="truncate text-[11px] text-muted mt-1">
@@ -258,8 +258,8 @@ onBeforeUnmount(() => {
               </p>
               <span
                 v-if="!claimed"
-                class="mt-1.5 inline-flex items-center gap-1 rounded-lg bg-amber-500 px-2 py-0.5 text-[10px] font-semibold text-slate-950 transition-transform"
-                :class="claimFlash ? 'scale-110 ring-2 ring-amber-500/50' : ''"
+                class="mt-1.5 inline-flex items-center gap-1 rounded-lg bg-primary-500 px-2 py-0.5 text-[10px] font-semibold text-slate-950 transition-transform"
+                :class="claimFlash ? 'scale-110 ring-2 ring-primary-500/50' : ''"
               >
                 <UIcon
                   name="i-lucide-hand"
@@ -270,7 +270,7 @@ onBeforeUnmount(() => {
 
             <div class="px-3 py-2.5 border-t border-default/60 opacity-70">
               <div class="flex items-center gap-2">
-                <span class="grid place-items-center size-7 shrink-0 rounded-lg avatar-amber text-[10px] font-bold">N</span>
+                <span class="grid place-items-center size-7 shrink-0 rounded-lg avatar-primary text-[10px] font-bold">N</span>
                 <span class="truncate text-xs font-medium text-highlighted">Noah Bennett</span>
                 <span class="ml-auto grid place-items-center size-4.5 shrink-0 rounded-full bg-elevated ring-1 ring-default text-[8px] font-bold text-muted">J</span>
               </div>
@@ -281,7 +281,7 @@ onBeforeUnmount(() => {
 
             <div class="px-3 py-2.5 border-t border-default/60 opacity-50">
               <div class="flex items-center gap-2">
-                <span class="grid place-items-center size-7 shrink-0 rounded-lg avatar-amber text-[10px] font-bold">L</span>
+                <span class="grid place-items-center size-7 shrink-0 rounded-lg avatar-primary text-[10px] font-bold">L</span>
                 <span class="truncate text-xs font-medium text-highlighted">Liam Carter</span>
               </div>
               <p class="truncate text-[11px] text-muted mt-1">
@@ -327,10 +327,10 @@ onBeforeUnmount(() => {
                 >{{ typedAgent || 'Reply to Ava… ( / for canned replies )' }}</span>
                 <span
                   v-if="typedAgent"
-                  class="ml-0.5 inline-block w-0.5 h-3 bg-amber-500 animate-pulse shrink-0"
+                  class="ml-0.5 inline-block w-0.5 h-3 bg-primary-500 animate-pulse shrink-0"
                 />
               </div>
-              <span class="grid place-items-center size-8 rounded-lg bg-amber-500 text-slate-950 shrink-0">
+              <span class="grid place-items-center size-8 rounded-lg bg-primary-500 text-slate-950 shrink-0">
                 <UIcon
                   name="i-lucide-send-horizontal"
                   class="size-3.5"
@@ -347,7 +347,7 @@ onBeforeUnmount(() => {
       <span class="flex items-center gap-2 rounded-full glass ring-1 ring-default px-3.5 py-1.5 font-mono text-xs text-muted">
         <span class="size-1.5 rounded-full bg-green-500 animate-pulse" />
         on the wire
-        <span class="text-amber-600 dark:text-amber-400">▸ {{ wireEvent }}</span>
+        <span class="text-primary-600 dark:text-primary-400">▸ {{ wireEvent }}</span>
       </span>
     </div>
   </div>
@@ -361,15 +361,15 @@ onBeforeUnmount(() => {
   height: calc(var(--spacing) * 6);
   flex-shrink: 0;
   border-radius: var(--radius-lg);
-  background: color-mix(in oklab, var(--color-amber-500) 15%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--color-amber-500) 30%, transparent);
+  background: color-mix(in oklab, var(--ui-color-primary-500) 15%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ui-color-primary-500) 30%, transparent);
   font-size: 10px;
   font-weight: 600;
-  color: var(--color-amber-600);
+  color: var(--ui-color-primary-600);
 }
 
 :root.dark .theater-avatar {
-  color: var(--color-amber-400);
+  color: var(--ui-color-primary-400);
 }
 
 .theater-presence {
@@ -390,7 +390,7 @@ onBeforeUnmount(() => {
   max-width: 85%;
   border-radius: 1rem;
   border-bottom-right-radius: 0.375rem;
-  background: var(--color-amber-500);
+  background: var(--ui-color-primary-500);
   color: var(--color-slate-950);
   padding: 0.5rem 0.875rem;
   font-size: 0.8125rem;
