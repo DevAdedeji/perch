@@ -141,6 +141,8 @@ export const conversations = pgTable('conversations', {
   workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
   visitorRef: uuid('visitor_ref').notNull().references(() => visitors.id, { onDelete: 'cascade' }),
   assignedAgentId: uuid('assigned_agent_id').references(() => workspaceMembers.id, { onDelete: 'set null' }),
+  // Teammates explicitly looped in through an internal-note mention.
+  collaboratorMemberIds: uuid('collaborator_member_ids').array().default([]).notNull(),
   status: conversationStatusEnum('status').default('unassigned').notNull(),
   priority: conversationPriorityEnum('priority').default('normal').notNull(),
   snoozedUntil: timestamp('snoozed_until', { withTimezone: true }),
@@ -272,6 +274,7 @@ export const teamMessages = pgTable('team_messages', {
   workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
   memberId: uuid('member_id').notNull().references(() => workspaceMembers.id, { onDelete: 'cascade' }),
   content: text('content').notNull(),
+  mentionedMemberIds: uuid('mentioned_member_ids').array().default([]).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull()
 }, t => [
   index('team_messages_workspace_recency_idx').on(t.workspaceId, t.createdAt)
@@ -288,6 +291,8 @@ export const messages = pgTable('messages', {
   attachmentType: text('attachment_type'),
   // true = agent-only; the visitor WS pipeline must NEVER receive these (§4)
   isInternalNote: boolean('is_internal_note').default(false).notNull(),
+  // Validated workspace member ids selected through the internal-note composer.
+  mentionedMemberIds: uuid('mentioned_member_ids').array().default([]).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull()
 }, t => [
   index('messages_conversation_created_idx').on(t.conversationId, t.createdAt),
@@ -297,6 +302,38 @@ export const messages = pgTable('messages', {
   index('messages_public_sender_time_conversation_idx')
     .on(t.senderType, t.createdAt, t.conversationId, t.senderId)
     .where(sql`${t.isInternalNote} = false`)
+])
+
+/** Durable in-app delivery for assignments and @mentions. */
+export const memberNotifications = pgTable('member_notifications', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  recipientMemberId: uuid('recipient_member_id').notNull().references(() => workspaceMembers.id, { onDelete: 'cascade' }),
+  actorMemberId: uuid('actor_member_id').references(() => workspaceMembers.id, { onDelete: 'set null' }),
+  actorName: text('actor_name').notNull(),
+  type: text('type', { enum: ['mention', 'assignment'] }).notNull(),
+  source: text('source', { enum: ['nest', 'conversation'] }).notNull(),
+  conversationId: uuid('conversation_id').references(() => conversations.id, { onDelete: 'cascade' }),
+  messageId: uuid('message_id').references(() => messages.id, { onDelete: 'cascade' }),
+  teamMessageId: uuid('team_message_id').references(() => teamMessages.id, { onDelete: 'cascade' }),
+  excerpt: text('excerpt').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  readAt: timestamp('read_at', { withTimezone: true })
+}, t => [
+  check(
+    'member_notifications_target_ck',
+    sql`(${t.type} = 'assignment' and ${t.source} = 'conversation' and ${t.conversationId} is not null and ${t.messageId} is null and ${t.teamMessageId} is null)
+      or (${t.type} = 'mention' and ${t.source} = 'conversation' and ${t.conversationId} is not null and ${t.messageId} is not null and ${t.teamMessageId} is null)
+      or (${t.type} = 'mention' and ${t.source} = 'nest' and ${t.conversationId} is null and ${t.messageId} is null and ${t.teamMessageId} is not null)`
+  ),
+  uniqueIndex('member_notifications_message_recipient_uq')
+    .on(t.messageId, t.recipientMemberId)
+    .where(sql`${t.messageId} is not null`),
+  uniqueIndex('member_notifications_team_message_recipient_uq')
+    .on(t.teamMessageId, t.recipientMemberId)
+    .where(sql`${t.teamMessageId} is not null`),
+  index('member_notifications_recipient_unread_idx').on(t.recipientMemberId, t.readAt, t.createdAt),
+  index('member_notifications_workspace_recency_idx').on(t.workspaceId, t.createdAt)
 ])
 
 /** Per-agent read tracking; unread is derived (last_message_at > last_read_at). */
@@ -495,6 +532,8 @@ export type SupportOutcomeEvent = typeof supportOutcomeEvents.$inferSelect
 export type NewSupportOutcomeEvent = typeof supportOutcomeEvents.$inferInsert
 export type Message = typeof messages.$inferSelect
 export type NewMessage = typeof messages.$inferInsert
+export type MemberNotification = typeof memberNotifications.$inferSelect
+export type NewMemberNotification = typeof memberNotifications.$inferInsert
 export type ConversationRead = typeof conversationReads.$inferSelect
 export type NewConversationRead = typeof conversationReads.$inferInsert
 export type CannedResponse = typeof cannedResponses.$inferSelect

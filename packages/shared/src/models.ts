@@ -59,6 +59,7 @@ export interface ConversationDTO {
   workspace_id: string
   visitor_ref: string
   assigned_agent_id: string | null
+  collaborator_member_ids: string[]
   status: ConversationStatus
   priority: ConversationPriority
   snoozed_until: string | null
@@ -96,6 +97,7 @@ export interface MessageDTO {
   attachment_url: string | null
   attachment_type: string | null
   is_internal_note: boolean
+  mentioned_member_ids: string[]
   created_at: string
 }
 

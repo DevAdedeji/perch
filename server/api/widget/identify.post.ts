@@ -86,7 +86,7 @@ export default defineEventHandler(async (event) => {
           publishFiltered(channels.workspace(workspace.id), {
             type: 'conversation.refresh',
             payload: { conversation_id: conversation.id }
-          }, inboxScope(automated.conversation.assignedAgentId))
+          }, inboxScope(automated.conversation.assignedAgentId, automated.conversation.collaboratorMemberIds))
         }
       } catch (error) {
         console.error('[automation] identify pass failed', { conversationId: conversation.id, error })

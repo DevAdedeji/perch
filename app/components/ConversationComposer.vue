@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { validateImageAttachment } from '@perch/shared'
 import type { CannedResponse, TeamMember } from '~/composables/useControlRoom'
+import { activeMention, insertMention, selectedMentionIds } from '~/utils/mentions'
 
 const props = defineProps<{
   members: TeamMember[]
+  currentMemberId: string | null
   cannedResponses: CannedResponse[]
   sendReply: (
     content: string,
@@ -25,19 +27,17 @@ const composerElement = ref<{ textareaRef?: HTMLTextAreaElement } | null>(null)
 
 const mentionIndex = ref(0)
 const pickedMentions = new Map<string, string>()
-const mentionQuery = computed<string | null>(() => {
-  if (!internalNote.value) return null
-  const match = reply.value.match(/@([\w-]*)$/)
-  return match ? match[1]!.toLowerCase() : null
-})
+const currentMention = computed(() => internalNote.value ? activeMention(reply.value) : null)
 const mentionMatches = computed(() =>
-  mentionQuery.value === null
+  currentMention.value === null
     ? []
-    : props.members.filter(member => member.name.toLowerCase().includes(mentionQuery.value!)).slice(0, 6)
+    : props.members
+        .filter(member => member.id !== props.currentMemberId && member.name.toLowerCase().includes(currentMention.value!.query))
+        .slice(0, 6)
 )
 const mentionOpen = computed(() => mentionMatches.value.length > 0)
 
-watch(mentionQuery, () => {
+watch(currentMention, () => {
   mentionIndex.value = 0
 })
 
@@ -46,9 +46,10 @@ function focusComposer() {
 }
 
 function applyMention(member: Pick<TeamMember, 'id' | 'name'>) {
-  const token = `@${member.name.split(' ')[0]}`
-  reply.value = reply.value.replace(/@[\w-]*$/, `${token} `)
-  pickedMentions.set(token, member.id)
+  if (!currentMention.value) return
+  const token = `@${member.name}`
+  reply.value = insertMention(reply.value, currentMention.value, member.name)
+  pickedMentions.set(member.id, token)
   focusComposer()
 }
 
@@ -126,11 +127,7 @@ async function send() {
   const text = reply.value.trim()
   if (!text) return
   const note = internalNote.value
-  const mentionIds = note
-    ? [...new Set([...pickedMentions.entries()]
-        .filter(([token]) => text.includes(token))
-        .map(([, id]) => id))]
-    : []
+  const mentionIds = note ? selectedMentionIds(text, pickedMentions) : []
 
   pickedMentions.clear()
   reply.value = ''

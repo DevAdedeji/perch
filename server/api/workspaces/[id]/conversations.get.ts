@@ -24,9 +24,14 @@ export default defineEventHandler(async (event) => {
   const limit = Math.min(Math.max(Number(query.limit) || DEFAULT_LIMIT, 1), MAX_LIMIT)
   const beforeId = typeof query.before === 'string' ? query.before : null
 
-  // agents see only the unassigned pool + their own chats; admins see everything
+  // Agents see the unassigned pool, their own chats, and chats where they were
+  // brought in as a collaborator; admins see everything.
   const scope = member.role === 'agent'
-    ? or(isNull(conversations.assignedAgentId), eq(conversations.assignedAgentId, member.id))
+    ? or(
+        isNull(conversations.assignedAgentId),
+        eq(conversations.assignedAgentId, member.id),
+        sql`${member.id}::uuid = any(${conversations.collaboratorMemberIds})`
+      )
     : undefined
 
   const db = useDb()
@@ -44,6 +49,7 @@ export default defineEventHandler(async (event) => {
       id: conversations.id,
       status: conversations.status,
       assignedAgentId: conversations.assignedAgentId,
+      collaboratorMemberIds: conversations.collaboratorMemberIds,
       priority: conversations.priority,
       snoozedUntil: conversations.snoozedUntil,
       lastMessageAt: conversations.lastMessageAt,
@@ -103,6 +109,7 @@ export default defineEventHandler(async (event) => {
       id: r.id,
       status: r.status,
       assignedAgentId: r.assignedAgentId,
+      collaboratorMemberIds: r.collaboratorMemberIds,
       priority: r.priority,
       snoozedUntil: r.snoozedUntil?.toISOString() ?? null,
       lastMessageAt: r.lastMessageAt.toISOString(),

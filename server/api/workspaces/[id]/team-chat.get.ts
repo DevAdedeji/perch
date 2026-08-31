@@ -11,6 +11,7 @@ export default defineEventHandler(async (event) => {
       memberId: teamMessages.memberId,
       memberName: users.name,
       content: teamMessages.content,
+      mentionedMemberIds: teamMessages.mentionedMemberIds,
       createdAt: teamMessages.createdAt
     })
     .from(teamMessages)
@@ -25,6 +26,7 @@ export default defineEventHandler(async (event) => {
     member_id: r.memberId,
     member_name: r.memberName,
     content: r.content,
+    mentioned_member_ids: r.mentionedMemberIds,
     created_at: r.createdAt.toISOString()
   }))
 })

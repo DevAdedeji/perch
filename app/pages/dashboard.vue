@@ -151,6 +151,14 @@ const assignMenuItems = computed(() => {
   }))]
 })
 
+const canTransferActive = computed(() => {
+  const active = cr.activeConversation.value
+  return !!active?.assignedAgentId && (
+    currentWorkspace.value?.role === 'admin'
+    || active.assignedAgentId === currentWorkspace.value?.memberId
+  )
+})
+
 async function onAssign(memberId: string, memberName: string) {
   const active = cr.activeConversation.value
   if (!active || active.assignedAgentId === memberId) return
@@ -215,9 +223,17 @@ function snoozedLabel(value: string) {
 
 // a mention toast (from the layout) asked us to open a specific conversation
 const pendingSelect = useState<string | null>('inbox:pendingSelect', () => null)
-watch(pendingSelect, (id) => {
+watch(pendingSelect, async (id) => {
   if (id) {
-    cr.select(id, { force: true })
+    // A notification is an explicit request to open one conversation. Clear
+    // list filters first so a collaborator can see the selected row as well.
+    cr.filter.value = 'all'
+    cr.assigneeFilter.value = 'any'
+    cr.priorityFilters.value = []
+    cr.tagFilters.value = []
+    cr.snoozedFilter.value = 'include'
+    await cr.reload()
+    await cr.select(id, { force: true })
     pendingSelect.value = null
   }
 }, { immediate: true })
@@ -868,6 +884,7 @@ const statusBadge = {
 
             <!-- assignee / transfer -->
             <UDropdownMenu
+              v-if="canTransferActive"
               :items="assignMenuItems"
               :content="{ align: 'end' }"
             >
@@ -1041,6 +1058,7 @@ const statusBadge = {
             <ConversationComposer
               :key="cr.activeConversation.value.id"
               :members="cr.members.value"
+              :current-member-id="currentWorkspace?.memberId ?? null"
               :canned-responses="cr.canned.value"
               :send-reply="cr.sendReply"
               :send-attachment="cr.sendAttachment"

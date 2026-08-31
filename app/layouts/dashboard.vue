@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { channels } from '@perch/shared'
-import type { ServerEvent } from '@perch/shared'
+import type { MemberNotificationPayload, ServerEvent } from '@perch/shared'
 
 const { user, currentWorkspace } = useAuth()
 const rt = useRealtime()
@@ -14,8 +14,11 @@ const wid = computed(() => currentWorkspace.value?.workspaceId ?? null)
 const activeConversationId = useState<string | null>('inbox:activeId', () => null)
 // a mention toast can ask the inbox to open a specific conversation
 const pendingSelect = useState<string | null>('inbox:pendingSelect', () => null)
+const pendingNestMessage = useState<string | null>('nest:pendingMessage', () => null)
 const shownAutomationNotifications = new Set<string>()
 const automationNotifications = ref<AutomationNotification[]>([])
+const shownMemberNotifications = new Set<string>()
+const memberNotifications = ref<MemberNotificationPayload[]>([])
 
 interface AutomationNotification {
   id: string
@@ -77,22 +80,8 @@ async function loadTeam() {
  * agent is already looking at that exact conversation in a focused tab.
  */
 function onEvent(ev: ServerEvent) {
-  // someone @mentioned this agent in an internal note
-  if (ev.type === 'mention') {
-    toast.add({
-      title: `${ev.payload.by_name} mentioned you`,
-      description: ev.payload.excerpt,
-      icon: 'i-lucide-at-sign',
-      color: 'warning',
-      actions: [{
-        label: 'View',
-        onClick: () => {
-          pendingSelect.value = ev.payload.conversation_id
-          navigateTo('/dashboard')
-        }
-      }]
-    })
-    play()
+  if (ev.type === 'member.notification') {
+    showMemberNotification(ev.payload)
     return
   }
   if (ev.type === 'automation.reminder') {
@@ -122,6 +111,66 @@ function onEvent(ev: ServerEvent) {
     actions: [{ label: 'View', onClick: () => { navigateTo('/dashboard') } }]
   })
   play()
+}
+
+function memberNotificationTitle(notification: MemberNotificationPayload) {
+  if (notification.type === 'assignment') return `${notification.by_name} assigned you a conversation`
+  return notification.source === 'nest'
+    ? `${notification.by_name} mentioned you in Nest`
+    : `${notification.by_name} mentioned you in an internal note`
+}
+
+function memberNotificationIcon(notification: MemberNotificationPayload) {
+  return notification.type === 'assignment' ? 'i-lucide-user-round-check' : 'i-lucide-at-sign'
+}
+
+async function openMemberNotification(notification: MemberNotificationPayload) {
+  if (wid.value) {
+    try {
+      await $fetch(`/api/workspaces/${wid.value}/member-notifications/${notification.notification_id}/read`, { method: 'POST' })
+      memberNotifications.value = memberNotifications.value.filter(item => item.notification_id !== notification.notification_id)
+      shownMemberNotifications.delete(notification.notification_id)
+    } catch {
+      // Keep it visible until the server confirms acknowledgement.
+      return
+    }
+  }
+  if (notification.source === 'nest' && notification.team_message_id) {
+    pendingNestMessage.value = notification.team_message_id
+    await navigateTo('/nest')
+    return
+  }
+  if (notification.conversation_id) {
+    pendingSelect.value = notification.conversation_id
+    await navigateTo('/dashboard')
+  }
+}
+
+function showMemberNotification(notification: MemberNotificationPayload) {
+  if (!memberNotifications.value.some(item => item.notification_id === notification.notification_id)) {
+    memberNotifications.value.unshift(notification)
+  }
+  if (shownMemberNotifications.has(notification.notification_id)) return
+  shownMemberNotifications.add(notification.notification_id)
+  toast.add({
+    title: memberNotificationTitle(notification),
+    description: notification.excerpt,
+    icon: memberNotificationIcon(notification),
+    color: notification.type === 'assignment' ? 'primary' : 'warning',
+    actions: [{ label: 'View', onClick: () => openMemberNotification(notification) }]
+  })
+  play()
+}
+
+async function loadMemberNotifications() {
+  if (!wid.value) return
+  try {
+    const notifications = await $fetch<MemberNotificationPayload[]>(`/api/workspaces/${wid.value}/member-notifications`)
+    memberNotifications.value = notifications
+    notifications.slice().reverse().forEach(showMemberNotification)
+  } catch {
+    // Realtime delivery still works; polling retries persisted notifications.
+  }
 }
 
 async function openAutomationReminder(notification: AutomationNotification) {
@@ -170,6 +219,7 @@ async function loadAutomationNotifications() {
 
 let off: (() => void) | undefined
 let automationPoll: ReturnType<typeof setInterval> | undefined
+let memberNotificationPoll: ReturnType<typeof setInterval> | undefined
 onMounted(() => {
   rt.connect()
   off = rt.on(onEvent)
@@ -177,22 +227,28 @@ onMounted(() => {
     rt.subscribe(channels.workspace(wid.value))
     loadTeam()
     loadAutomationNotifications()
+    loadMemberNotifications()
   }
   automationPoll = setInterval(loadAutomationNotifications, 60_000)
+  memberNotificationPoll = setInterval(loadMemberNotifications, 60_000)
 })
 onBeforeUnmount(() => {
   off?.()
   if (automationPoll) clearInterval(automationPoll)
+  if (memberNotificationPoll) clearInterval(memberNotificationPoll)
   if (wid.value) rt.unsubscribe(channels.workspace(wid.value))
 })
 watch(wid, (next, prev) => {
   if (prev) rt.unsubscribe(channels.workspace(prev))
   shownAutomationNotifications.clear()
   automationNotifications.value = []
+  shownMemberNotifications.clear()
+  memberNotifications.value = []
   if (next) {
     rt.subscribe(channels.workspace(next))
     loadTeam()
     loadAutomationNotifications()
+    loadMemberNotifications()
   }
 })
 </script>
@@ -230,6 +286,42 @@ watch(wid, (next, prev) => {
             />
             {{ rt.status.value === 'open' ? 'Live' : 'connecting…' }}
           </span>
+
+          <UPopover v-if="memberNotifications.length">
+            <UButton
+              color="primary"
+              variant="soft"
+              size="xs"
+              icon="i-lucide-bell"
+              :label="String(memberNotifications.length)"
+              aria-label="Open team notifications"
+            />
+            <template #content>
+              <div class="w-80 max-w-[90vw] p-2">
+                <p class="px-2 py-1 text-xs font-semibold text-highlighted">
+                  Team notifications
+                </p>
+                <button
+                  v-for="notification in memberNotifications"
+                  :key="notification.notification_id"
+                  type="button"
+                  class="flex w-full items-start gap-3 rounded-lg px-2 py-2 text-left hover:bg-elevated focus-visible:outline-2 focus-visible:outline-primary"
+                  @click="openMemberNotification(notification)"
+                >
+                  <span class="mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg bg-primary-500/10 text-primary-700 dark:text-primary-300">
+                    <UIcon
+                      :name="memberNotificationIcon(notification)"
+                      class="size-4"
+                    />
+                  </span>
+                  <span class="min-w-0">
+                    <span class="block text-sm font-medium text-highlighted">{{ memberNotificationTitle(notification) }}</span>
+                    <span class="mt-0.5 block truncate text-xs text-muted">{{ notification.excerpt }}</span>
+                  </span>
+                </button>
+              </div>
+            </template>
+          </UPopover>
 
           <UPopover v-if="automationNotifications.length">
             <UButton

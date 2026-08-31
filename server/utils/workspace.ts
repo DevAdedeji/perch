@@ -42,6 +42,12 @@ export function canMemberAccessConversation(member: WorkspaceMember, conversatio
   return member.role === 'admin'
     || conversation.assignedAgentId === null
     || conversation.assignedAgentId === member.id
+    || conversation.collaboratorMemberIds.includes(member.id)
+}
+
+/** Only the current owner (or an admin) may hand a conversation to someone else. */
+export function canMemberReassignConversation(member: WorkspaceMember, conversation: Conversation): boolean {
+  return member.role === 'admin' || conversation.assignedAgentId === member.id
 }
 
 /**

@@ -5,9 +5,14 @@ export default defineEventHandler(async (event) => {
   const workspaceId = getRouterParam(event, 'id')!
   const { member } = await requireMembership(event, workspaceId)
 
-  // agents only count the unassigned pool + their own; admins count everything
+  // Agents count the unassigned pool, their own chats, and chats where they
+  // were brought in as a collaborator; admins count everything.
   const scope = member.role === 'agent'
-    ? or(isNull(conversations.assignedAgentId), eq(conversations.assignedAgentId, member.id))
+    ? or(
+        isNull(conversations.assignedAgentId),
+        eq(conversations.assignedAgentId, member.id),
+        sql`${member.id}::uuid = any(${conversations.collaboratorMemberIds})`
+      )
     : undefined
 
   const db = useDb()

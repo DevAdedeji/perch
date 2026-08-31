@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { inboxRemovalScope, inboxScope } from '../server/utils/conversations'
-import { canMemberAccessConversation } from '../server/utils/workspace'
+import { canMemberAccessConversation, canMemberReassignConversation } from '../server/utils/workspace'
 
 describe('inboxScope — agent visibility on the workspace channel', () => {
   const admin = { memberRole: 'admin', memberId: 'admin-1' }
@@ -22,6 +22,11 @@ describe('inboxScope — agent visibility on the workspace channel', () => {
     expect(inboxScope('agent-a')(agentA)).toBe(true)
     expect(inboxScope('agent-a')(agentB)).toBe(false)
     expect(inboxScope('agent-b')(agentA)).toBe(false)
+  })
+
+  it('collaborators receive only the conversations where they were mentioned', () => {
+    expect(inboxScope('agent-a', ['agent-b'])(agentB)).toBe(true)
+    expect(inboxScope('agent-a', ['agent-c'])(agentB)).toBe(false)
   })
 
   it('a peer with no membership context receives nothing assigned', () => {
@@ -48,16 +53,31 @@ describe('inboxRemovalScope — assignment visibility changes', () => {
     expect(scope(agentA)).toBe(true)
     expect(scope(agentB)).toBe(false)
   })
+
+  it('keeps a previous owner who is also a collaborator', () => {
+    const scope = inboxRemovalScope('agent-a', 'agent-b', ['agent-a'])
+    expect(scope(agentA)).toBe(false)
+  })
 })
 
 describe('conversation authorization', () => {
   const member = (id: string, role: 'admin' | 'agent') => ({ id, role }) as Parameters<typeof canMemberAccessConversation>[0]
-  const conversation = (assignedAgentId: string | null) => ({ assignedAgentId }) as Parameters<typeof canMemberAccessConversation>[1]
+  const conversation = (assignedAgentId: string | null, collaboratorMemberIds: string[] = []) => ({
+    assignedAgentId,
+    collaboratorMemberIds
+  }) as Parameters<typeof canMemberAccessConversation>[1]
 
   it('matches inbox visibility for direct REST and WS access', () => {
     expect(canMemberAccessConversation(member('admin', 'admin'), conversation('someone-else'))).toBe(true)
     expect(canMemberAccessConversation(member('agent-a', 'agent'), conversation(null))).toBe(true)
     expect(canMemberAccessConversation(member('agent-a', 'agent'), conversation('agent-a'))).toBe(true)
+    expect(canMemberAccessConversation(member('agent-a', 'agent'), conversation('agent-b', ['agent-a']))).toBe(true)
     expect(canMemberAccessConversation(member('agent-a', 'agent'), conversation('agent-b'))).toBe(false)
+  })
+
+  it('allows only admins and the current assignee to transfer ownership', () => {
+    expect(canMemberReassignConversation(member('admin', 'admin'), conversation('agent-a'))).toBe(true)
+    expect(canMemberReassignConversation(member('agent-a', 'agent'), conversation('agent-a'))).toBe(true)
+    expect(canMemberReassignConversation(member('agent-b', 'agent'), conversation('agent-a', ['agent-b']))).toBe(false)
   })
 })

@@ -82,6 +82,7 @@ export interface ConversationUpdatedPayload {
   id: string
   status: ConversationStatus
   assigned_agent_id: string | null
+  collaborator_member_ids: string[]
   priority: ConversationPriority
   snoozed_until: string | null
   last_message_at: string
@@ -130,16 +131,21 @@ export interface TeamMessagePayload {
   member_id: string
   member_name: string
   content: string
+  mentioned_member_ids: string[]
   created_at: string
 }
 
-export interface MentionPayload {
-  conversation_id: string
-  message_id: string
-  by_member_id: string
+export interface MemberNotificationPayload {
+  notification_id: string
+  type: 'mention' | 'assignment'
+  source: 'nest' | 'conversation'
+  conversation_id: string | null
+  message_id: string | null
+  team_message_id: string | null
+  by_member_id: string | null
   by_name: string
-  /** first ~90 chars of the note, for the toast */
   excerpt: string
+  created_at: string
 }
 
 export interface ConversationReadReceiptPayload {
@@ -195,7 +201,7 @@ export type ServerEvent = | { type: 'message.new', payload: MessageDTO }
   | { type: 'business.presence', payload: BusinessPresencePayload }
   | { type: 'conversation.read', payload: ConversationReadReceiptPayload }
   | { type: 'team.message', payload: TeamMessagePayload }
-  | { type: 'mention', payload: MentionPayload }
+  | { type: 'member.notification', payload: MemberNotificationPayload }
   | { type: 'automation.reminder', payload: AutomationReminderPayload }
   | { type: 'conversation.refresh', payload: ConversationRefreshPayload }
   | { type: 'visitor.online', payload: LiveVisitorDTO }

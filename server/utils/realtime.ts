@@ -100,6 +100,7 @@ export function publishConversationEvent(
   channel: string,
   event: WsEvent,
   assignedAgentId: string | null,
+  collaboratorMemberIds: string[] = [],
   opts?: { agentsOnly?: boolean }
 ): void {
   publishFiltered(channel, event, (context) => {
@@ -108,6 +109,7 @@ export function publishConversationEvent(
     return context.memberRole === 'admin'
       || assignedAgentId === null
       || context.memberId === assignedAgentId
+      || collaboratorMemberIds.includes(context.memberId as string)
   })
 }
 

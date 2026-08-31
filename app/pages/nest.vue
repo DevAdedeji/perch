@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { ServerEvent } from '@perch/shared'
+import { activeMention, insertMention, mentionSegments, selectedMentionIds } from '~/utils/mentions'
 
 definePageMeta({ layout: 'dashboard' })
 useHead({ title: 'Nest · Perch' })
@@ -9,6 +10,7 @@ interface NestMessage {
   member_id: string
   member_name: string
   content: string
+  mentioned_member_ids: string[]
   created_at: string
   pending?: boolean
 }
@@ -25,7 +27,11 @@ const thread = useState<NestMessage[]>('nest:messages', () => [])
 const loading = ref(false)
 const draft = ref('')
 const threadEl = ref<HTMLElement | null>(null)
-const onlineNames = ref<string[]>([])
+interface NestMember { id: string, name: string, presence: 'online' | 'away' | 'offline' }
+const members = ref<NestMember[]>([])
+const onlineNames = computed(() => members.value.filter(member => member.presence === 'online').map(member => member.name))
+const pendingMessageId = useState<string | null>('nest:pendingMessage', () => null)
+const highlightedMessageId = ref<string | null>(null)
 
 async function load() {
   if (!wid.value) return
@@ -41,10 +47,54 @@ async function load() {
 async function loadPresence() {
   if (!wid.value) return
   try {
-    const members = await $fetch<{ name: string, presence: string }[]>(`/api/workspaces/${wid.value}/members`)
-    onlineNames.value = members.filter(m => m.presence === 'online').map(m => m.name)
+    members.value = await $fetch<NestMember[]>(`/api/workspaces/${wid.value}/members`)
   } catch {
     // decorative
+  }
+}
+
+const pickedMentions = new Map<string, string>()
+const mentionIndex = ref(0)
+const currentMention = computed(() => activeMention(draft.value))
+const mentionMatches = computed(() => currentMention.value === null
+  ? []
+  : members.value
+      .filter(member => member.id !== myMemberId.value && member.name.toLowerCase().includes(currentMention.value!.query))
+      .slice(0, 6))
+const mentionOpen = computed(() => mentionMatches.value.length > 0)
+
+watch(currentMention, () => {
+  mentionIndex.value = 0
+})
+
+function applyMention(member: NestMember) {
+  if (!currentMention.value) return
+  const token = `@${member.name}`
+  draft.value = insertMention(draft.value, currentMention.value, member.name)
+  pickedMentions.set(member.id, token)
+}
+
+function onComposerKeydown(event: KeyboardEvent) {
+  if (mentionOpen.value) {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      mentionIndex.value = (mentionIndex.value + 1) % mentionMatches.value.length
+      return
+    }
+    if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      mentionIndex.value = (mentionIndex.value - 1 + mentionMatches.value.length) % mentionMatches.value.length
+      return
+    }
+    if (event.key === 'Enter' || event.key === 'Tab') {
+      event.preventDefault()
+      applyMention(mentionMatches.value[mentionIndex.value]!)
+      return
+    }
+  }
+  if (event.key === 'Enter') {
+    event.preventDefault()
+    send()
   }
 }
 
@@ -68,6 +118,7 @@ function onEvent(ev: ServerEvent) {
 async function send() {
   const content = draft.value.trim()
   if (!content || !wid.value) return
+  const mentionedMemberIds = selectedMentionIds(content, pickedMentions)
   draft.value = ''
   const tempId = `temp-${Date.now()}`
   thread.value.push({
@@ -75,6 +126,7 @@ async function send() {
     member_id: myMemberId.value ?? '',
     member_name: user.value?.name ?? 'Me',
     content,
+    mentioned_member_ids: mentionedMemberIds,
     created_at: new Date().toISOString(),
     pending: true
   })
@@ -82,7 +134,7 @@ async function send() {
   try {
     const msg = await $fetch<NestMessage>(`/api/workspaces/${wid.value}/team-chat`, {
       method: 'POST',
-      body: { content }
+      body: { content, mentioned_member_ids: mentionedMemberIds }
     })
     const idx = thread.value.findIndex(m => m.id === tempId)
     if (thread.value.some(m => m.id === msg.id)) {
@@ -90,11 +142,32 @@ async function send() {
     } else if (idx !== -1) {
       thread.value.splice(idx, 1, msg)
     }
+    pickedMentions.clear()
   } catch (e) {
     thread.value = thread.value.filter(m => m.id !== tempId)
     draft.value = content
     toast.add({ title: getErrorMessage(e, 'Could not send'), color: 'error' })
   }
+}
+
+function memberName(id: string) {
+  return members.value.find(member => member.id === id)?.name ?? null
+}
+
+function messageSegments(message: NestMessage) {
+  return mentionSegments(message.content, message.mentioned_member_ids, memberName)
+}
+
+async function focusPendingMessage() {
+  const id = pendingMessageId.value
+  if (!id) return
+  await nextTick()
+  document.getElementById(`nest-message-${id}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  highlightedMessageId.value = id
+  pendingMessageId.value = null
+  window.setTimeout(() => {
+    if (highlightedMessageId.value === id) highlightedMessageId.value = null
+  }, 2500)
 }
 
 // the workspace channel is owned by the dashboard layout; we just listen
@@ -104,6 +177,7 @@ onMounted(() => {
   off = rt.on(onEvent)
   load()
   loadPresence()
+  focusPendingMessage()
 })
 onBeforeUnmount(() => off?.())
 watch(wid, () => {
@@ -111,6 +185,7 @@ watch(wid, () => {
   load()
   loadPresence()
 })
+watch([() => thread.value.length, pendingMessageId], focusPendingMessage)
 
 /* rows: day dividers + grouping (same rhythm as the inbox thread) */
 interface MsgRow { kind: 'msg', m: NestMessage, first: boolean }
@@ -227,8 +302,12 @@ function initials(n: string) {
 
           <div
             v-else
+            :id="`nest-message-${row.m.id}`"
             class="flex items-start gap-2.5"
-            :class="[row.first ? 'mt-3' : 'mt-0.5', { 'opacity-60': row.m.pending }]"
+            :class="[
+              row.first ? 'mt-3' : 'mt-0.5',
+              { 'opacity-60': row.m.pending }
+            ]"
           >
             <span
               v-if="row.first"
@@ -240,16 +319,32 @@ function initials(n: string) {
               v-else
               class="w-8 shrink-0"
             />
-            <div class="min-w-0">
+            <div
+              class="min-w-0 max-w-[min(100%,36rem)] rounded-xl px-3.5 py-2 ring-1 shadow-sm transition-all"
+              :class="[
+                row.m.member_id === myMemberId
+                  ? 'bg-primary-500/10 ring-primary-500/25'
+                  : 'bg-elevated/80 ring-default',
+                row.first ? 'rounded-tl-md' : '',
+                highlightedMessageId === row.m.id
+                  ? 'bg-primary-500/15 ring-2 ring-primary-500/60 shadow-primary-500/10'
+                  : ''
+              ]"
+            >
               <p
                 v-if="row.first"
-                class="text-xs"
+                class="mb-1 text-xs"
               >
                 <span class="font-semibold text-highlighted">{{ row.m.member_id === myMemberId ? 'You' : row.m.member_name }}</span>
                 <span class="ml-1.5 text-[10px] text-dimmed">{{ formatTime(row.m.created_at) }}</span>
               </p>
-              <p class="mt-0.5 text-sm text-default leading-relaxed whitespace-pre-wrap wrap-break-word">
-                {{ row.m.content }}
+              <p class="text-sm text-default leading-relaxed whitespace-pre-wrap wrap-break-word">
+                <template
+                  v-for="(segment, index) in messageSegments(row.m)"
+                  :key="index"
+                >
+                  <span :class="segment.mention ? 'rounded bg-primary-500/15 px-0.5 font-semibold text-primary-700 dark:text-primary-300' : ''">{{ segment.text }}</span>
+                </template>
               </p>
             </div>
           </div>
@@ -259,13 +354,40 @@ function initials(n: string) {
 
     <!-- composer -->
     <div class="shrink-0 border-t border-default bg-default p-3">
-      <div class="max-w-2xl mx-auto flex items-center gap-2">
+      <div class="relative max-w-2xl mx-auto flex items-center gap-2">
+        <div
+          v-if="mentionOpen"
+          class="absolute bottom-full left-0 right-12 z-10 mb-2 overflow-hidden rounded-xl bg-default ring-1 ring-default shadow-xl shadow-black/10"
+        >
+          <p class="px-3 pt-2.5 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-dimmed">
+            Mention a teammate
+          </p>
+          <ul class="max-h-56 overflow-y-auto pb-1">
+            <li
+              v-for="(member, index) in mentionMatches"
+              :key="member.id"
+            >
+              <button
+                type="button"
+                class="w-full flex items-center gap-2 px-3 py-2 text-left text-sm transition-colors"
+                :class="index === mentionIndex ? 'bg-primary-500/10 text-highlighted' : 'text-muted hover:bg-elevated'"
+                @mousedown.prevent="applyMention(member)"
+              >
+                <span
+                  class="size-1.5 rounded-full"
+                  :class="member.presence === 'online' ? 'bg-green-500' : member.presence === 'away' ? 'bg-amber-400' : 'bg-zinc-500'"
+                />
+                {{ member.name }}
+              </button>
+            </li>
+          </ul>
+        </div>
         <UInput
           v-model="draft"
           class="flex-1"
-          placeholder="Message the team…"
+          placeholder="Message the team… Use @ to mention someone"
           size="lg"
-          @keyup.enter="send"
+          @keydown="onComposerKeydown"
         />
         <UButton
           color="primary"

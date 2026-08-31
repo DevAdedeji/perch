@@ -5,6 +5,7 @@ export interface InboxItem {
   id: string
   status: ConversationStatus
   assignedAgentId: string | null
+  collaboratorMemberIds: string[]
   priority: ConversationPriority
   snoozedUntil: string | null
   lastMessageAt: string
@@ -120,11 +121,15 @@ export function useControlRoom() {
   const workspaceId = computed(() => currentWorkspace.value?.workspaceId ?? null)
   const activeConversation = computed(() => conversations.value.find(c => c.id === activeId.value) ?? null)
 
-  // agents only see the unassigned pool + their own chats; admins see all
+  // Agents see the unassigned pool, their own chats, and conversations where
+  // a teammate explicitly brought them in through an internal-note mention.
   const myRole = computed(() => currentWorkspace.value?.role ?? 'agent')
   const myMemberId = computed(() => currentWorkspace.value?.memberId ?? null)
-  function canSee(assignedAgentId: string | null): boolean {
-    return myRole.value === 'admin' || assignedAgentId == null || assignedAgentId === myMemberId.value
+  function canSee(assignedAgentId: string | null, collaboratorMemberIds: string[] = []): boolean {
+    return myRole.value === 'admin'
+      || assignedAgentId == null
+      || assignedAgentId === myMemberId.value
+      || (!!myMemberId.value && collaboratorMemberIds.includes(myMemberId.value))
   }
 
   function memberName(id: string | null): string | null {
@@ -295,6 +300,7 @@ export function useControlRoom() {
       attachment_url: attachment?.url ?? null,
       attachment_type: attachment?.type ?? null,
       is_internal_note: isInternalNote,
+      mentioned_member_ids: [],
       created_at: new Date().toISOString(),
       pending: true
     })
@@ -352,6 +358,8 @@ export function useControlRoom() {
     if (!activeId.value || (!text && !attachment)) return
     const tempId = pushTemp(activeId.value, text, isInternalNote, attachment)
     if (mentionedMemberIds?.length) mentionMeta.set(tempId, mentionedMemberIds)
+    const temp = messages.value.find(message => message.id === tempId)
+    if (temp) temp.mentioned_member_ids = mentionedMemberIds ?? []
     await performSend(tempId)
   }
 
@@ -420,11 +428,12 @@ export function useControlRoom() {
           const statusChanged = c.status !== p.status
           c.status = p.status
           c.assignedAgentId = p.assigned_agent_id
+          c.collaboratorMemberIds = p.collaborator_member_ids
           c.priority = p.priority
           c.snoozedUntil = p.snoozed_until
           c.lastMessageAt = p.last_message_at
 
-          if ((assignmentChanged && !canSee(p.assigned_agent_id)) || !matchesFilters(c)) {
+          if ((assignmentChanged && !canSee(p.assigned_agent_id, p.collaborator_member_ids)) || !matchesFilters(c)) {
             // reassigned to another agent — drop it from my view
             conversations.value = conversations.value.filter(x => x.id !== p.id)
             if (activeId.value === p.id) deselect()
@@ -436,7 +445,7 @@ export function useControlRoom() {
               if (filter.value !== 'all') loadConversations()
             }
           }
-        } else if (canSee(p.assigned_agent_id)) {
+        } else if (canSee(p.assigned_agent_id, p.collaborator_member_ids)) {
           // newly visible to me (assigned to me / returned to the pool)
           loadConversations()
           loadCounts()

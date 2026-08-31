@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { MessageDTO } from '@perch/shared'
+import { mentionSegments } from '~/utils/mentions'
 
 type ThreadMessage = MessageDTO & { pending?: boolean, failed?: boolean }
 interface MessageRow { kind: 'message', message: ThreadMessage, first: boolean, last: boolean }
@@ -35,6 +36,10 @@ function dayLabel(iso: string) {
 
 function formatTime(iso: string) {
   return new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+}
+
+function noteSegments(message: ThreadMessage) {
+  return mentionSegments(message.content, message.mentioned_member_ids, id => props.memberName(id))
 }
 
 function isBubble(message: ThreadMessage) {
@@ -192,7 +197,12 @@ async function loadOlder() {
               alt="Image attachment"
             >
           </a>
-          {{ row.message.content }}
+          <template
+            v-for="(segment, index) in noteSegments(row.message)"
+            :key="index"
+          >
+            <span :class="segment.mention ? 'rounded bg-primary-500/20 px-0.5 font-semibold text-primary-800 dark:text-primary-300' : ''">{{ segment.text }}</span>
+          </template>
         </div>
       </div>
 

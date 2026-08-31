@@ -19,7 +19,7 @@ export default defineEventHandler(async (event) => {
   publishConversationEvent(channels.conversation(conversationId), {
     type: 'conversation.read',
     payload: { conversation_id: conversationId, last_read_at: now.toISOString() }
-  }, conversation.assignedAgentId)
+  }, conversation.assignedAgentId, conversation.collaboratorMemberIds)
 
   return { ok: true }
 })

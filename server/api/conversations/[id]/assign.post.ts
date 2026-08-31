@@ -3,10 +3,10 @@ import { z } from 'zod'
 
 const schema = z.object({ member_id: z.string().uuid() })
 
-/** Transfer a conversation to another agent (§3.3). Any member may reassign. */
+/** Transfer a conversation to another agent (§3.3). */
 export default defineEventHandler(async (event) => {
   const conversationId = getRouterParam(event, 'id')!
-  const { conversation } = await requireConversationMember(event, conversationId)
+  const { user, member, conversation } = await requireConversationMember(event, conversationId)
 
   const result = await readValidatedBody(event, body => schema.safeParse(body))
   if (!result.success) {
@@ -23,7 +23,10 @@ export default defineEventHandler(async (event) => {
   if (!target) {
     throw createError({ statusCode: 404, statusMessage: 'That agent is not in this workspace' })
   }
+  if (!canMemberReassignConversation(member, conversation)) {
+    throw createError({ statusCode: 403, statusMessage: 'Only the current assignee or an admin can transfer this conversation' })
+  }
 
-  const updated = await assignConversation(conversationId, target.id)
+  const updated = await assignConversation(conversationId, target.id, { memberId: member.id, name: user.name })
   return { conversation: serializeConversation(updated!) }
 })

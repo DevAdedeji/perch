@@ -237,7 +237,7 @@ export default defineWebSocketHandler({
             is_typing: msg.type === 'typing.start',
             preview
           }
-        }, convo.assignedAgentId)
+        }, convo.assignedAgentId, convo.collaboratorMemberIds)
         break
       }
     }
