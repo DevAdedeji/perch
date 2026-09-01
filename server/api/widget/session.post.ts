@@ -103,6 +103,7 @@ export default defineEventHandler(async (event) => {
   })
 
   const withinHours = isWithinBusinessHours(workspace.businessHours, workspace.timezone)
+  const entitlement = await workspaceEntitlement(workspace.id)
 
   return {
     workspace: {
@@ -116,7 +117,7 @@ export default defineEventHandler(async (event) => {
       position: workspace.widgetPosition,
       size: workspace.widgetSize,
       theme: workspace.widgetTheme,
-      show_branding: workspace.widgetShowBranding,
+      show_branding: entitlement.isPro ? workspace.widgetShowBranding : true,
       has_articles: !!published
     },
     agent: agentName ? { name: agentName } : null,

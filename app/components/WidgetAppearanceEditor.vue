@@ -12,9 +12,11 @@ withDefaults(defineProps<{
   /** agents may look, but only admins may change */
   disabled?: boolean
   saving?: boolean
+  removeBrandingAllowed?: boolean
 }>(), {
   disabled: false,
-  saving: false
+  saving: false,
+  removeBrandingAllowed: true
 })
 
 const emit = defineEmits<{ save: [] }>()
@@ -204,12 +206,12 @@ const canSave = computed(() =>
           Show “Powered by Perch”
         </p>
         <p class="text-xs text-muted">
-          Keep it visible or present the widget as fully yours.
+          Keep it visible or present the widget as fully yours on Pro.
         </p>
       </div>
       <USwitch
         v-model="showBranding"
-        :disabled="disabled"
+        :disabled="disabled || (!removeBrandingAllowed && model.widgetShowBranding)"
       />
     </div>
 

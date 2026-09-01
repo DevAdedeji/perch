@@ -17,6 +17,9 @@ const nav = computed(() => [
   ...(currentWorkspace.value?.role === 'admin'
     ? [{ label: 'Install', icon: 'i-lucide-code-xml', to: '/installation' }]
     : []),
+  ...(currentWorkspace.value?.role === 'admin'
+    ? [{ label: 'Plans & billing', icon: 'i-lucide-credit-card', to: '/billing' }]
+    : []),
   { label: 'Settings', icon: 'i-lucide-settings', to: '/settings' },
   { label: 'Account', icon: 'i-lucide-user-cog', to: '/account' },
   // workspace administration — admins only
