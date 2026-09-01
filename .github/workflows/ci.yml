@@ -17,6 +17,26 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: perch
+          POSTGRES_PASSWORD: perch_test_password
+          POSTGRES_DB: perch_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U perch -d perch_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      NEON_CONNECTION_STRING: postgresql://perch:perch_test_password@127.0.0.1:5432/perch_test
+      TEST_DATABASE_URL: postgresql://perch:perch_test_password@127.0.0.1:5432/perch_test
+      PERCH_PUBLIC_URL: https://useperch.xyz
+      NUXT_SESSION_PASSWORD: ci-only-session-secret-at-least-thirty-two-characters
+      REALTIME_SECRET: ci-only-realtime-secret-at-least-thirty-two-characters
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -27,6 +47,9 @@ jobs:
           runtime: node@22
           cache: true
           require-lockfile: true
+
+      - name: Apply database migrations
+        run: pnpm --filter @perch/db db:migrate
 
       - name: Lint
         run: pnpm lint
