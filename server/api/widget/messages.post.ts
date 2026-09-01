@@ -29,6 +29,7 @@ export default defineEventHandler(async (event) => {
   }
   const { workspace, visitor } = await requireVisitorSession(event, site_id, visitor_session)
   assertRateLimit('widget-msg:visitor', visitor.id, { max: 20, windowMs: 60 * 1000 })
+  await assertVisitorCanMessage(visitor)
 
   const { conversation, message } = await ingestVisitorMessage({
     workspaceId: workspace.id,

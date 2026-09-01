@@ -49,6 +49,7 @@ export default defineEventHandler(async (event) => {
     .from(conversations)
     .innerJoin(visitors, eq(visitors.id, conversations.visitorRef))
     .where(sql`${conversations.workspaceId} = ${workspaceId}
+      and ${conversations.isSpam} = false
       and (${scope ?? sql`true`})
       and (
         coalesce(${visitors.profileName}, '') ilike ${needle}

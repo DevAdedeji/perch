@@ -24,7 +24,8 @@ const filters: { label: string, value: InboxFilter }[] = [
   { label: 'All', value: 'all' },
   { label: 'Unassigned', value: 'unassigned' },
   { label: 'Open', value: 'open' },
-  { label: 'Resolved', value: 'resolved' }
+  { label: 'Resolved', value: 'resolved' },
+  { label: 'Spam', value: 'spam' }
 ]
 
 const priorities: { value: ConversationPriority, label: string, icon: string }[] = [
@@ -130,9 +131,12 @@ const pendingBulkAction = ref<{
 
 const selectedCount = computed(() => selectedIds.value.size)
 const pageConversationIds = computed(() => cr.conversations.value.map(conversation => conversation.id))
-const selectablePageIds = computed(() => pageConversationIds.value.slice(0, MAX_BULK_CONVERSATIONS))
+const selectablePageIds = computed(() => cr.conversations.value
+  .filter(conversation => !conversation.isSpam)
+  .slice(0, MAX_BULK_CONVERSATIONS)
+  .map(conversation => conversation.id))
 const allPageSelected = computed(() => selectablePageIds.value.length > 0 && selectablePageIds.value.every(id => selectedIds.value.has(id)))
-const somePageSelected = computed(() => !allPageSelected.value && pageConversationIds.value.some(id => selectedIds.value.has(id)))
+const somePageSelected = computed(() => !allPageSelected.value && selectablePageIds.value.some(id => selectedIds.value.has(id)))
 const selectedConversations = computed(() => cr.conversations.value.filter(conversation => selectedIds.value.has(conversation.id)))
 
 const bulkTagOptions = computed(() => bulkTagMode.value === 'add_tag'
@@ -147,6 +151,14 @@ function setSelectionMode(enabled: boolean) {
 }
 
 function toggleConversationSelection(id: string) {
+  if (cr.conversations.value.find(conversation => conversation.id === id)?.isSpam) {
+    toast.add({
+      title: 'Restore spam conversations individually',
+      description: 'This keeps visitor unblocking explicit and prevents accidental bulk changes.',
+      color: 'neutral'
+    })
+    return
+  }
   const next = new Set(selectedIds.value)
   if (next.has(id)) next.delete(id)
   else if (next.size < MAX_BULK_CONVERSATIONS) next.add(id)
@@ -173,6 +185,9 @@ watch(pageConversationIds, (ids) => {
 })
 watch(searchActive, (active) => {
   if (active) setSelectionMode(false)
+})
+watch(() => cr.filter.value, (filter) => {
+  if (filter === 'spam') setSelectionMode(false)
 })
 
 async function runBulkAction(input: BulkConversationInput, successLabel: string) {
@@ -304,6 +319,44 @@ async function onAssign(memberId: string, memberName: string) {
     toast.add({ title: `Transferred to ${memberName}`, icon: 'i-lucide-arrow-right-left', color: 'success' })
   } catch (e) {
     toast.add({ title: getErrorMessage(e, 'Could not transfer'), color: 'error' })
+  }
+}
+
+const spamConfirmOpen = ref(false)
+const spamSaving = ref(false)
+
+function openSpamConfirmation() {
+  if (!cr.activeConversation.value) return
+  spamConfirmOpen.value = true
+}
+
+async function confirmSpamAction() {
+  const active = cr.activeConversation.value
+  if (!active || spamSaving.value) return
+  spamSaving.value = true
+  try {
+    if (active.isSpam) {
+      const result = await cr.restoreSpam(active.id)
+      toast.add({
+        title: 'Conversation restored',
+        description: result.visitor_blocked
+          ? 'This visitor stays blocked because another conversation is still marked as spam.'
+          : 'The visitor can send messages again.',
+        color: 'success'
+      })
+    } else {
+      await cr.markSpam(active.id)
+      toast.add({
+        title: 'Marked as spam',
+        description: 'The visitor can no longer send messages to this workspace.',
+        color: 'success'
+      })
+    }
+    spamConfirmOpen.value = false
+  } catch (error) {
+    toast.add({ title: getErrorMessage(error, 'Could not update spam status'), color: 'error' })
+  } finally {
+    spamSaving.value = false
   }
 }
 
@@ -443,7 +496,7 @@ const statusBadge = {
           </h1>
           <div class="flex items-center gap-1.5">
             <UButton
-              v-if="!searchActive"
+              v-if="!searchActive && cr.filter.value !== 'spam'"
               :icon="selectionMode ? 'i-lucide-x' : 'i-lucide-list-checks'"
               color="neutral"
               :variant="selectionMode ? 'subtle' : 'ghost'"
@@ -863,6 +916,12 @@ const statusBadge = {
             Resolve
           </UButton>
         </div>
+        <p
+          v-else-if="!selectablePageIds.length"
+          class="mt-2 text-[11px] leading-4 text-dimmed"
+        >
+          Spam conversations must be restored individually so visitor access is never changed by accident.
+        </p>
       </div>
 
       <div class="flex-1 overflow-y-auto">
@@ -946,20 +1005,22 @@ const statusBadge = {
             >
               <label
                 v-if="selectionMode"
-                class="flex shrink-0 cursor-pointer items-start py-4 pl-3"
-                :aria-label="`Select conversation with ${c.visitor.name ?? 'Visitor'}`"
+                class="flex shrink-0 items-start py-4 pl-3"
+                :class="c.isSpam ? 'cursor-not-allowed opacity-45' : 'cursor-pointer'"
+                :aria-label="c.isSpam ? 'Spam conversations must be restored individually' : `Select conversation with ${c.visitor.name ?? 'Visitor'}`"
               >
                 <input
                   type="checkbox"
                   class="size-4 rounded border-default accent-primary-500"
                   :checked="selectedIds.has(c.id)"
+                  :disabled="c.isSpam"
                   @change="toggleConversationSelection(c.id)"
                 >
               </label>
               <button
                 class="relative min-w-0 flex-1 flex gap-3 px-4 py-3 text-left transition-colors"
                 :class="cr.activeId.value === c.id || selectedIds.has(c.id) ? 'bg-primary-500/6' : 'hover:bg-elevated/50'"
-                @click="selectionMode ? toggleConversationSelection(c.id) : cr.select(c.id)"
+                @click="selectionMode && !c.isSpam ? toggleConversationSelection(c.id) : cr.select(c.id)"
               >
                 <span
                   v-if="cr.activeId.value === c.id"
@@ -995,6 +1056,16 @@ const statusBadge = {
                       {{ c.priority }}
                     </span>
                     <UBadge
+                      v-if="c.isSpam"
+                      color="error"
+                      variant="subtle"
+                      icon="i-lucide-shield-ban"
+                      size="sm"
+                    >
+                      Spam
+                    </UBadge>
+                    <UBadge
+                      v-else
                       :color="statusBadge[c.status].color"
                       variant="subtle"
                       :icon="statusBadge[c.status].icon"
@@ -1120,6 +1191,16 @@ const statusBadge = {
             :sla="cr.activeConversation.value.responseSla"
             :now="slaNow"
           />
+
+          <UBadge
+            v-if="cr.activeConversation.value.isSpam"
+            class="hidden sm:inline-flex"
+            color="error"
+            variant="subtle"
+            icon="i-lucide-shield-ban"
+          >
+            Spam
+          </UBadge>
 
           <div class="flex items-center gap-1 sm:gap-2 shrink-0">
             <UDropdownMenu
@@ -1285,7 +1366,7 @@ const statusBadge = {
             </UButton>
 
             <UButton
-              v-if="cr.activeConversation.value.status === 'resolved'"
+              v-if="cr.activeConversation.value.status === 'resolved' && !cr.activeConversation.value.isSpam"
               size="sm"
               color="neutral"
               variant="subtle"
@@ -1295,7 +1376,7 @@ const statusBadge = {
               <span class="hidden sm:inline">Reopen</span>
             </UButton>
             <UButton
-              v-else
+              v-else-if="!cr.activeConversation.value.isSpam"
               size="sm"
               color="neutral"
               variant="subtle"
@@ -1304,6 +1385,15 @@ const statusBadge = {
             >
               <span class="hidden sm:inline">Resolve</span>
             </UButton>
+
+            <UButton
+              size="sm"
+              color="neutral"
+              variant="ghost"
+              :icon="cr.activeConversation.value.isSpam ? 'i-lucide-rotate-ccw' : 'i-lucide-ellipsis'"
+              :aria-label="cr.activeConversation.value.isSpam ? 'Restore spam conversation' : 'More conversation actions'"
+              @click="openSpamConfirmation"
+            />
 
             <!-- visitor context (slideover below xl; static panel on xl+) -->
             <UButton
@@ -1409,6 +1499,7 @@ const statusBadge = {
               :canned-responses="cr.canned.value"
               :send-reply="cr.sendReply"
               :send-attachment="cr.sendAttachment"
+              :public-reply-disabled="cr.activeConversation.value.isSpam"
             />
           </div>
 
@@ -1465,6 +1556,46 @@ const statusBadge = {
             @click="confirmBulkAction"
           >
             {{ pendingBulkAction?.confirmLabel }}
+          </UButton>
+        </div>
+      </template>
+    </UModal>
+
+    <UModal
+      v-model:open="spamConfirmOpen"
+      :title="cr.activeConversation.value?.isSpam ? 'Restore this conversation?' : 'Mark as spam and block visitor?'"
+      :description="cr.activeConversation.value?.isSpam
+        ? 'The conversation returns to the regular inbox. The visitor is unblocked unless another conversation from them is still marked as spam.'
+        : 'The conversation moves to Spam and closes. This visitor will not be able to send new messages to this workspace.'"
+    >
+      <template #body>
+        <div class="rounded-xl bg-elevated/60 p-3 text-sm text-muted ring-1 ring-default">
+          <p v-if="cr.activeConversation.value?.isSpam">
+            Existing messages stay in the conversation history. Restoring does not reopen the conversation until the visitor sends another message.
+          </p>
+          <p v-else>
+            This does not delete any history. Anonymous visitors are blocked for this browser session; verified signed-in identities stay blocked across new sessions.
+          </p>
+        </div>
+      </template>
+      <template #footer>
+        <div class="flex w-full flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <UButton
+            color="neutral"
+            variant="ghost"
+            class="justify-center"
+            @click="spamConfirmOpen = false"
+          >
+            Cancel
+          </UButton>
+          <UButton
+            :color="cr.activeConversation.value?.isSpam ? 'primary' : 'error'"
+            :icon="cr.activeConversation.value?.isSpam ? 'i-lucide-rotate-ccw' : 'i-lucide-shield-ban'"
+            :loading="spamSaving"
+            class="justify-center"
+            @click="confirmSpamAction"
+          >
+            {{ cr.activeConversation.value?.isSpam ? 'Restore and unblock' : 'Mark as spam' }}
           </UButton>
         </div>
       </template>

@@ -13,6 +13,7 @@ import {
   visitors
 } from '@perch/db'
 import type { Conversation, WorkspaceMember } from '@perch/db'
+import { isVisitorMessagingBlocked } from './spam-control'
 import { z } from 'zod'
 
 const nullableText = (max: number) => z.union([
@@ -84,7 +85,7 @@ export async function getCustomerContext(conversation: Conversation, member: Wor
     ne(conversations.id, conversation.id),
     historyAccess(member)
   )
-  const [pastRows, recent, profileTags] = await Promise.all([
+  const [pastRows, recent, profileTags, messagingBlocked] = await Promise.all([
     db.select({ total: count() }).from(conversations).where(historyWhere),
     db.select({
       id: conversations.id,
@@ -95,7 +96,8 @@ export async function getCustomerContext(conversation: Conversation, member: Wor
       .from(visitorTags)
       .innerJoin(tags, eq(tags.id, visitorTags.tagId))
       .where(and(eq(visitorTags.visitorId, visitor.id), eq(tags.workspaceId, conversation.workspaceId)))
-      .orderBy(tags.name)
+      .orderBy(tags.name),
+    isVisitorMessagingBlocked(visitor, db)
   ])
 
   const { browser, os } = parseUa(visitor.metadata.ua)
@@ -115,6 +117,7 @@ export async function getCustomerContext(conversation: Conversation, member: Wor
       visitor_id: visitor.visitorId,
       external_id: visitor.externalId,
       identity_verified: visitor.identityVerified,
+      messaging_blocked: messagingBlocked,
       first_seen_at: visitor.firstSeenAt.toISOString(),
       last_seen_at: visitor.lastSeenAt.toISOString(),
       page_url: visitor.metadata.page_url ?? null,
