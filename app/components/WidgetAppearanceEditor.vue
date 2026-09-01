@@ -212,6 +212,7 @@ const canSave = computed(() =>
       <USwitch
         v-model="showBranding"
         :disabled="disabled || (!removeBrandingAllowed && model.widgetShowBranding)"
+        aria-label="Show Powered by Perch branding"
       />
     </div>
 
