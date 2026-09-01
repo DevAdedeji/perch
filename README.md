@@ -207,8 +207,8 @@ Useful scripts: `pnpm build` (production Nitro bundle), `pnpm preview`, `pnpm li
 | `NUXT_OAUTH_GOOGLE_CLIENT_ID` / `NUXT_OAUTH_GOOGLE_CLIENT_SECRET` | *(optional)* Google OAuth web-client credentials; both are required to enable Google sign-in |
 | `NUXT_OAUTH_GOOGLE_REDIRECT_URL` | *(required with Google OAuth)* Exact callback URL registered in Google Cloud, e.g. `https://useperch.xyz/auth/google` |
 | `REALTIME_SECRET` | *(optional)* separate 32+ char HMAC secret for realtime and visitor tickets; otherwise `NUXT_SESSION_PASSWORD` is reused |
-| `RESEND_API_KEY` | *(optional)* transactional email — password resets + invite emails. Without it, emails are logged to the server console |
-| `RESEND_FROM` | *(optional)* from address, e.g. `Perch <no-reply@yourdomain.com>` |
+| `RESEND_API_KEY` | Transactional email for password resets and invites. Optional only during local development; every production-mode deployment, including Railway staging, requires its own key |
+| `RESEND_FROM` | Verified sender, e.g. `Perch <no-reply@yourdomain.com>`. Optional only during local development and required with `RESEND_API_KEY` in deployed environments |
 | `SENTRY_DSN` | *(optional)* server-side error tracking; the client DSN lives in `sentry.client.config.ts` |
 | `CLOUDINARY_CLOUD_NAME` / `CLOUDINARY_API_KEY` / `CLOUDINARY_API_SECRET` | *(optional)* signed image attachments; the secret never leaves the server |
 | `PERCH_PUBLIC_URL` | Canonical origin used in prerendered SEO metadata, password, verification, and invite links; set it to `https://useperch.xyz` during both the production build and runtime |

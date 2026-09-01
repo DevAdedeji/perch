@@ -87,6 +87,18 @@ export interface CustomerProfileUpdate {
   tag_ids?: string[]
 }
 
+export type BulkConversationInput
+  = | { action: 'assign', conversation_ids: string[], member_id: string }
+    | { action: 'resolve' | 'reopen', conversation_ids: string[] }
+    | { action: 'add_tag' | 'remove_tag', conversation_ids: string[], tag_id: string }
+
+export interface BulkConversationResult {
+  action: BulkConversationInput['action']
+  requested_count: number
+  changed_count: number
+  unchanged_count: number
+}
+
 export type InboxFilter = 'all' | ConversationStatus
 
 /**
@@ -608,6 +620,16 @@ export function useControlRoom() {
     return tag
   }
 
+  async function bulkUpdate(input: BulkConversationInput): Promise<BulkConversationResult> {
+    if (!workspaceId.value) throw new Error('No workspace selected')
+    const result = await $fetch<BulkConversationResult>(`/api/workspaces/${workspaceId.value}/conversations/bulk`, {
+      method: 'POST',
+      body: input
+    })
+    await Promise.all([loadConversations(), loadCounts()])
+    return result
+  }
+
   let offReconnect: (() => void) | undefined
   let snoozeRefresh: ReturnType<typeof setInterval> | undefined
   onMounted(() => {
@@ -746,6 +768,7 @@ export function useControlRoom() {
     applyTag,
     removeTag,
     createTag,
+    bulkUpdate,
     select,
     deselect,
     loadMoreConversations,

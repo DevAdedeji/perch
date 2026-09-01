@@ -37,7 +37,7 @@ This is the practical checklist for deploying and operating Perch. It separates 
 - Generate `NUXT_SESSION_PASSWORD` and optional `REALTIME_SECRET` independently with at least 32 random characters.
 - Rotate a session secret as an incident response action: it signs everyone out. Rotate the realtime secret at the same time only when it is separate.
 - Configure Google client ID, client secret, and the exact HTTPS redirect URL together.
-- Configure Resend API key and verified sender together. Monitor delivery failures and domain authentication.
+- Configure Resend API key and verified sender together. Railway staging also runs with `NODE_ENV=production`, so it needs separate staging/test Resend credentials rather than the local-development console fallback. Monitor delivery failures and domain authentication.
 - Configure Bachs API and webhook secrets together. Keep sandbox keys on staging and verify the production webhook URL and signature secret before launch.
 - Configure all three Cloudinary values together. Keep upload presets private; uploads pass through Perch's signed, authenticated proxy.
 - Never paste secret values into tickets, screenshots, commits, or logs.
