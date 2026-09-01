@@ -27,7 +27,9 @@ This is the practical checklist for deploying and operating Perch. It separates 
 ## Database safety
 
 - Enable Neon backups or point-in-time recovery before production traffic.
-- Test restoring a backup into a separate database. A backup that has never been restored is not yet proven.
+- Schedule `scripts/backup.sh` on an always-on service and copy its archive plus checksum to private storage outside Neon and Railway.
+- Test restoring with `scripts/restore-verify.sh` into a fresh separate database. A backup that has never been restored is not yet proven.
+- Record a successful restore drill before launch and repeat it at least monthly.
 - Keep production, staging, CI, and local database credentials separate.
 - The container applies migrations before starting the server. Review every migration before deploy and do not edit a migration that has already run.
 - For a rollback, prefer a forward-compatible application rollback. Do not automatically reverse a migration that may already contain user data.
