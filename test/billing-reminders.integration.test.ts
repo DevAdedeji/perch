@@ -61,8 +61,8 @@ describe.skipIf(!databaseUrl)('billing and reminder database integration', () =>
       sent.push(message)
       return true
     }
-    await runUnansweredReminderSweep({ now: new Date('2026-09-01T10:05:00Z'), sender })
-    await runUnansweredReminderSweep({ now: new Date('2026-09-01T10:06:00Z'), sender })
+    await runUnansweredReminderSweep({ now: new Date('2026-09-01T10:15:00Z'), sender })
+    await runUnansweredReminderSweep({ now: new Date('2026-09-01T10:16:00Z'), sender })
     expect(sent).toHaveLength(1)
     expect(sent[0]).toMatchObject({ subject: 'Waiting Visitor is waiting for a reply' })
     const delivery = await db.query.unansweredReminderDeliveries.findFirst({
