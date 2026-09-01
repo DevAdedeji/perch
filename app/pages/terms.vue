@@ -4,7 +4,7 @@ useSeoMeta({
   description: 'The terms governing access to and use of the Perch live-chat service.'
 })
 
-const updated = 'September 1, 2026'
+const updated = 'September 2, 2026'
 const contact = 'adedejitewogbade2@gmail.com'
 </script>
 
@@ -99,9 +99,10 @@ const contact = 'adedejitewogbade2@gmail.com'
         <section>
           <h2>Termination</h2>
           <p class="mt-3">
-            You can delete your workspace or account at any time from the app — deletion is
-            immediate and permanent. We may suspend or terminate accounts that violate these terms,
-            with notice where practical.
+            You can delete your workspace or account at any time from the app. It is removed from
+            the live service immediately and cannot be undone in the app. Short-lived private
+            disaster-recovery backups rotate automatically as described in the Privacy Policy. We
+            may suspend or terminate accounts that violate these terms, with notice where practical.
           </p>
         </section>
 

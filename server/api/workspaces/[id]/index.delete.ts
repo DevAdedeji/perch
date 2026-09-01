@@ -11,5 +11,6 @@ export default defineEventHandler(async (event) => {
   await requireMembership(event, workspaceId, { admin: true })
 
   await useDb().delete(workspaces).where(eq(workspaces.id, workspaceId))
+  logDeletionReceipt({ kind: 'workspace', subjectId: workspaceId })
   return { ok: true }
 })

@@ -4,7 +4,7 @@ useSeoMeta({
   description: 'How Perch collects, uses and protects account, workspace and live-chat data.'
 })
 
-const updated = 'September 1, 2026'
+const updated = 'September 2, 2026'
 const contact = 'adedejitewogbade2@gmail.com'
 </script>
 
@@ -82,8 +82,15 @@ const contact = 'adedejitewogbade2@gmail.com'
             Chat history is kept for as long as the workspace exists, so businesses can see past
             conversations. Deleting a workspace permanently removes its conversations, messages,
             visitors, and settings. Deleting your account removes your profile and any workspaces
-            where you were the only member. Both options are available in the app, and deletion is
-            immediate — there is no soft-delete recovery window.
+            where you were the only member. Both options are available in the app, and deletion from
+            the live service is immediate — there is no in-app soft-delete recovery window.
+          </p>
+          <p>
+            Private disaster-recovery backups may retain a deleted record for up to 14 days before
+            automatic rotation. Backups are access-restricted, are not used to keep serving deleted
+            data, and are restored only when recovering the service from a serious data-loss event.
+            If a backup is restored, separately retained deletion receipts are reconciled before
+            normal access resumes so requests made after that archive remain effective.
           </p>
         </section>
 

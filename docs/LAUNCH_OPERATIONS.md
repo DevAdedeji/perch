@@ -23,6 +23,7 @@ This is the practical checklist for deploying and operating Perch. It separates 
 - Run one application replica until realtime fan-out, presence, rate limits, and background-job claiming use shared infrastructure. In-memory coordination is intentionally single-instance today.
 - Set CPU and memory limits, watch restart count and memory pressure, and keep at least one previous known-good image available for rollback.
 - Send application logs to a retained log destination. Alert on repeated `5xx` responses, failed health checks, restart loops, and background sweep failures.
+- Retain structured `[data-deletion-receipt]` log records for longer than the backup window. They contain internal IDs but no email, chat text, or password. Restrict access to operators.
 
 ## Database safety
 
@@ -30,6 +31,7 @@ This is the practical checklist for deploying and operating Perch. It separates 
 - Schedule `scripts/backup.sh` on an always-on service and copy its archive plus checksum to private storage outside Neon and Railway.
 - Test restoring with `scripts/restore-verify.sh` into a fresh separate database. A backup that has never been restored is not yet proven.
 - Record a successful restore drill before launch and repeat it at least monthly.
+- Before a restored database serves traffic, replay every retained `data_deletion.completed` receipt created after the archive timestamp, then verify those account/workspace IDs no longer exist.
 - Keep production, staging, CI, and local database credentials separate.
 - The container applies migrations before starting the server. Review every migration before deploy and do not edit a migration that has already run.
 - For a rollback, prefer a forward-compatible application rollback. Do not automatically reverse a migration that may already contain user data.
