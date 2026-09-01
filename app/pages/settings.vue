@@ -501,6 +501,7 @@ async function removeLogo() {
               <USwitch
                 :model-value="workspace?.prechatFormEnabled"
                 :disabled="!isAdmin"
+                aria-label="Enable pre-chat form"
                 @update:model-value="togglePrechat"
               />
             </div>
@@ -613,6 +614,7 @@ async function removeLogo() {
             <USwitch
               v-model="hoursEnabled"
               :disabled="!isAdmin"
+              aria-label="Enable business hours"
             />
           </div>
 
@@ -640,6 +642,7 @@ async function removeLogo() {
                   v-model="dayRows[d]!.on"
                   :disabled="!isAdmin"
                   size="sm"
+                  :aria-label="`${DAY_NAMES[d]} business hours`"
                 />
                 <span
                   class="w-24 text-sm"
@@ -728,6 +731,7 @@ async function removeLogo() {
               <USwitch
                 v-model="reminderEnabled"
                 :disabled="!isAdmin"
+                aria-label="Enable unanswered-message email reminders"
               />
             </div>
           </div>
@@ -747,6 +751,7 @@ async function removeLogo() {
             <USwitch
               v-model="reminderBusinessHoursOnly"
               :disabled="!isAdmin || !workspace?.entitlement.features.businessHoursReminders"
+              aria-label="Send reminder emails during business hours only"
             />
           </div>
 
