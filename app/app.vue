@@ -18,7 +18,7 @@ useHead(() => ({
   link: [
     { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' },
     { rel: 'apple-touch-icon', href: '/favicon.svg' },
-    ...(indexable.value ? [{ key: 'canonical', rel: 'canonical', href: canonical.value }] : [])
+    ...(indexable.value ? [{ key: 'canonical', rel: 'canonical' as const, href: canonical.value }] : [])
   ],
   htmlAttrs: {
     lang: 'en'
