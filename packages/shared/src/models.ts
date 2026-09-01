@@ -69,6 +69,17 @@ export interface ConversationDTO {
   resolved_at: string | null
 }
 
+export type ResponseSlaStatus = 'due' | 'approaching' | 'breached' | 'answered' | 'paused'
+
+export interface ResponseSlaDTO {
+  status: ResponseSlaStatus
+  target_minutes: number
+  started_at: string | null
+  approaching_at: string | null
+  due_at: string | null
+  paused_until: string | null
+}
+
 export type InboxSnoozedFilter = 'exclude' | 'include' | 'only'
 
 export interface SavedInboxFilters {

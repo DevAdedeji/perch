@@ -26,6 +26,7 @@ export interface InboxFilters {
   priorities: ConversationPriority[]
   tagIds: string[]
   snoozed: 'exclude' | 'include' | 'only'
+  response: 'all' | 'breached'
 }
 
 export function parseInboxFilters(query: Record<string, unknown>) {
@@ -34,13 +35,15 @@ export function parseInboxFilters(query: Record<string, unknown>) {
     assignee: z.preprocess(value => typeof value === 'string' && value ? value : 'any', assigneeSchema),
     priorities: z.preprocess(value => unique(list(value)), z.array(z.enum(CONVERSATION_PRIORITIES)).max(CONVERSATION_PRIORITIES.length)),
     tagIds: z.preprocess(value => unique(list(value)), z.array(uuid).max(10)),
-    snoozed: z.preprocess(value => typeof value === 'string' && value ? value : 'exclude', z.enum(['exclude', 'include', 'only']))
+    snoozed: z.preprocess(value => typeof value === 'string' && value ? value : 'exclude', z.enum(['exclude', 'include', 'only'])),
+    response: z.preprocess(value => typeof value === 'string' && value ? value : 'all', z.enum(['all', 'breached']))
   }).safeParse({
     status: query.status,
     assignee: query.assignee,
     priorities: query.priority,
     tagIds: query.tag,
-    snoozed: query.snoozed
+    snoozed: query.snoozed,
+    response: query.response
   })
 }
 

@@ -1,5 +1,5 @@
 import { channels } from '@perch/shared'
-import type { ConversationPriority, ConversationStatus, MessageDTO, SavedInboxFilters, ServerEvent } from '@perch/shared'
+import type { ConversationPriority, ConversationStatus, MessageDTO, ResponseSlaDTO, SavedInboxFilters, ServerEvent } from '@perch/shared'
 
 export interface InboxItem {
   id: string
@@ -13,6 +13,7 @@ export interface InboxItem {
   preview: string
   tags: { id: string, name: string }[]
   unread: boolean
+  responseSla: ResponseSlaDTO
   visitor: { id: string, name: string | null, email: string | null, visitorId: string }
 }
 
@@ -97,6 +98,7 @@ export function useControlRoom() {
   const priorityFilters = useState<ConversationPriority[]>('cr:priorityFilters', () => [])
   const tagFilters = useState<string[]>('cr:tagFilters', () => [])
   const snoozedFilter = useState<'exclude' | 'include' | 'only'>('cr:snoozedFilter', () => 'exclude')
+  const responseFilter = useState<'all' | 'breached'>('cr:responseFilter', () => 'all')
   const workspaceTags = useState<WorkspaceTag[]>('cr:tags', () => [])
   const savedViews = useState<InboxSavedView[]>('cr:savedViews', () => [])
   const loadingList = ref(false)
@@ -106,7 +108,7 @@ export function useControlRoom() {
   const visitorDraft = ref('')
 
   // per-status counts for the tabs — fetched independently of the active filter
-  const counts = useState('cr:counts', () => ({ unassigned: 0, open: 0, resolved: 0 }))
+  const counts = useState('cr:counts', () => ({ unassigned: 0, open: 0, resolved: 0, breached: 0 }))
 
   // composer `/shortcut` templates + the context panel for the open thread
   const canned = useState<CannedResponse[]>('cr:canned', () => [])
@@ -152,6 +154,7 @@ export function useControlRoom() {
     if (priorityFilters.value.length) params.set('priority', priorityFilters.value.join(','))
     if (tagFilters.value.length) params.set('tag', tagFilters.value.join(','))
     if (snoozedFilter.value !== 'exclude') params.set('snoozed', snoozedFilter.value)
+    if (responseFilter.value !== 'all') params.set('response', responseFilter.value)
   }
 
   function matchesFilters(conversation: InboxItem) {
@@ -164,6 +167,7 @@ export function useControlRoom() {
     const activelySnoozed = Boolean(conversation.snoozedUntil && new Date(conversation.snoozedUntil) > new Date())
     if (snoozedFilter.value === 'exclude' && activelySnoozed) return false
     if (snoozedFilter.value === 'only' && !activelySnoozed) return false
+    if (responseFilter.value === 'breached' && currentResponseSlaStatus(conversation.responseSla) !== 'breached') return false
     return true
   }
 
@@ -211,7 +215,7 @@ export function useControlRoom() {
 
   async function loadCounts() {
     if (!workspaceId.value) return
-    counts.value = await $fetch<{ unassigned: number, open: number, resolved: number }>(
+    counts.value = await $fetch<{ unassigned: number, open: number, resolved: number, breached: number }>(
       `/api/workspaces/${workspaceId.value}/conversation-counts`
     )
   }
@@ -466,6 +470,10 @@ export function useControlRoom() {
           visitorTyping.value = false
           visitorDraft.value = ''
         }
+        if (!m.is_internal_note && (m.sender_type === 'visitor' || m.sender_type === 'agent')) {
+          loadConversations()
+          loadCounts()
+        }
         break
       }
       case 'typing':
@@ -599,17 +607,18 @@ export function useControlRoom() {
     activeId.value = null
     messages.value = []
     conversations.value = []
-    counts.value = { unassigned: 0, open: 0, resolved: 0 }
+    counts.value = { unassigned: 0, open: 0, resolved: 0, breached: 0 }
     savedViews.value = []
     filter.value = 'all'
     assigneeFilter.value = 'any'
     priorityFilters.value = []
     tagFilters.value = []
     snoozedFilter.value = 'exclude'
+    responseFilter.value = 'all'
     if (next) loadAll()
   })
 
-  watch([filter, assigneeFilter, priorityFilters, tagFilters, snoozedFilter], () => loadConversations({ showLoader: true }), { deep: true })
+  watch([filter, assigneeFilter, priorityFilters, tagFilters, snoozedFilter, responseFilter], () => loadConversations({ showLoader: true }), { deep: true })
 
   function currentSavedFilters(): SavedInboxFilters {
     return {
@@ -670,6 +679,7 @@ export function useControlRoom() {
     priorityFilters,
     tagFilters,
     snoozedFilter,
+    responseFilter,
     workspaceTags,
     savedViews,
     currentSavedFilters,
