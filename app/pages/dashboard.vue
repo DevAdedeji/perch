@@ -1077,6 +1077,8 @@ const statusBadge = {
             <VisitorContextPanel
               :context="cr.context.value"
               :fallback-name="cr.activeConversation.value.visitor.name"
+              :available-tags="cr.workspaceTags.value"
+              :save-profile="cr.updateCustomerProfile"
             />
           </aside>
         </div>
@@ -1092,6 +1094,8 @@ const statusBadge = {
             <VisitorContextPanel
               :context="cr.context.value"
               :fallback-name="cr.activeConversation.value?.visitor.name ?? null"
+              :available-tags="cr.workspaceTags.value"
+              :save-profile="cr.updateCustomerProfile"
             />
           </template>
         </USlideover>

@@ -46,6 +46,15 @@ export interface VisitorContext {
   visitor: {
     name: string | null
     email: string | null
+    profile_name: string | null
+    profile_email: string | null
+    reported_name: string | null
+    reported_email: string | null
+    company: string | null
+    job_title: string | null
+    internal_note: string | null
+    profile_version: number
+    tags: WorkspaceTag[]
     visitor_id: string
     external_id: string | null
     identity_verified: boolean
@@ -61,6 +70,20 @@ export interface VisitorContext {
     resolved_at: string | null
   }
   past_conversations: number
+  recent_conversations: Array<{
+    id: string
+    status: ConversationStatus
+    last_message_at: string
+  }>
+}
+
+export interface CustomerProfileUpdate {
+  name?: string | null
+  email?: string | null
+  company?: string | null
+  job_title?: string | null
+  internal_note?: string | null
+  tag_ids?: string[]
 }
 
 export type InboxFilter = 'all' | ConversationStatus
@@ -404,6 +427,31 @@ export function useControlRoom() {
     }
   }
 
+  async function updateCustomerProfile(changes: CustomerProfileUpdate) {
+    const conversationId = activeId.value
+    const current = context.value
+    if (!conversationId || !current) return
+    try {
+      const updated = await $fetch<VisitorContext>(`/api/conversations/${conversationId}/customer`, {
+        method: 'PATCH',
+        body: { ...changes, expected_version: current.visitor.profile_version }
+      })
+      if (activeId.value !== conversationId) return
+      context.value = updated
+      const inboxItem = conversations.value.find(item => item.id === conversationId)
+      if (inboxItem) {
+        inboxItem.visitor.name = updated.visitor.name
+        inboxItem.visitor.email = updated.visitor.email
+      }
+      return updated
+    } catch (error) {
+      if ((error as { statusCode?: number }).statusCode === 409 && activeId.value === conversationId) {
+        context.value = await $fetch<VisitorContext>(`/api/conversations/${conversationId}/context`)
+      }
+      throw error
+    }
+  }
+
   /* live events */
   function applyEvent(ev: ServerEvent) {
     switch (ev.type) {
@@ -419,6 +467,14 @@ export function useControlRoom() {
         break
       case 'conversation.refresh':
         loadConversations()
+        if (activeId.value === ev.payload.conversation_id) {
+          const seq = threadSeq
+          $fetch<VisitorContext>(`/api/conversations/${ev.payload.conversation_id}/context`)
+            .then((updated) => {
+              if (seq === threadSeq && activeId.value === ev.payload.conversation_id) context.value = updated
+            })
+            .catch(() => {})
+        }
         break
       case 'conversation.updated': {
         const p = ev.payload
@@ -691,6 +747,7 @@ export function useControlRoom() {
     resolve,
     reopen,
     organize,
+    updateCustomerProfile,
     reload: loadConversations
   }
 }

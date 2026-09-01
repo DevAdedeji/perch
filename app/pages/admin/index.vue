@@ -295,7 +295,8 @@ const AUDIT_LABELS: Record<string, string> = {
   'automation.reordered': 'reordered automations',
   'webhook.created': 'added a webhook endpoint',
   'webhook.updated': 'updated a webhook endpoint',
-  'webhook.deleted': 'deleted a webhook endpoint'
+  'webhook.deleted': 'deleted a webhook endpoint',
+  'customer.profile_updated': 'updated customer details'
 }
 
 function auditLabel(row: AuditRow) {
@@ -320,6 +321,7 @@ function auditDetail(row: AuditRow) {
     case 'webhook.created':
     case 'webhook.updated':
     case 'webhook.deleted': return (d.url as string | undefined) ?? ''
+    case 'customer.profile_updated': return (d.changed as string[] | undefined)?.join(', ') ?? ''
     default: return ''
   }
 }
