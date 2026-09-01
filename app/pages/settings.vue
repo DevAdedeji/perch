@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { PERCH_PRO_PLAN } from '@perch/shared'
+
 definePageMeta({ layout: 'dashboard' })
 useHead({ title: 'Settings · Perch' })
 
@@ -198,7 +200,7 @@ async function saveHours() {
   }
 }
 
-/* unanswered-message email reminders */
+/* response target and unanswered-message email reminders */
 const reminderEnabled = ref(false)
 const reminderDelay = ref(15)
 const reminderBusinessHoursOnly = ref(false)
@@ -215,7 +217,7 @@ const reminderOptions = [
 watch(workspace, (w) => {
   if (!w) return
   reminderEnabled.value = w.unansweredReminderEnabled
-  reminderDelay.value = w.unansweredReminderDelayMinutes
+  reminderDelay.value = w.entitlement.isPro ? w.unansweredReminderDelayMinutes : PERCH_PRO_PLAN.freeReminderMinutes
   reminderBusinessHoursOnly.value = w.unansweredReminderBusinessHoursOnly
 }, { immediate: true })
 
@@ -679,40 +681,31 @@ async function removeLogo() {
           </UButton>
         </section>
 
-        <!-- Unanswered-message reminders -->
+        <!-- Response target and unanswered-message reminders -->
         <section class="rounded-2xl border-glow bg-elevated/30 p-5 sm:p-6">
-          <div class="flex items-start justify-between gap-4">
-            <div>
-              <div class="flex flex-wrap items-center gap-2">
-                <h2 class="font-display font-semibold text-highlighted">
-                  Unanswered-message email reminders
-                </h2>
-                <UBadge
-                  v-if="!workspace?.entitlement.isPro"
-                  color="primary"
-                  variant="subtle"
-                  size="sm"
-                >
-                  15 min on Free
-                </UBadge>
-              </div>
-              <p class="mt-0.5 text-sm text-muted">
-                Email the assigned teammate when a visitor is still waiting. Unassigned chats notify admins.
-              </p>
+          <div>
+            <div class="flex flex-wrap items-center gap-2">
+              <h2 class="font-display font-semibold text-highlighted">
+                Response target
+              </h2>
+              <UBadge
+                v-if="!workspace?.entitlement.isPro"
+                color="primary"
+                variant="subtle"
+                size="sm"
+              >
+                15 min target on Free
+              </UBadge>
             </div>
-            <USwitch
-              v-model="reminderEnabled"
-              :disabled="!isAdmin"
-            />
+            <p class="mt-0.5 text-sm text-muted">
+              Keep waiting conversations visible in the inbox, then optionally email the responsible teammate.
+            </p>
           </div>
 
-          <div
-            v-if="reminderEnabled"
-            class="mt-5 grid gap-5 sm:grid-cols-2"
-          >
+          <div class="mt-5 grid gap-5 sm:grid-cols-2">
             <UFormField
-              label="Remind me after"
-              :help="workspace?.entitlement.isPro ? 'Choose how long a visitor can wait.' : 'Upgrade to Pro to customize the delay.'"
+              label="Reply target"
+              :help="workspace?.entitlement.isPro ? 'A conversation becomes overdue after this time.' : 'Upgrade to Pro to customize the target.'"
             >
               <USelect
                 v-model="reminderDelay"
@@ -726,17 +719,35 @@ async function removeLogo() {
             <div class="flex items-center justify-between gap-4 rounded-xl bg-default px-4 py-3 ring-1 ring-default">
               <div>
                 <p class="text-sm font-medium text-highlighted">
-                  Business hours only
+                  Email reminders
                 </p>
                 <p class="text-xs text-muted">
-                  Pause reminder emails while your team is away.
+                  Notify the assigned teammate, or admins when unassigned.
                 </p>
               </div>
               <USwitch
-                v-model="reminderBusinessHoursOnly"
-                :disabled="!isAdmin || !workspace?.entitlement.features.businessHoursReminders"
+                v-model="reminderEnabled"
+                :disabled="!isAdmin"
               />
             </div>
+          </div>
+
+          <div
+            v-if="reminderEnabled"
+            class="mt-4 flex items-center justify-between gap-4 rounded-xl bg-default px-4 py-3 ring-1 ring-default"
+          >
+            <div>
+              <p class="text-sm font-medium text-highlighted">
+                Send emails during business hours only
+              </p>
+              <p class="text-xs text-muted">
+                Email delivery pauses while your team is away. The inbox target timer keeps running.
+              </p>
+            </div>
+            <USwitch
+              v-model="reminderBusinessHoursOnly"
+              :disabled="!isAdmin || !workspace?.entitlement.features.businessHoursReminders"
+            />
           </div>
 
           <div class="mt-4 flex flex-wrap items-center gap-3">
@@ -746,7 +757,7 @@ async function removeLogo() {
               :loading="savingReminder"
               @click="saveReminder"
             >
-              Save reminders
+              Save response settings
             </UButton>
             <NuxtLink
               v-if="!workspace?.entitlement.isPro"
