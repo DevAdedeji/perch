@@ -4,7 +4,7 @@ useSeoMeta({
   description: 'How Perch collects, uses and protects account, workspace and live-chat data.'
 })
 
-const updated = 'July 11, 2026'
+const updated = 'September 1, 2026'
 const contact = 'adedejitewogbade2@gmail.com'
 </script>
 
@@ -71,6 +71,7 @@ const contact = 'adedejitewogbade2@gmail.com'
             <li><strong class="text-highlighted">Railway</strong> — application hosting</li>
             <li><strong class="text-highlighted">Cloudinary</strong> — image attachment storage</li>
             <li><strong class="text-highlighted">Resend</strong> — transactional email (password resets, verification)</li>
+            <li><strong class="text-highlighted">Bachs</strong> — subscription checkout and payment processing</li>
             <li><strong class="text-highlighted">Sentry</strong> — error monitoring</li>
           </ul>
         </section>

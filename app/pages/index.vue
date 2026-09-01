@@ -37,7 +37,7 @@ useHead(() => ({
           'description': 'Real-time website live chat with a shared inbox, conversation ownership, private notes, saved replies and team handoffs.',
           'offers': {
             '@type': 'Offer',
-            'price': '0',
+            'price': '9.00',
             'priceCurrency': 'USD'
           },
           'publisher': { '@id': `${siteUrl.value}/#organization` }
@@ -171,7 +171,7 @@ const claimSql = 'UPDATE conversations\nSET assigned_agent_id = $me, status = \'
               trailing-icon="i-lucide-arrow-right"
               class="font-semibold shadow-lg shadow-primary-500/25"
             >
-              Get started free
+              Get started
             </UButton>
             <UButton
               to="#how"
@@ -352,31 +352,41 @@ const claimSql = 'UPDATE conversations\nSET assigned_agent_id = $me, status = \'
       </UContainer>
     </section>
 
-    <!-- ═══════════════ PRICING — one honest strip ═══════════════ -->
+    <!-- ═══════════════ PRICING ═══════════════ -->
     <section
       id="pricing"
       class="relative py-16 scroll-mt-16"
     >
       <UContainer>
-        <div class="rounded-3xl border-glow bg-elevated/30 glass px-8 py-12 sm:px-14 grid lg:grid-cols-[1fr_auto] gap-8 items-center">
-          <div>
-            <h2 class="font-display text-3xl sm:text-4xl font-bold tracking-tight text-highlighted">
-              Free. <span class="text-accent">All of it.</span>
-            </h2>
-            <p class="mt-3 max-w-xl text-muted leading-relaxed">
-              Every feature, unlimited teammates, unlimited conversations. No credit card,
-              no trial clock. If that ever changes, this is where the plans would live.
-            </p>
+        <div class="mx-auto max-w-2xl text-center">
+          <p class="text-sm font-semibold uppercase tracking-[0.2em] text-primary-600 dark:text-primary-400">
+            Simple pricing
+          </p>
+          <h2 class="mt-3 font-display text-3xl font-bold tracking-tight text-highlighted sm:text-4xl">
+            One price for your whole workspace.
+          </h2>
+          <p class="mt-3 text-muted">
+            Launch pricing starts at $9 per month. No per-seat tax and no limit on customer conversations.
+          </p>
+        </div>
+        <div class="mx-auto mt-10 max-w-3xl rounded-3xl border border-primary-500/50 bg-primary-500/5 p-7 glass sm:p-9">
+          <div class="grid gap-6 sm:grid-cols-[1fr_auto] sm:items-center">
+            <div>
+              <p class="font-display text-4xl font-bold text-highlighted">
+                $9 <span class="text-base font-normal text-muted">/ workspace / month</span>
+              </p>
+              <p class="mt-2 text-sm text-muted">
+                Unlimited teammates on Pro, custom reminders and your own branding.
+              </p>
+            </div>
+            <UButton
+              to="/pricing"
+              size="lg"
+              trailing-icon="i-lucide-arrow-right"
+            >
+              See plans
+            </UButton>
           </div>
-          <UButton
-            to="/signup"
-            size="lg"
-            color="primary"
-            trailing-icon="i-lucide-arrow-right"
-            class="font-semibold justify-self-start lg:justify-self-end"
-          >
-            Create a workspace
-          </UButton>
         </div>
       </UContainer>
     </section>
@@ -408,7 +418,7 @@ const claimSql = 'UPDATE conversations\nSET assigned_agent_id = $me, status = \'
               trailing-icon="i-lucide-arrow-right"
               class="font-semibold shadow-lg shadow-primary-500/25"
             >
-              Get started free
+              Get started
             </UButton>
             <UButton
               to="https://github.com/DevAdedeji/perch"
