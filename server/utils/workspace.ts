@@ -96,6 +96,9 @@ export function serializeWorkspace(w: Workspace) {
     prechatFormEnabled: w.prechatFormEnabled,
     allowedDomains: w.allowedDomains,
     businessHours: w.businessHours,
-    timezone: w.timezone
+    timezone: w.timezone,
+    unansweredReminderEnabled: w.unansweredReminderEnabled,
+    unansweredReminderDelayMinutes: w.unansweredReminderDelayMinutes,
+    unansweredReminderBusinessHoursOnly: w.unansweredReminderBusinessHoursOnly
   }
 }

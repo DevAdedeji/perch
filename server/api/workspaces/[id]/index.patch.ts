@@ -1,5 +1,6 @@
 import { eq, workspaces } from '@perch/db'
 import { z } from 'zod'
+import { PERCH_PRO_PLAN } from '@perch/shared'
 
 const dayHours = z.object({
   open: z.string().regex(TIME_RE, 'Times must be HH:MM'),
@@ -22,7 +23,10 @@ const schema = z.object({
     fri: dayHours.optional(),
     sat: dayHours.optional()
   }).nullable().optional(),
-  timezone: z.string().max(64).refine(isValidTimezone, 'Unknown timezone').nullable().optional()
+  timezone: z.string().max(64).refine(isValidTimezone, 'Unknown timezone').nullable().optional(),
+  unansweredReminderEnabled: z.boolean().optional(),
+  unansweredReminderDelayMinutes: z.number().int().min(5).max(1440).optional(),
+  unansweredReminderBusinessHoursOnly: z.boolean().optional()
 })
 
 /** Update workspace settings (admin only). */
@@ -37,6 +41,23 @@ export default defineEventHandler(async (event) => {
 
   const db = useDb()
   const patch = { ...result.data }
+  const entitlement = await workspaceEntitlement(workspaceId)
+  if (!entitlement.isPro) {
+    if (patch.unansweredReminderDelayMinutes !== undefined
+      && patch.unansweredReminderDelayMinutes !== PERCH_PRO_PLAN.freeReminderMinutes) {
+      throw createError({ statusCode: 402, statusMessage: 'Custom reminder timing is available on Perch Pro.' })
+    }
+    if (patch.unansweredReminderBusinessHoursOnly) {
+      throw createError({ statusCode: 402, statusMessage: 'Business-hours-only reminders are available on Perch Pro.' })
+    }
+    if (patch.widgetShowBranding === false) {
+      throw createError({ statusCode: 402, statusMessage: 'Removing Perch branding is available on Perch Pro.' })
+    }
+    if (patch.unansweredReminderEnabled !== undefined) {
+      patch.unansweredReminderDelayMinutes = PERCH_PRO_PLAN.freeReminderMinutes
+      patch.unansweredReminderBusinessHoursOnly = false
+    }
+  }
   // logos ride the same signed-upload pipeline as attachments — own cloud only
   if (patch.logoUrl && !isOwnCloudinaryImageUrl(patch.logoUrl, cloudinaryConfig().cloudName)) {
     throw createError({ statusCode: 400, statusMessage: 'Invalid logo upload' })
