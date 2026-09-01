@@ -35,7 +35,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 401, statusMessage: 'Incorrect password' })
   }
 
-  const revokedSessionIds = await db.transaction(async (tx) => {
+  const deletion = await db.transaction(async (tx) => {
     const memberships = await tx.query.workspaceMembers.findMany({
       where: eq(workspaceMembers.userId, user.id)
     })
@@ -71,10 +71,18 @@ export default defineEventHandler(async (event) => {
     })
     if (soloWorkspaceIds.length) await tx.delete(workspaces).where(inArray(workspaces.id, soloWorkspaceIds))
     await tx.delete(users).where(eq(users.id, user.id))
-    return activeSessions.map(row => row.id)
+    return {
+      revokedSessionIds: activeSessions.map(row => row.id),
+      soloWorkspaceIds
+    }
   })
 
-  forgetSessions(revokedSessionIds)
+  logDeletionReceipt({
+    kind: 'account',
+    subjectId: user.id,
+    cascadeWorkspaceIds: deletion.soloWorkspaceIds
+  })
+  forgetSessions(deletion.revokedSessionIds)
   await clearUserSession(event)
   return { ok: true }
 })
