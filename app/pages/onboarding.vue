@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { validateImageAttachment } from '@perch/shared'
+
 definePageMeta({ layout: 'onboarding' })
 useHead({ title: 'Set up your workspace · Perch' })
 
@@ -15,11 +17,53 @@ const swatches = ['#8b5cf6', '#6366f1', '#f43f5e', '#ec4899', '#f59e0b', '#f9731
 const form = reactive({ name: '', color: '#8b5cf6' })
 const creating = ref(false)
 const createError = ref('')
+const logoError = ref('')
+const logoFile = ref<File | null>(null)
+const logoPreview = ref<string | null>(null)
+const logoEl = ref<HTMLInputElement | null>(null)
+const { uploading: logoUploading, uploadImage } = useImageUpload()
 
 const created = ref<{ id: string, siteId: string, name: string } | null>(null)
 
-function comingSoonLogo() {
-  toast.add({ title: 'Logo upload is coming soon', description: 'You’ll be able to add one from Settings.', icon: 'i-lucide-image', color: 'neutral' })
+function pickLogo() {
+  logoEl.value?.click()
+}
+
+function clearLogo() {
+  if (logoPreview.value) URL.revokeObjectURL(logoPreview.value)
+  logoFile.value = null
+  logoPreview.value = null
+  logoError.value = ''
+}
+
+function onLogoPicked(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+
+  const error = validateImageAttachment(file)
+  if (error) {
+    logoError.value = error
+    return
+  }
+
+  clearLogo()
+  logoFile.value = file
+  logoPreview.value = URL.createObjectURL(file)
+}
+
+onBeforeUnmount(() => {
+  if (logoPreview.value) URL.revokeObjectURL(logoPreview.value)
+})
+
+async function saveSelectedLogo(workspaceId: string) {
+  if (!logoFile.value) return
+  const uploaded = await uploadImage(logoFile.value)
+  await $fetch(`/api/workspaces/${workspaceId}`, {
+    method: 'PATCH',
+    body: { logoUrl: uploaded.url }
+  })
 }
 
 async function createWorkspace() {
@@ -36,6 +80,17 @@ async function createWorkspace() {
     })
     created.value = res.workspace
     await refresh() // membership now exists → unlocks /dashboard
+
+    try {
+      await saveSelectedLogo(res.workspace.id)
+    } catch (error) {
+      toast.add({
+        title: 'Workspace created without the logo',
+        description: `${getErrorMessage(error, 'The logo could not be uploaded')} You can add it later in Settings.`,
+        icon: 'i-lucide-image-off',
+        color: 'warning'
+      })
+    }
     step.value = 1
   } catch (e) {
     createError.value = getErrorMessage(e, 'Could not create workspace')
@@ -137,21 +192,44 @@ async function finish() {
             :name="form.name"
             :color="form.color"
             :size="64"
+            :logo-url="logoPreview"
           />
           <div class="flex-1">
+            <input
+              ref="logoEl"
+              type="file"
+              accept="image/*"
+              class="sr-only"
+              @change="onLogoPicked"
+            >
             <button
               type="button"
               class="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted ring-1 ring-default hover:text-highlighted hover:bg-elevated/60 transition-colors"
-              @click="comingSoonLogo"
+              @click="pickLogo"
             >
               <UIcon
                 name="i-lucide-upload"
                 class="size-4"
               />
-              Add logo
+              {{ logoFile ? 'Change logo' : 'Add logo' }}
+            </button>
+            <button
+              v-if="logoFile"
+              type="button"
+              class="mt-2 text-xs font-medium text-muted hover:text-highlighted"
+              @click="clearLogo"
+            >
+              Remove selected logo
             </button>
             <p class="mt-1.5 text-xs text-dimmed">
-              Optional — a lettermark is used until you add one.
+              Optional — JPG, PNG, GIF or WebP under 1 MB. A lettermark is used otherwise.
+            </p>
+            <p
+              v-if="logoError"
+              class="mt-1.5 text-xs text-error"
+              role="alert"
+            >
+              {{ logoError }}
             </p>
           </div>
         </div>
@@ -209,7 +287,8 @@ async function finish() {
           size="lg"
           block
           class="mt-8 font-medium"
-          :loading="creating"
+          :loading="creating || logoUploading"
+          :disabled="creating || logoUploading"
           trailing-icon="i-lucide-arrow-right"
           @click="createWorkspace"
         >
