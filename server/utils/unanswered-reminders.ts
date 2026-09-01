@@ -1,6 +1,7 @@
 import { and, asc, conversations, eq, gt, inArray, lt, messages, or, sql, unansweredReminderDeliveries, users, visitors, workspaceMembers, workspaces } from '@perch/db'
 import { PERCH_PRO_PLAN, PERCH_PRODUCTION_ORIGIN } from '@perch/shared'
 import type { SubscriptionStatus } from '@perch/shared'
+import { subscriptionHasPaidAccess, workspaceEntitlement } from './billing'
 
 const MAX_ATTEMPTS = 5
 const CLAIM_LIMIT = 25
