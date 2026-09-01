@@ -34,6 +34,12 @@ const isAdmin = computed(() => currentWorkspace.value?.role === 'admin')
 const overview = ref<BillingOverview | null>(null)
 const loading = ref(true)
 const checkoutInterval = ref<BillingInterval>('yearly')
+const displayedInterval = computed<BillingInterval>(() => {
+  if (overview.value?.entitlement.isPro && overview.value.entitlement.interval) {
+    return overview.value.entitlement.interval
+  }
+  return checkoutInterval.value
+})
 const checkingOut = ref(false)
 const canceling = ref(false)
 
@@ -183,10 +189,10 @@ function date(value: string) {
                   Pro
                 </p>
                 <p class="mt-2 font-display text-4xl font-bold text-highlighted">
-                  {{ checkoutInterval === 'yearly' ? '$90' : '$9' }}
+                  {{ displayedInterval === 'yearly' ? '$90' : '$9' }}
                 </p>
                 <p class="mt-1 text-sm text-muted">
-                  per workspace / {{ checkoutInterval === 'yearly' ? 'year' : 'month' }}
+                  per workspace / {{ displayedInterval === 'yearly' ? 'year' : 'month' }}
                 </p>
               </div>
               <UBadge
