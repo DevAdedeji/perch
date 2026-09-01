@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { drizzle } from '../packages/db/node_modules/drizzle-orm/postgres-js/index.js'
 import { eq } from '../packages/db/node_modules/drizzle-orm/index.js'
@@ -7,6 +8,11 @@ import * as schema from '../packages/db/src/schema'
 import { customerProfileUpdateSchema, getCustomerContext } from '../server/utils/customer-profiles'
 
 describe('customer profile input', () => {
+  const updateRouteSource = readFileSync(
+    new URL('../server/api/conversations/[id]/customer.patch.ts', import.meta.url),
+    'utf8'
+  )
+
   it('normalizes optional internal details without retaining empty values', () => {
     const result = customerProfileUpdateSchema.parse({
       name: '  Ada Lovelace  ',
@@ -33,6 +39,11 @@ describe('customer profile input', () => {
     expect(customerProfileUpdateSchema.safeParse({ internal_note: 'x'.repeat(2001), expected_version: 1 }).success).toBe(false)
     expect(customerProfileUpdateSchema.safeParse({ company: 'Perch', secret: 'nope', expected_version: 1 }).success).toBe(false)
     expect(customerProfileUpdateSchema.safeParse({ expected_version: 1 }).success).toBe(false)
+  })
+
+  it('keeps updates behind conversation access and per-member rate limits', () => {
+    expect(updateRouteSource).toContain('requireConversationMember(event, conversationId)')
+    expect(updateRouteSource).toContain(`assertRateLimit('customer-profile:member', member.id`)
   })
 })
 

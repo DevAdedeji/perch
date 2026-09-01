@@ -5,6 +5,7 @@ import { channels } from '@perch/shared'
 export default defineEventHandler(async (event) => {
   const conversationId = getRouterParam(event, 'id')!
   const { user, member, conversation } = await requireConversationMember(event, conversationId)
+  assertRateLimit('customer-profile:member', member.id, { max: 60, windowMs: 60 * 1000 })
   const result = await readValidatedBody(event, body => customerProfileUpdateSchema.safeParse(body))
   if (!result.success) {
     throw createError({ statusCode: 400, statusMessage: 'Invalid customer details', data: result.error.flatten() })

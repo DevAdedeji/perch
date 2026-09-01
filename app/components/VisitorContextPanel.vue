@@ -23,6 +23,13 @@ const form = reactive({
 })
 
 const displayName = computed(() => props.context?.visitor.name ?? props.fallbackName ?? 'Visitor')
+const hasProfileOverride = computed(() => Boolean(
+  props.context?.visitor.profile_name || props.context?.visitor.profile_email
+))
+const reportedIdentity = computed(() => [
+  props.context?.visitor.reported_name,
+  props.context?.visitor.reported_email
+].filter(Boolean).join(' · '))
 const remainingNoteCharacters = computed(() => 2000 - form.internalNote.length)
 
 watch(() => props.context?.visitor.profile_version, resetForm, { immediate: true })
@@ -100,19 +107,8 @@ const pageHost = computed(() => {
       <span class="mx-auto grid size-14 place-items-center rounded-2xl avatar-primary text-lg font-bold">
         {{ initials(displayName) }}
       </span>
-      <p class="mt-3 flex items-center justify-center gap-1.5 text-sm font-semibold text-highlighted">
-        <span class="truncate">{{ displayName }}</span>
-        <span
-          v-if="context?.visitor.identity_verified"
-          class="inline-flex shrink-0 items-center gap-1 rounded-full bg-green-500/10 px-1.5 py-0.5 text-[10px] font-medium text-green-700 ring-1 ring-green-500/25 dark:text-green-400"
-          title="The website supplied a signed identity. Internal profile edits are not part of that verification."
-        >
-          <UIcon
-            name="i-lucide-badge-check"
-            class="size-3"
-          />
-          Verified site identity
-        </span>
+      <p class="mt-3 truncate text-sm font-semibold text-highlighted">
+        {{ displayName }}
       </p>
       <button
         v-if="context?.visitor.email"
@@ -128,6 +124,30 @@ const pageHost = computed(() => {
       >
         No email shared
       </p>
+      <div class="mt-2 flex flex-wrap items-center justify-center gap-1.5">
+        <span
+          v-if="hasProfileOverride"
+          class="inline-flex items-center gap-1 rounded-full bg-primary-500/10 px-1.5 py-0.5 text-[10px] font-medium text-primary-700 ring-1 ring-primary-500/25 dark:text-primary-400"
+          title="A teammate added a private display name or email."
+        >
+          <UIcon
+            name="i-lucide-users"
+            class="size-3"
+          />
+          Team profile
+        </span>
+        <span
+          v-if="context?.visitor.identity_verified"
+          class="inline-flex shrink-0 items-center gap-1 rounded-full bg-green-500/10 px-1.5 py-0.5 text-[10px] font-medium text-green-700 ring-1 ring-green-500/25 dark:text-green-400"
+          title="The original identity supplied by the website was signed. Team profile edits are not verified."
+        >
+          <UIcon
+            name="i-lucide-badge-check"
+            class="size-3"
+          />
+          Verified site identity
+        </span>
+      </div>
     </div>
 
     <div
@@ -280,6 +300,17 @@ const pageHost = computed(() => {
           v-else
           class="mt-3 space-y-3 text-xs"
         >
+          <div
+            v-if="hasProfileOverride && reportedIdentity"
+            class="rounded-lg bg-elevated/60 p-2.5 ring-1 ring-default"
+          >
+            <p class="text-[10px] font-semibold uppercase tracking-wider text-dimmed">
+              Visitor reported
+            </p>
+            <p class="mt-1 break-words text-muted">
+              {{ reportedIdentity }}
+            </p>
+          </div>
           <dl
             v-if="context.visitor.company || context.visitor.job_title"
             class="space-y-2"
