@@ -233,9 +233,10 @@ self-contained `.output`, and its CMD runs **pending database migrations before 
 server** (`scripts/migrate.mjs`, bundled at build time) — a deploy with unapplied migrations
 fails loudly instead of serving against a stale schema.
 
-**Backups:** Neon's point-in-time restore covers recent mistakes; `scripts/backup.sh` takes the
-off-provider copy — a nightly `pg_dump | gzip` with retention pruning, meant for a cron on any
-machine (see the script header for the crontab line and restore command).
+**Backups:** Neon's point-in-time restore covers recent mistakes; `scripts/backup.sh` creates an
+atomic, checksummed PostgreSQL archive for private off-provider storage. Schedule it on an
+always-on service, then use `scripts/restore-verify.sh` for the required fresh-database restore
+drill before launch and at least monthly. See `docs/LAUNCH_OPERATIONS.md` for the checklist.
 
 Notes from getting this live on a small tier:
 - The Nitro build can OOM on small builders — the Dockerfile raises V8's heap
