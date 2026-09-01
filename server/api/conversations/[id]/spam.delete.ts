@@ -40,6 +40,7 @@ export default defineEventHandler(async (event) => {
       .for('update')
     if (!visitor) throw createError({ statusCode: 404, statusMessage: 'Visitor not found' })
 
+    await lockVisitorModerationIdentity(tx, visitor)
     const now = new Date()
     let updated = conversation
     if (conversation.isSpam) {

@@ -1390,8 +1390,9 @@ const statusBadge = {
               size="sm"
               color="neutral"
               variant="ghost"
-              :icon="cr.activeConversation.value.isSpam ? 'i-lucide-rotate-ccw' : 'i-lucide-ellipsis'"
-              :aria-label="cr.activeConversation.value.isSpam ? 'Restore spam conversation' : 'More conversation actions'"
+              :icon="cr.activeConversation.value.isSpam ? 'i-lucide-rotate-ccw' : 'i-lucide-shield-ban'"
+              :aria-label="cr.activeConversation.value.isSpam ? 'Restore spam conversation' : 'Mark conversation as spam'"
+              :title="cr.activeConversation.value.isSpam ? 'Restore spam conversation' : 'Mark conversation as spam'"
               @click="openSpamConfirmation"
             />
 

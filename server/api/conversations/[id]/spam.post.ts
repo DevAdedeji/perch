@@ -39,6 +39,7 @@ export default defineEventHandler(async (event) => {
       .for('update')
     if (!visitor) throw createError({ statusCode: 404, statusMessage: 'Visitor not found' })
 
+    await lockVisitorModerationIdentity(tx, visitor)
     const visitorIds = await linkedVisitorIds(tx, visitor)
     const activeBlock = visitorIds.length
       ? await tx.query.visitorBlocks.findFirst({

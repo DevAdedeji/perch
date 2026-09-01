@@ -2,10 +2,15 @@ import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { drizzle } from '../packages/db/node_modules/drizzle-orm/postgres-js/index.js'
-import { eq } from '../packages/db/node_modules/drizzle-orm/index.js'
+import { and, eq, inArray, isNull, ne } from '../packages/db/node_modules/drizzle-orm/index.js'
 import postgres from '../packages/db/node_modules/postgres/src/index.js'
 import * as schema from '../packages/db/src/schema'
-import { isVisitorMessagingBlocked, linkedVisitorIds } from '../server/utils/spam-control'
+import { addAgentMessage } from '../server/utils/conversations'
+import {
+  isVisitorMessagingBlocked,
+  linkedVisitorIds,
+  lockVisitorModerationIdentity
+} from '../server/utils/spam-control'
 
 describe('spam-control security boundary', () => {
   const markSource = readFileSync(new URL('../server/api/conversations/[id]/spam.post.ts', import.meta.url), 'utf8')
@@ -22,6 +27,7 @@ describe('spam-control security boundary', () => {
       expect(source).toContain('eq(workspaceMembers.workspaceId, conversation.workspaceId)')
       expect(source).toContain('canMemberAccessConversation(member, conversation)')
       expect(source).toContain('tx.insert(auditLogs)')
+      expect(source).toContain('await lockVisitorModerationIdentity(tx, visitor)')
     }
   })
 
@@ -38,7 +44,7 @@ describe('spam-control security boundary', () => {
 const databaseUrl = process.env.TEST_DATABASE_URL
 
 describe.skipIf(!databaseUrl)('spam-control database integration', () => {
-  const client = postgres(databaseUrl!, { max: 1 })
+  const client = postgres(databaseUrl!, { max: 4 })
   const db = drizzle(client, { schema })
   const workspaceId = randomUUID()
   const otherWorkspaceId = randomUUID()
@@ -131,5 +137,215 @@ describe.skipIf(!databaseUrl)('spam-control database integration', () => {
       spamMarkedByMemberId: memberId
     }).returning()
     expect(conversation?.isSpam).toBe(true)
+  })
+
+  it('rejects a public agent reply using the freshly locked spam state', async () => {
+    const visitorId = randomUUID()
+    const conversationId = randomUUID()
+    await db.insert(schema.visitors).values({
+      id: visitorId,
+      workspaceId,
+      visitorId: `visitor_${randomUUID()}`
+    })
+    await db.insert(schema.conversations).values({
+      id: conversationId,
+      workspaceId,
+      visitorRef: visitorId
+    })
+
+    const staleConversation = await db.query.conversations.findFirst({
+      where: eq(schema.conversations.id, conversationId)
+    })
+    expect(staleConversation?.isSpam).toBe(false)
+
+    let spamWriteReady!: () => void
+    const spamWritten = new Promise<void>((resolve) => {
+      spamWriteReady = resolve
+    })
+    let releaseSpamWrite!: () => void
+    const holdSpamWrite = new Promise<void>((resolve) => {
+      releaseSpamWrite = resolve
+    })
+    const spamWrite = db.transaction(async (tx) => {
+      await tx.select().from(schema.conversations)
+        .where(eq(schema.conversations.id, conversationId)).for('update')
+      await tx.update(schema.conversations).set({
+        status: 'resolved',
+        resolvedAt: new Date(),
+        isSpam: true,
+        spamMarkedAt: new Date(),
+        spamMarkedByMemberId: memberId
+      }).where(eq(schema.conversations.id, conversationId))
+      spamWriteReady()
+      await holdSpamWrite
+    })
+
+    await spamWritten
+    let replySettled = false
+    const reply = addAgentMessage({
+      conversationId,
+      workspaceId,
+      senderMemberId: memberId,
+      content: 'This reply must not be delivered.',
+      isInternalNote: false
+    }).finally(() => { replySettled = true })
+    const replyRejected = expect(reply).rejects.toMatchObject({ statusCode: 409 })
+    await new Promise(resolve => setTimeout(resolve, 75))
+    expect(replySettled).toBe(false)
+    releaseSpamWrite()
+    await spamWrite
+    await replyRejected
+
+    const inserted = await db.query.messages.findMany({
+      where: eq(schema.messages.conversationId, conversationId)
+    })
+    expect(inserted).toHaveLength(0)
+  })
+
+  it('serializes linked-identity mark and restore so the final spam identity stays blocked', async () => {
+    const raceExternalId = `race-${randomUUID()}`
+    const markVisitorId = randomUUID()
+    const restoreVisitorId = randomUUID()
+    const markConversationId = randomUUID()
+    const restoreConversationId = randomUUID()
+    const now = new Date()
+
+    await db.insert(schema.visitors).values([
+      {
+        id: markVisitorId,
+        workspaceId,
+        visitorId: `visitor_${randomUUID()}`,
+        externalId: raceExternalId,
+        identityVerified: true
+      },
+      {
+        id: restoreVisitorId,
+        workspaceId,
+        visitorId: `visitor_${randomUUID()}`,
+        externalId: raceExternalId,
+        identityVerified: true
+      }
+    ])
+    await db.insert(schema.conversations).values([
+      { id: markConversationId, workspaceId, visitorRef: markVisitorId },
+      {
+        id: restoreConversationId,
+        workspaceId,
+        visitorRef: restoreVisitorId,
+        status: 'resolved',
+        resolvedAt: now,
+        isSpam: true,
+        spamMarkedAt: now,
+        spamMarkedByMemberId: memberId
+      }
+    ])
+    await db.insert(schema.visitorBlocks).values({
+      workspaceId,
+      visitorRef: restoreVisitorId,
+      sourceConversationId: restoreConversationId,
+      blockedByMemberId: memberId
+    })
+
+    let markCheckedActiveBlock!: () => void
+    const markChecked = new Promise<void>((resolve) => {
+      markCheckedActiveBlock = resolve
+    })
+    let releaseMark!: () => void
+    const holdMark = new Promise<void>((resolve) => {
+      releaseMark = resolve
+    })
+
+    const mark = db.transaction(async (tx) => {
+      const [conversation] = await tx.select().from(schema.conversations)
+        .where(eq(schema.conversations.id, markConversationId)).for('update')
+      const [visitor] = await tx.select().from(schema.visitors)
+        .where(eq(schema.visitors.id, markVisitorId)).for('update')
+      await lockVisitorModerationIdentity(tx, visitor!)
+      const visitorIds = await linkedVisitorIds(tx, visitor!)
+      const activeBlock = await tx.query.visitorBlocks.findFirst({
+        where: and(
+          eq(schema.visitorBlocks.workspaceId, workspaceId),
+          inArray(schema.visitorBlocks.visitorRef, visitorIds),
+          isNull(schema.visitorBlocks.unblockedAt)
+        )
+      })
+      expect(activeBlock).toBeTruthy()
+      markCheckedActiveBlock()
+      await holdMark
+
+      await tx.update(schema.conversations).set({
+        status: 'resolved',
+        resolvedAt: now,
+        isSpam: true,
+        spamMarkedAt: now,
+        spamMarkedByMemberId: memberId
+      }).where(eq(schema.conversations.id, conversation!.id))
+      if (!activeBlock) {
+        await tx.insert(schema.visitorBlocks).values({
+          workspaceId,
+          visitorRef: visitor!.id,
+          sourceConversationId: conversation!.id,
+          blockedByMemberId: memberId
+        })
+      }
+    })
+
+    await markChecked
+    let restoreReachedLock!: () => void
+    const restoreAttempted = new Promise<void>((resolve) => {
+      restoreReachedLock = resolve
+    })
+    let restoreAcquiredIdentityLock = false
+    const restore = db.transaction(async (tx) => {
+      const [conversation] = await tx.select().from(schema.conversations)
+        .where(eq(schema.conversations.id, restoreConversationId)).for('update')
+      const [visitor] = await tx.select().from(schema.visitors)
+        .where(eq(schema.visitors.id, restoreVisitorId)).for('update')
+      restoreReachedLock()
+      await lockVisitorModerationIdentity(tx, visitor!)
+      restoreAcquiredIdentityLock = true
+
+      await tx.update(schema.conversations).set({
+        isSpam: false,
+        spamMarkedAt: null,
+        spamMarkedByMemberId: null
+      }).where(eq(schema.conversations.id, conversation!.id))
+      const visitorIds = await linkedVisitorIds(tx, visitor!)
+      const otherSpam = await tx.query.conversations.findFirst({
+        where: and(
+          eq(schema.conversations.workspaceId, workspaceId),
+          inArray(schema.conversations.visitorRef, visitorIds),
+          eq(schema.conversations.isSpam, true),
+          ne(schema.conversations.id, conversation!.id)
+        )
+      })
+      if (!otherSpam) {
+        await tx.update(schema.visitorBlocks).set({
+          unblockedAt: new Date(),
+          unblockedByMemberId: memberId
+        }).where(and(
+          eq(schema.visitorBlocks.workspaceId, workspaceId),
+          inArray(schema.visitorBlocks.visitorRef, visitorIds),
+          isNull(schema.visitorBlocks.unblockedAt)
+        ))
+      }
+    })
+
+    await restoreAttempted
+    await new Promise(resolve => setTimeout(resolve, 75))
+    expect(restoreAcquiredIdentityLock).toBe(false)
+    releaseMark()
+    await Promise.all([mark, restore])
+
+    const visitor = await db.query.visitors.findFirst({ where: eq(schema.visitors.id, markVisitorId) })
+    expect(await isVisitorMessagingBlocked(visitor!, db)).toBe(true)
+    const finalMark = await db.query.conversations.findFirst({
+      where: eq(schema.conversations.id, markConversationId)
+    })
+    const finalRestore = await db.query.conversations.findFirst({
+      where: eq(schema.conversations.id, restoreConversationId)
+    })
+    expect(finalMark?.isSpam).toBe(true)
+    expect(finalRestore?.isSpam).toBe(false)
   })
 })

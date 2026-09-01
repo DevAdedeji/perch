@@ -260,6 +260,9 @@ export async function addAgentMessage(input: AgentMessageInput) {
     const [current] = await tx.select().from(conversations)
       .where(eq(conversations.id, input.conversationId)).for('update')
     if (!current) throw createError({ statusCode: 404, statusMessage: 'Conversation not found' })
+    if (current.isSpam && !input.isInternalNote) {
+      throw createError({ statusCode: 409, statusMessage: 'Restore this conversation before replying' })
+    }
     const collaboratorMemberIds = input.isInternalNote && input.mentionRecipientIds?.length
       ? [...new Set([...current.collaboratorMemberIds, ...input.mentionRecipientIds])]
       : current.collaboratorMemberIds

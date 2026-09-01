@@ -4,6 +4,7 @@ import {
   inArray,
   isNull,
   or,
+  sql,
   visitorBlocks,
   visitors,
   type Database,
@@ -14,6 +15,7 @@ export const MESSAGING_UNAVAILABLE_CODE = 'MESSAGING_UNAVAILABLE'
 
 type VisitorIdentity = Pick<Visitor, 'id' | 'workspaceId' | 'externalId' | 'identityVerified'>
 type ReadableDatabase = Pick<Database, 'select' | 'query'>
+type ExecutableDatabase = Pick<Database, 'execute'>
 
 /**
  * A signed host identity may legitimately acquire a new browser session. Only
@@ -31,6 +33,17 @@ export async function linkedVisitorIds(db: ReadableDatabase, visitor: VisitorIde
       : eq(visitors.id, visitor.id)
   ))
   return rows.map(row => row.id)
+}
+
+/** Different browser rows for one verified user need one transaction lock before moderation decisions. */
+export async function lockVisitorModerationIdentity(
+  db: ExecutableDatabase,
+  visitor: VisitorIdentity
+): Promise<void> {
+  const identity = visitor.identityVerified && visitor.externalId
+    ? `verified:${visitor.externalId}`
+    : `session:${visitor.id}`
+  await db.execute(sql`select pg_advisory_xact_lock(hashtext(${visitor.workspaceId}), hashtext(${identity}))`)
 }
 
 export async function isVisitorMessagingBlocked(
