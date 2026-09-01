@@ -1,14 +1,34 @@
 /**
- * Baseline security headers. The one carve-out is the widget frame: `/widget`
- * exists to be iframed by any customer site, so it advertises
- * `frame-ancestors *` — everything else (dashboard, auth, API) refuses to be
- * framed at all (clickjacking protection for an app full of other companies'
- * customer conversations).
+ * The dashboard refuses framing. The widget is the deliberate exception and
+ * receives a workspace-specific frame policy after its embed origin is proven.
  */
 import { eq, workspaces } from '@perch/db'
+import { randomUUID } from 'node:crypto'
 
 export default defineEventHandler(async (event) => {
   const path = event.path.split('?')[0] ?? ''
+  const requestId = randomUUID()
+  event.context.requestId = requestId
+  setResponseHeader(event, 'X-Request-Id', requestId)
+  setResponseHeader(event, 'X-Frame-Options', 'DENY')
+  setResponseHeader(event, 'Content-Security-Policy', contentSecurityPolicy('\'none\''))
+  setResponseHeader(event, 'Cross-Origin-Opener-Policy', 'same-origin')
+  setResponseHeader(event, 'X-Content-Type-Options', 'nosniff')
+  setResponseHeader(event, 'Referrer-Policy', 'strict-origin-when-cross-origin')
+  setResponseHeader(event, 'Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=()')
+  setResponseHeader(event, 'X-Permitted-Cross-Domain-Policies', 'none')
+  setResponseHeader(event, 'Origin-Agent-Cluster', '?1')
+  setResponseHeader(
+    event,
+    'Cross-Origin-Resource-Policy',
+    path === '/widget' || path === '/widget.js' || path === '/api/widget/embed-ticket'
+      ? 'cross-origin'
+      : 'same-origin'
+  )
+  removeResponseHeader(event, 'X-Powered-By')
+  if (!import.meta.dev) {
+    setResponseHeader(event, 'Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
+  }
 
   if (path === '/widget') {
     const siteId = getQuery(event).site_id
@@ -50,18 +70,8 @@ export default defineEventHandler(async (event) => {
             `https://${domain}`, `https://*.${domain}`, `http://${domain}`, `http://*.${domain}`
           ]).join(' ')
         : '*'
-    setResponseHeader(event, 'Content-Security-Policy', `frame-ancestors ${ancestors}`)
-  } else {
-    setResponseHeader(event, 'X-Frame-Options', 'DENY')
-    setResponseHeader(event, 'Content-Security-Policy', 'frame-ancestors \'none\'')
-  }
-
-  setResponseHeader(event, 'X-Content-Type-Options', 'nosniff')
-  setResponseHeader(event, 'Referrer-Policy', 'strict-origin-when-cross-origin')
-  setResponseHeader(event, 'Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
-  removeResponseHeader(event, 'X-Powered-By')
-  // HSTS only matters (and is only safe) over TLS — i.e. production
-  if (!import.meta.dev) {
-    setResponseHeader(event, 'Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
+    removeResponseHeader(event, 'X-Frame-Options')
+    removeResponseHeader(event, 'Cross-Origin-Opener-Policy')
+    setResponseHeader(event, 'Content-Security-Policy', contentSecurityPolicy(ancestors))
   }
 })

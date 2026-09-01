@@ -1,7 +1,9 @@
-/** Public assets must not mint anonymous auth-session cookies. */
+/** Public resources must not mint anonymous auth-session cookies. */
 export default defineNitroPlugin((nitroApp) => {
   nitroApp.hooks.hook('beforeResponse', (event) => {
-    const path = event.path.split('?')[0]
-    if (path === '/' || path === '/widget.js') removeResponseHeader(event, 'set-cookie')
+    const installationPreview = event.path.startsWith('/widget') && getQuery(event).preview === '1'
+    if (isCookieFreePublicRequest(event.path, installationPreview)) {
+      removeResponseHeader(event, 'set-cookie')
+    }
   })
 })
