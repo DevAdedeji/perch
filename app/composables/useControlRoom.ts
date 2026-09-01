@@ -636,6 +636,7 @@ export function useControlRoom() {
     priorityFilters.value = [...view.filters.priorities]
     tagFilters.value = [...view.filters.tag_ids]
     snoozedFilter.value = view.filters.snoozed
+    responseFilter.value = 'all'
   }
 
   async function saveCurrentView(name: string) {

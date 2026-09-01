@@ -1,5 +1,6 @@
 import { and, asc, conversations, eq, gt, inArray, lt, messages, or, sql, unansweredReminderDeliveries, users, visitors, workspaceMembers, workspaces } from '@perch/db'
-import { PERCH_PRODUCTION_ORIGIN } from '@perch/shared'
+import { PERCH_PRO_PLAN, PERCH_PRODUCTION_ORIGIN } from '@perch/shared'
+import type { SubscriptionStatus } from '@perch/shared'
 
 const MAX_ATTEMPTS = 5
 const CLAIM_LIMIT = 25
@@ -25,6 +26,19 @@ interface LatestVisitorCandidate {
   business_hours_only: boolean
   business_hours: typeof workspaces.$inferSelect['businessHours']
   timezone: string | null
+  subscription_status: SubscriptionStatus | null
+  subscription_period_end: Date | string | null
+}
+
+export function effectiveReminderSettings(input: {
+  delayMinutes: number
+  businessHoursOnly: boolean
+  isPro: boolean
+}) {
+  return {
+    delayMinutes: input.isPro ? input.delayMinutes : PERCH_PRO_PLAN.freeReminderMinutes,
+    businessHoursOnly: input.isPro && input.businessHoursOnly
+  }
 }
 
 async function latestVisitorCandidates(now: Date) {
@@ -39,10 +53,13 @@ async function latestVisitorCandidates(now: Date) {
       latest_public.id as visitor_message_id, latest_public.created_at as message_at,
       w.unanswered_reminder_delay_minutes as reminder_delay,
       w.unanswered_reminder_business_hours_only as business_hours_only,
-      w.business_hours, w.timezone
+      w.business_hours, w.timezone,
+      s.status as subscription_status,
+      s.current_period_end as subscription_period_end
     from latest_public
     join conversations c on c.id = latest_public.conversation_id
     join workspaces w on w.id = c.workspace_id
+    left join workspace_subscriptions s on s.workspace_id = c.workspace_id
     where latest_public.row_number = 1
       and latest_public.sender_type = 'visitor'
       and w.unanswered_reminder_enabled = true
@@ -65,8 +82,19 @@ async function reminderRecipients(workspaceId: string, assignedAgentId: string |
 async function enqueueDueReminders(now: Date) {
   for (const candidate of await latestVisitorCandidates(now)) {
     const messageAt = new Date(candidate.message_at)
-    if (!reminderIsDue(messageAt, candidate.reminder_delay, now)) continue
-    if (candidate.business_hours_only && !isWithinBusinessHours(candidate.business_hours, candidate.timezone, now)) continue
+    const isPro = candidate.subscription_status
+      ? subscriptionHasPaidAccess({
+          status: candidate.subscription_status,
+          currentPeriodEnd: candidate.subscription_period_end ? new Date(candidate.subscription_period_end) : null
+        }, now)
+      : false
+    const settings = effectiveReminderSettings({
+      delayMinutes: candidate.reminder_delay,
+      businessHoursOnly: candidate.business_hours_only,
+      isPro
+    })
+    if (!reminderIsDue(messageAt, settings.delayMinutes, now)) continue
+    if (settings.businessHoursOnly && !isWithinBusinessHours(candidate.business_hours, candidate.timezone, now)) continue
     const recipients = await reminderRecipients(candidate.workspace_id, candidate.assigned_agent_id)
     if (!recipients.length) continue
     await useDb().insert(unansweredReminderDeliveries).values(recipients.map(recipient => ({
@@ -128,7 +156,8 @@ async function stillNeedsReminder(delivery: typeof unansweredReminderDeliveries.
     )
   )).limit(1)
   if (newer) return { send: false, reschedule: false }
-  if (row.businessHoursOnly && !isWithinBusinessHours(row.businessHours, row.timezone, now)) {
+  const entitlement = await workspaceEntitlement(delivery.workspaceId)
+  if (entitlement.isPro && row.businessHoursOnly && !isWithinBusinessHours(row.businessHours, row.timezone, now)) {
     return { send: false, reschedule: true }
   }
   return { send: true, reschedule: false }

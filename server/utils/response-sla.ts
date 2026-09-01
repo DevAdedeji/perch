@@ -1,7 +1,7 @@
 import { and, conversations, desc, eq, inArray, isNull, messages, ne, or, sql } from '@perch/db'
 import type { Database } from '@perch/db'
 import type { ConversationStatus } from '@perch/shared'
-import type { ResponseSlaDTO } from '../../packages/shared/src/models'
+import type { ResponseSlaDTO } from '@perch/shared/models'
 import { PERCH_PRO_PLAN } from '@perch/shared'
 
 const APPROACHING_FRACTION = 0.25

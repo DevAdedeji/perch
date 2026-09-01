@@ -704,7 +704,7 @@ async function removeLogo() {
 
           <div class="mt-5 grid gap-5 sm:grid-cols-2">
             <UFormField
-              label="First response target"
+              label="Reply target"
               :help="workspace?.entitlement.isPro ? 'A conversation becomes overdue after this time.' : 'Upgrade to Pro to customize the target.'"
             >
               <USelect
