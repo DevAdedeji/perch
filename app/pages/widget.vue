@@ -125,8 +125,10 @@ interface HelpGroup {
 
 const tab = ref<'chat' | 'help'>('chat')
 const helpGroups = ref<HelpGroup[]>([])
+const baseHelpGroups = ref<HelpGroup[]>([])
 const helpStatus = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
 const helpQuery = ref('')
+const helpSearchStatus = ref<'idle' | 'loading' | 'error'>('idle')
 const activeArticleId = ref<string | null>(null)
 const activeArticle = ref<HelpArticleDetail | null>(null)
 const articleStatus = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
@@ -139,7 +141,9 @@ async function loadHelp() {
     helpGroups.value = await $fetch<HelpGroup[]>('/api/widget/articles', {
       query: { site_id: siteId.value }
     })
+    baseHelpGroups.value = helpGroups.value
     helpStatus.value = 'ready'
+    if (helpQuery.value.trim()) void searchHelp()
   } catch {
     helpStatus.value = 'error'
   }
@@ -177,17 +181,40 @@ function closeHelpArticle() {
   articleStatus.value = 'idle'
 }
 
-const filteredGroups = computed(() => {
-  const q = helpQuery.value.trim().toLowerCase()
-  if (!q) return helpGroups.value
-  return helpGroups.value
-    .map(g => ({
-      ...g,
-      articles: g.articles.filter(a =>
-        a.title.toLowerCase().includes(q) || a.excerpt.toLowerCase().includes(q))
-    }))
-    .filter(g => g.articles.length > 0)
-})
+let helpSearchTimer: ReturnType<typeof setTimeout> | undefined
+let helpSearchController: AbortController | undefined
+
+async function searchHelp() {
+  clearTimeout(helpSearchTimer)
+  helpSearchController?.abort()
+  const query = helpQuery.value.trim().slice(0, 80)
+  if (!query) {
+    helpGroups.value = baseHelpGroups.value
+    helpSearchStatus.value = 'idle'
+    return
+  }
+
+  const controller = new AbortController()
+  helpSearchController = controller
+  helpSearchStatus.value = 'loading'
+  try {
+    const result = await $fetch<HelpGroup[]>('/api/widget/articles', {
+      query: { site_id: siteId.value, q: query },
+      signal: controller.signal
+    })
+    if (controller !== helpSearchController) return
+    helpGroups.value = result
+    helpSearchStatus.value = 'idle'
+  } catch {
+    if (controller.signal.aborted) return
+    helpSearchStatus.value = 'error'
+  }
+}
+
+function scheduleHelpSearch() {
+  clearTimeout(helpSearchTimer)
+  helpSearchTimer = setTimeout(searchHelp, 250)
+}
 
 const draft = ref('')
 const prechat = reactive({ name: '', email: '', message: '' })
@@ -433,6 +460,8 @@ onMounted(async () => {
   scrollToBottom()
 })
 onBeforeUnmount(() => {
+  clearTimeout(helpSearchTimer)
+  helpSearchController?.abort()
   darkQuery?.removeEventListener('change', syncSystemTheme)
   window.removeEventListener('message', onParentMessage)
   widget.stop()
@@ -598,10 +627,20 @@ onBeforeUnmount(() => {
         />
         <input
           v-model="helpQuery"
-          type="text"
+          type="search"
           placeholder="Search articles…"
           class="w-full bg-transparent text-sm outline-none"
+          aria-label="Search help articles"
+          autocomplete="off"
+          @input="scheduleHelpSearch"
+          @keydown.esc="helpQuery = ''; searchHelp()"
         >
+        <UIcon
+          v-if="helpSearchStatus === 'loading'"
+          name="i-lucide-loader-circle"
+          class="size-4 shrink-0 animate-spin text-dimmed"
+          aria-label="Searching"
+        />
       </div>
 
       <div
@@ -628,15 +667,31 @@ onBeforeUnmount(() => {
           Try again
         </button>
       </div>
-      <p
-        v-else-if="!filteredGroups.length"
-        class="text-center py-10 text-sm text-dimmed"
+      <div
+        v-else-if="helpSearchStatus === 'error'"
+        class="text-center py-10"
       >
-        No articles match “{{ helpQuery }}”.
+        <p class="text-sm text-muted">
+          Couldn’t search articles.
+        </p>
+        <button
+          class="mt-3 text-sm font-medium hover:underline"
+          :style="{ color: accent }"
+          @click="searchHelp"
+        >
+          Try again
+        </button>
+      </div>
+      <p
+        v-else-if="!helpGroups.length"
+        class="text-center py-10 text-sm text-dimmed"
+        role="status"
+      >
+        {{ helpQuery.trim() ? `No articles match “${helpQuery.trim()}”.` : 'No articles published yet.' }}
       </p>
 
       <div
-        v-for="g in filteredGroups"
+        v-for="g in helpGroups"
         v-else
         :key="g.id"
         class="mb-5"
@@ -844,9 +899,10 @@ onBeforeUnmount(() => {
                     alt="Image attachment"
                   >
                 </a>
-                <template v-if="row.m.content">
-                  {{ row.m.content }}
-                </template>
+                <MessageContent
+                  v-if="row.m.content"
+                  :content="row.m.content"
+                />
               </div>
             </div>
             <!-- group meta: time / sending state -->

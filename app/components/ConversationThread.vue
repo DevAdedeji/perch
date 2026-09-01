@@ -248,9 +248,10 @@ async function loadOlder() {
                 alt="Image attachment"
               >
             </a>
-            <template v-if="row.message.content">
-              {{ row.message.content }}
-            </template>
+            <MessageContent
+              v-if="row.message.content"
+              :content="row.message.content"
+            />
           </div>
         </div>
         <p
