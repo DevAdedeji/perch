@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { drizzle } from '../packages/db/node_modules/drizzle-orm/postgres-js/index.js'
 import postgres from '../packages/db/node_modules/postgres/src/index.js'
 import * as schema from '../packages/db/src/schema'
@@ -55,14 +55,19 @@ describe.skipIf(!databaseUrl)('billing and reminder database integration', () =>
     await client.end()
   })
 
+  afterEach(async () => {
+    await db.delete(schema.workspaceSubscriptions).where(eq(schema.workspaceSubscriptions.workspaceId, workspaceId))
+  })
+
   it('delivers exactly one email for the same unanswered visitor message', async () => {
+    await db.insert(schema.workspaceSubscriptions).values({ workspaceId, status: 'active', interval: 'monthly' })
     const sent: Array<{ to: string, subject: string }> = []
     const sender = async (message: { to: string, subject: string }) => {
       sent.push(message)
       return true
     }
-    await runUnansweredReminderSweep({ now: new Date('2026-09-01T10:15:00Z'), sender })
-    await runUnansweredReminderSweep({ now: new Date('2026-09-01T10:16:00Z'), sender })
+    await runUnansweredReminderSweep({ now: new Date('2026-09-01T10:05:00Z'), sender })
+    await runUnansweredReminderSweep({ now: new Date('2026-09-01T10:06:00Z'), sender })
     expect(sent).toHaveLength(1)
     expect(sent[0]).toMatchObject({ subject: 'Waiting Visitor is waiting for a reply' })
     const delivery = await db.query.unansweredReminderDeliveries.findFirst({
