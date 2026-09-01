@@ -6,6 +6,7 @@ describe('public help API boundary', () => {
   const detailSource = readFileSync(new URL('../server/api/widget/articles/[articleId].get.ts', import.meta.url), 'utf8')
   const serviceSource = readFileSync(new URL('../server/utils/help-center.ts', import.meta.url), 'utf8')
   const sitemapSource = readFileSync(new URL('../server/routes/sitemap.xml.ts', import.meta.url), 'utf8')
+  const agentSearchSource = readFileSync(new URL('../server/api/workspaces/[id]/articles/search.get.ts', import.meta.url), 'utf8')
   const indexPageSource = readFileSync(new URL('../app/pages/help/[siteId]/index.vue', import.meta.url), 'utf8')
 
   it('keeps article bodies out of the public index response', () => {
@@ -46,5 +47,12 @@ describe('public help API boundary', () => {
   it('adds only published help content to the dynamic sitemap', () => {
     expect(serviceSource).toContain(`.where(eq(articles.status, 'published'))`)
     expect(sitemapSource).toContain('publicHelpSitemapPaths(entries, capacity)')
+  })
+
+  it('keeps agent suggestions authenticated, workspace scoped, and published only', () => {
+    expect(agentSearchSource).toContain('requireMembership(event, workspaceId)')
+    expect(agentSearchSource).toContain('listPublishedHelpSuggestions(db, workspaceId')
+    expect(serviceSource).toContain(`eq(articles.status, 'published')`)
+    expect(serviceSource).toContain('.limit(AGENT_HELP_SUGGESTION_LIMIT)')
   })
 })

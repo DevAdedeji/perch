@@ -1063,6 +1063,7 @@ const statusBadge = {
 
             <ConversationComposer
               :key="cr.activeConversation.value.id"
+              :workspace-id="currentWorkspace?.workspaceId ?? null"
               :members="cr.members.value"
               :current-member-id="currentWorkspace?.memberId ?? null"
               :canned-responses="cr.canned.value"

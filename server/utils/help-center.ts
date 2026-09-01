@@ -1,10 +1,11 @@
-import { and, articleGroups, articles, asc, eq, inArray, or, sql, workspaces, type Database } from '@perch/db'
+import { and, articleGroups, articles, asc, desc, eq, inArray, or, sql, workspaces, type Database } from '@perch/db'
 
 export const PUBLIC_HELP_SITE_ID_PATTERN = /^ws_[a-f0-9]{10}$/
 export const PUBLIC_HELP_ARTICLE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const PUBLIC_HELP_EXCERPT_SOURCE_LENGTH = 181
 export const PUBLIC_HELP_SEARCH_MAX_LENGTH = 80
 export const PUBLIC_HELP_SEARCH_RESULT_LIMIT = 50
+export const AGENT_HELP_SUGGESTION_LIMIT = 8
 const PUBLIC_HELP_INDEX_RESULT_LIMIT = 200
 
 export interface PublishedHelpSitemapEntry {
@@ -104,6 +105,43 @@ export async function findPublishedHelpArticle(db: Database, workspaceId: string
     url: normalizePublicArticleUrl(article.url),
     group
   }
+}
+
+export async function listPublishedHelpSuggestions(db: Database, workspaceId: string, search?: string) {
+  const searchCondition = search
+    ? or(
+        sql<boolean>`position(lower(${search}) in lower(${articles.title})) > 0`,
+        sql<boolean>`position(lower(${search}) in lower(${articles.body})) > 0`,
+        sql<boolean>`position(lower(${search}) in lower(${articleGroups.name})) > 0`
+      )
+    : undefined
+
+  return db.select({
+    id: articles.id,
+    title: articles.title,
+    excerpt: sql<string>`left(regexp_replace(btrim(${articles.body}), '\\s+', ' ', 'g'), ${PUBLIC_HELP_EXCERPT_SOURCE_LENGTH})`,
+    url: articles.url,
+    group: articleGroups.name
+  })
+    .from(articles)
+    .innerJoin(articleGroups, and(
+      eq(articleGroups.id, articles.groupId),
+      eq(articleGroups.workspaceId, workspaceId)
+    ))
+    .where(and(
+      eq(articles.workspaceId, workspaceId),
+      eq(articles.status, 'published'),
+      searchCondition
+    ))
+    .orderBy(
+      ...(search
+        ? [
+            sql`case when position(lower(${search}) in lower(${articles.title})) > 0 then 0 else 1 end`,
+            asc(articles.title)
+          ]
+        : [desc(articles.updatedAt)])
+    )
+    .limit(AGENT_HELP_SUGGESTION_LIMIT)
 }
 
 export async function listPublishedHelpSitemapEntries(db: Database, limit: number): Promise<PublishedHelpSitemapEntry[]> {
