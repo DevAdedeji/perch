@@ -34,6 +34,11 @@ export const automationRuleTypeEnum = pgEnum('automation_rule_type', [
   'round_robin', 'page_assignment', 'vip_tagging', 'inactivity_reminder', 'auto_close'
 ])
 export const supportOutcomeEventTypeEnum = pgEnum('support_outcome_event_type', ['resolution', 'csat'])
+export const reminderDeliveryStatusEnum = pgEnum('reminder_delivery_status', ['pending', 'processing', 'sent', 'failed', 'canceled'])
+export const billingIntervalEnum = pgEnum('billing_interval', ['monthly', 'yearly'])
+export const subscriptionStatusEnum = pgEnum('subscription_status', ['trialing', 'active', 'past_due', 'unpaid', 'paused', 'canceled'])
+export const invoiceStatusEnum = pgEnum('invoice_status', ['pending', 'paid', 'failed'])
+export const billingWebhookStatusEnum = pgEnum('billing_webhook_status', ['processing', 'completed', 'ignored', 'failed'])
 
 /* Tables */
 
@@ -79,8 +84,60 @@ export const workspaces = pgTable('workspaces', {
   businessHours: jsonb('business_hours').$type<BusinessHours>(),
   // IANA timezone the schedule is evaluated in (required when hours are set)
   timezone: text('timezone'),
+  unansweredReminderEnabled: boolean('unanswered_reminder_enabled').default(false).notNull(),
+  unansweredReminderDelayMinutes: integer('unanswered_reminder_delay_minutes').default(15).notNull(),
+  unansweredReminderBusinessHoursOnly: boolean('unanswered_reminder_business_hours_only').default(false).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull()
+}, t => [
+  check('workspaces_unanswered_reminder_delay_ck', sql`${t.unansweredReminderDelayMinutes} between 5 and 1440`)
+])
+
+export const workspaceSubscriptions = pgTable('workspace_subscriptions', {
+  workspaceId: uuid('workspace_id').primaryKey().references(() => workspaces.id, { onDelete: 'cascade' }),
+  status: subscriptionStatusEnum('status').default('canceled').notNull(),
+  interval: billingIntervalEnum('interval').default('monthly').notNull(),
+  currentPeriodEnd: timestamp('current_period_end', { withTimezone: true }),
+  cancelAtPeriodEnd: boolean('cancel_at_period_end').default(false).notNull(),
+  bachsSubscriptionId: text('bachs_subscription_id').unique(),
+  lastInvoiceReference: text('last_invoice_reference'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
 })
+
+export const workspaceInvoices = pgTable('workspace_invoices', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  reference: text('reference').notNull().unique(),
+  status: invoiceStatusEnum('status').default('pending').notNull(),
+  interval: billingIntervalEnum('interval').notNull(),
+  amountCents: integer('amount_cents').notNull(),
+  currency: text('currency').default('USD').notNull(),
+  periodStart: timestamp('period_start', { withTimezone: true }).notNull(),
+  periodEnd: timestamp('period_end', { withTimezone: true }).notNull(),
+  bachsCheckoutId: text('bachs_checkout_id'),
+  checkoutUrl: text('checkout_url'),
+  bachsChargeId: text('bachs_charge_id'),
+  lastError: text('last_error'),
+  paidAt: timestamp('paid_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
+}, t => [
+  check('workspace_invoices_amount_ck', sql`${t.amountCents} > 0`),
+  index('workspace_invoices_workspace_created_idx').on(t.workspaceId, t.createdAt)
+])
+
+export const billingWebhookDeliveries = pgTable('billing_webhook_deliveries', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  providerEventId: text('provider_event_id').notNull().unique(),
+  eventType: text('event_type').notNull(),
+  status: billingWebhookStatusEnum('status').default('processing').notNull(),
+  attempts: integer('attempts').default(1).notNull(),
+  lastError: text('last_error'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
+}, t => [
+  index('billing_webhook_deliveries_status_updated_idx').on(t.status, t.updatedAt)
+])
 
 export const widgetInstallationSignals = pgTable('widget_installation_signals', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -302,6 +359,27 @@ export const messages = pgTable('messages', {
   index('messages_public_sender_time_conversation_idx')
     .on(t.senderType, t.createdAt, t.conversationId, t.senderId)
     .where(sql`${t.isInternalNote} = false`)
+])
+
+/** Durable email outbox: one reminder per unanswered visitor message and recipient. */
+export const unansweredReminderDeliveries = pgTable('unanswered_reminder_deliveries', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  conversationId: uuid('conversation_id').notNull().references(() => conversations.id, { onDelete: 'cascade' }),
+  visitorMessageId: uuid('visitor_message_id').notNull().references(() => messages.id, { onDelete: 'cascade' }),
+  recipientMemberId: uuid('recipient_member_id').notNull().references(() => workspaceMembers.id, { onDelete: 'cascade' }),
+  status: reminderDeliveryStatusEnum('status').default('pending').notNull(),
+  attempts: integer('attempts').default(0).notNull(),
+  nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).defaultNow().notNull(),
+  lockedAt: timestamp('locked_at', { withTimezone: true }),
+  sentAt: timestamp('sent_at', { withTimezone: true }),
+  lastError: text('last_error'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
+}, t => [
+  uniqueIndex('unanswered_reminder_message_recipient_uq').on(t.visitorMessageId, t.recipientMemberId),
+  index('unanswered_reminder_due_idx').on(t.status, t.nextAttemptAt),
+  index('unanswered_reminder_workspace_idx').on(t.workspaceId, t.createdAt)
 ])
 
 /** Durable in-app delivery for assignments and @mentions. */
@@ -548,3 +626,7 @@ export type WebhookEndpoint = typeof webhookEndpoints.$inferSelect
 export type NewWebhookEndpoint = typeof webhookEndpoints.$inferInsert
 export type WebhookDelivery = typeof webhookDeliveries.$inferSelect
 export type NewWebhookDelivery = typeof webhookDeliveries.$inferInsert
+export type WorkspaceSubscription = typeof workspaceSubscriptions.$inferSelect
+export type WorkspaceInvoice = typeof workspaceInvoices.$inferSelect
+export type BillingWebhookDelivery = typeof billingWebhookDeliveries.$inferSelect
+export type UnansweredReminderDelivery = typeof unansweredReminderDeliveries.$inferSelect
