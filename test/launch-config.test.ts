@@ -13,7 +13,8 @@ const validEnvironment: LaunchEnvironment = {
   REALTIME_SECRET: 'separate-realtime-secret-unique-849201',
   PERCH_PUBLIC_URL: 'https://useperch.xyz',
   RESEND_API_KEY: 're_test_key',
-  RESEND_FROM: 'Perch <support@useperch.xyz>'
+  RESEND_FROM: 'Perch <support@useperch.xyz>',
+  VISITOR_REPLY_SECRET: 'visitor-reply-secret-unique-849201'
 }
 
 describe('launch configuration', () => {
@@ -61,6 +62,11 @@ describe('launch configuration', () => {
       RESEND_FROM: ''
     })
     expect(errors).toContain('RESEND_API_KEY and RESEND_FROM are required for production account recovery')
+  })
+
+  it('requires a separate secret for visitor return links', () => {
+    const errors = productionConfigErrors({ ...validEnvironment, VISITOR_REPLY_SECRET: 'short' })
+    expect(errors).toContain('VISITOR_REPLY_SECRET must be a non-placeholder secret of at least 32 characters')
   })
 
   it('allows HTTP only for an exact local development origin', () => {
