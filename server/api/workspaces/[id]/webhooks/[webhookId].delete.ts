@@ -1,4 +1,5 @@
 import { and, eq, webhookEndpoints } from '@perch/db'
+import { webhookAuditTarget } from '../../../../utils/webhook-security'
 
 /** Delete a webhook endpoint (admin). Its delivery log cascades away. */
 export default defineEventHandler(async (event) => {
@@ -14,7 +15,10 @@ export default defineEventHandler(async (event) => {
   }
 
   invalidateWebhookCache(workspaceId)
-  logAudit(workspaceId, user, 'webhook.deleted', { url: row.url })
+  logAudit(workspaceId, user, 'webhook.deleted', {
+    url: webhookAuditTarget(row.url),
+    endpoint_id: row.id
+  })
 
   return { ok: true }
 })

@@ -1,10 +1,7 @@
 import { createHmac, randomUUID } from 'node:crypto'
-import { lookup } from 'node:dns/promises'
-import { request as httpRequest } from 'node:http'
-import { request as httpsRequest } from 'node:https'
-import { isIP } from 'node:net'
 import { and, desc, eq, sql, webhookDeliveries, webhookEndpoints } from '@perch/db'
 import type { WebhookEndpoint } from '@perch/db'
+import { postWebhook, safeWebhookError } from './webhook-security'
 
 /**
  * Outbound webhooks: HMAC-signed POSTs to customer endpoints on conversation
@@ -16,7 +13,6 @@ import type { WebhookEndpoint } from '@perch/db'
 export const WEBHOOK_EVENTS = ['conversation.created', 'message.created', 'conversation.resolved'] as const
 export type WebhookEventName = typeof WEBHOOK_EVENTS[number]
 
-const TIMEOUT_MS = 5_000
 // attempt delays: immediate, then 5s and 25s backoff
 const RETRY_DELAYS_MS = [0, 5_000, 25_000]
 const KEEP_DELIVERIES = 50
@@ -28,106 +24,37 @@ export function signWebhook(secret: string, timestamp: number, body: string): st
   return createHmac('sha256', secret).update(`${timestamp}.${body}`).digest('hex')
 }
 
-/**
- * Syntactic SSRF guard. Delivery also resolves and pins the target address.
- */
-export function isSafeWebhookUrl(url: string): boolean {
-  let u: URL
-  try {
-    u = new URL(url)
-  } catch {
-    return false
-  }
-  if (u.protocol !== 'https:' && u.protocol !== 'http:') return false
-  if (u.username || u.password) return false
-  const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, '')
-  if (!host || host === 'localhost') return false
-  if (host.endsWith('.local') || host.endsWith('.internal')) return false
-  if (isIP(host) && !isPublicIp(host)) return false
-  return true
-}
-
-/** Only globally routable unicast addresses may receive webhooks. */
-export function isPublicIp(input: string): boolean {
-  const address = input.toLowerCase().replace(/^\[|\]$/g, '')
-  const version = isIP(address)
-  if (version === 4) {
-    const octets = address.split('.').map(Number)
-    const [a, b] = octets
-    if (a === undefined || b === undefined) return false
-    return !(a === 0 || a === 10 || a === 127 || a >= 224
-      || (a === 100 && b >= 64 && b <= 127)
-      || (a === 169 && b === 254)
-      || (a === 172 && b >= 16 && b <= 31)
-      || (a === 192 && b === 0)
-      || (a === 192 && b === 168)
-      || (a === 198 && (b === 18 || b === 19)))
-  }
-  if (version === 6) {
-    if (address === '::' || address === '::1') return false
-    if (/^f[cd]/.test(address) || /^fe[89ab]/.test(address) || /^ff/.test(address)) return false
-    const mapped = address.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/)
-    if (mapped?.[1]) return isPublicIp(mapped[1])
-    return true
-  }
-  return false
-}
-
-async function resolvePublicTarget(url: string) {
-  if (!isSafeWebhookUrl(url)) throw new Error('Webhook target is not allowed')
-  const parsed = new URL(url)
-  const hostname = parsed.hostname.replace(/^\[|\]$/g, '')
-  const literalVersion = isIP(hostname)
-  const addresses = literalVersion
-    ? [{ address: hostname, family: literalVersion }]
-    : await lookup(hostname, { all: true, verbatim: true })
-  if (!addresses.length || addresses.some(entry => !isPublicIp(entry.address))) {
-    throw new Error('Webhook target resolves to a non-public address')
-  }
-  return { parsed, target: addresses[0]! }
-}
-
-async function postWebhook(url: string, body: string, headers: Record<string, string>): Promise<number> {
-  const { parsed, target } = await resolvePublicTarget(url)
-  return await new Promise<number>((resolve, reject) => {
-    const request = (parsed.protocol === 'https:' ? httpsRequest : httpRequest)(parsed, {
-      method: 'POST',
-      headers: { ...headers, 'content-length': String(Buffer.byteLength(body)) },
-      lookup: (_hostname, _options, callback) => callback(null, target.address, target.family as 4 | 6)
-    }, (response) => {
-      response.resume()
-      response.once('end', () => {
-        clearTimeout(timer)
-        const status = response.statusCode ?? 0
-        if (status >= 200 && status < 300) resolve(status)
-        else reject(Object.assign(new Error(`Webhook returned HTTP ${status}`), { status }))
-      })
-    })
-    const timer = setTimeout(() => request.destroy(new Error('Webhook delivery timed out')), TIMEOUT_MS)
-    request.once('error', (error) => {
-      clearTimeout(timer)
-      reject(error)
-    })
-    request.end(body)
-  })
-}
-
 /* endpoint cache (dispatch runs on hot message paths) */
 
-interface CacheEntry { at: number, endpoints: WebhookEndpoint[] }
+interface EndpointSubscription { id: string, events: string[] }
+interface CacheEntry { at: number, endpoints: EndpointSubscription[] }
 
-const CACHE_TTL = 30_000
+const CACHE_TTL = 5_000
+const MAX_CACHE_ENTRIES = 500
 const g = globalThis as unknown as { __perchWebhookCache?: Map<string, CacheEntry> }
 const cache: Map<string, CacheEntry> = (g.__perchWebhookCache ??= new Map())
 
-async function getEndpoints(workspaceId: string): Promise<WebhookEndpoint[]> {
+function sweepEndpointCache(now: number) {
+  for (const [workspaceId, entry] of cache) {
+    if (now - entry.at >= CACHE_TTL) cache.delete(workspaceId)
+  }
+  while (cache.size >= MAX_CACHE_ENTRIES) {
+    const oldest = cache.keys().next().value as string | undefined
+    if (!oldest) break
+    cache.delete(oldest)
+  }
+}
+
+async function getEndpointSubscriptions(workspaceId: string): Promise<EndpointSubscription[]> {
+  const now = Date.now()
+  sweepEndpointCache(now)
   const hit = cache.get(workspaceId)
-  if (hit && Date.now() - hit.at < CACHE_TTL) return hit.endpoints
-  const endpoints = await useDb().query.webhookEndpoints.findMany({
-    where: and(eq(webhookEndpoints.workspaceId, workspaceId), eq(webhookEndpoints.enabled, true))
-  })
-  cache.set(workspaceId, { at: Date.now(), endpoints })
-  return endpoints
+  if (hit) return hit.endpoints.map(endpoint => ({ ...endpoint, events: [...endpoint.events] }))
+  const endpoints = await useDb().select({ id: webhookEndpoints.id, events: webhookEndpoints.events })
+    .from(webhookEndpoints)
+    .where(and(eq(webhookEndpoints.workspaceId, workspaceId), eq(webhookEndpoints.enabled, true)))
+  cache.set(workspaceId, { at: now, endpoints })
+  return endpoints.map(endpoint => ({ ...endpoint, events: [...endpoint.events] }))
 }
 
 /** Call after any webhook CRUD so dispatch sees the change immediately. */
@@ -168,7 +95,7 @@ export async function deliverOnce(
   } catch (e) {
     const fe = e as { status?: number, message?: string }
     httpStatus = fe.status ?? null
-    error = (fe.message ?? 'delivery failed').slice(0, 500)
+    error = safeWebhookError(e)
   }
   const durationMs = Date.now() - started
 
@@ -194,17 +121,26 @@ export async function deliverOnce(
           limit ${KEEP_DELIVERIES}
         )
     `)
-  } catch (e) {
-    console.error('[webhooks] could not record delivery:', e)
+  } catch {
+    console.error('[webhooks] could not record delivery')
   }
 
   return { ok, http_status: httpStatus, duration_ms: durationMs, error }
 }
 
-async function deliverWithRetries(endpoint: WebhookEndpoint, event: string, body: string) {
+async function currentEndpoint(endpointId: string, event: string): Promise<WebhookEndpoint | null> {
+  const endpoint = await useDb().query.webhookEndpoints.findFirst({
+    where: and(eq(webhookEndpoints.id, endpointId), eq(webhookEndpoints.enabled, true))
+  })
+  return endpoint?.events.includes(event) ? endpoint : null
+}
+
+async function deliverWithRetries(endpointId: string, event: string, body: string) {
   for (let attempt = 1; attempt <= RETRY_DELAYS_MS.length; attempt++) {
     const delay = RETRY_DELAYS_MS[attempt - 1]!
     if (delay) await new Promise(resolve => setTimeout(resolve, delay))
+    const endpoint = await currentEndpoint(endpointId, event)
+    if (!endpoint) return
     const result = await deliverOnce(endpoint, event, body, attempt)
     if (result.ok) return
   }
@@ -221,11 +157,11 @@ export function webhookEnvelope(event: string, data: Record<string, unknown>): s
  */
 export function dispatchWebhooks(workspaceId: string, event: WebhookEventName, data: Record<string, unknown>) {
   void (async () => {
-    const endpoints = (await getEndpoints(workspaceId)).filter(e => e.events.includes(event))
+    const endpoints = (await getEndpointSubscriptions(workspaceId)).filter(e => e.events.includes(event))
     if (!endpoints.length) return
     const body = webhookEnvelope(event, data)
-    await Promise.all(endpoints.map(e => deliverWithRetries(e, event, body)))
-  })().catch(e => console.error('[webhooks] dispatch failed:', e))
+    await Promise.all(endpoints.map(e => deliverWithRetries(e.id, event, body)))
+  })().catch(() => console.error('[webhooks] dispatch failed'))
 }
 
 /* deliveries listing (admin UI) */
