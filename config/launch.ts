@@ -17,6 +17,7 @@ export interface LaunchEnvironment {
   CLOUDINARY_CLOUD_NAME?: string
   CLOUDINARY_API_KEY?: string
   CLOUDINARY_API_SECRET?: string
+  PERCH_WEBHOOK_ALLOW_LOCALHOST?: string
 }
 
 function value(input: unknown): string {
@@ -107,6 +108,9 @@ export function productionConfigErrors(environment: LaunchEnvironment): string[]
     'CLOUDINARY_API_KEY',
     'CLOUDINARY_API_SECRET'
   ])
+  if (value(environment.PERCH_WEBHOOK_ALLOW_LOCALHOST).toLowerCase() === 'true') {
+    errors.push('PERCH_WEBHOOK_ALLOW_LOCALHOST must not be enabled in production')
+  }
 
   return errors
 }
