@@ -29,6 +29,9 @@ export default defineNuxtConfig({
     // transactional email (password reset, invites) — optional; logs in dev without it
     resendApiKey: '',
     emailFrom: '',
+    // workspace subscriptions via Bachs
+    bachsSecretKey: '',
+    bachsWebhookSecret: '',
     // signed image uploads (attachments) — optional; endpoint 503s without them
     cloudinaryCloudName: '',
     cloudinaryApiKey: '',
@@ -59,6 +62,7 @@ export default defineNuxtConfig({
     },
     '/privacy': { prerender: true },
     '/terms': { prerender: true },
+    '/pricing': { prerender: true },
     '/widget.js': {
       headers: {
         'cache-control': 'public, max-age=300, stale-while-revalidate=86400',

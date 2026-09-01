@@ -6,6 +6,7 @@ definePageMeta({ layout: 'dashboard' })
 useHead({ title: 'Inbox · Perch' })
 
 const toast = useToast()
+const route = useRoute()
 const cr = useControlRoom()
 const { currentWorkspace } = useAuth()
 const { enabled: soundEnabled, toggle: toggleSound } = useNotificationSound()
@@ -223,6 +224,10 @@ function snoozedLabel(value: string) {
 
 // a mention toast (from the layout) asked us to open a specific conversation
 const pendingSelect = useState<string | null>('inbox:pendingSelect', () => null)
+onMounted(() => {
+  const conversationId = route.query.conversation
+  if (typeof conversationId === 'string') pendingSelect.value = conversationId
+})
 watch(pendingSelect, async (id) => {
   if (id) {
     // A notification is an explicit request to open one conversation. Clear
@@ -235,6 +240,7 @@ watch(pendingSelect, async (id) => {
     await cr.reload()
     await cr.select(id, { force: true })
     pendingSelect.value = null
+    if (route.query.conversation === id) await navigateTo('/dashboard', { replace: true })
   }
 }, { immediate: true })
 

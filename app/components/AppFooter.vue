@@ -62,9 +62,16 @@ const year = new Date().getFullYear()
               v-for="link in col.links"
               :key="link.label"
             >
+              <a
+                v-if="link.external"
+                :href="link.to"
+                target="_blank"
+                rel="noreferrer"
+                class="text-sm text-muted hover:text-highlighted transition-colors"
+              >{{ link.label }}</a>
               <NuxtLink
+                v-else
                 :to="link.to"
-                :target="link.external ? '_blank' : undefined"
                 class="text-sm text-muted hover:text-highlighted transition-colors"
               >{{ link.label }}</NuxtLink>
             </li>

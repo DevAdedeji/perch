@@ -9,7 +9,8 @@ import {
 
 describe('SEO boundaries', () => {
   it('indexes only intentional public pages', () => {
-    expect(PERCH_INDEXABLE_PATHS).toEqual(['/', '/privacy', '/terms'])
+    expect(PERCH_INDEXABLE_PATHS).toEqual(['/', '/pricing', '/privacy', '/terms'])
+    expect(isPerchIndexablePath('/pricing')).toBe(true)
     expect(isPerchIndexablePath('/')).toBe(true)
     expect(isPerchIndexablePath('/help/ws_18c6715c14')).toBe(true)
     expect(isPerchIndexablePath('/help/ws_18c6715c14/550e8400-e29b-41d4-a716-446655440000')).toBe(true)

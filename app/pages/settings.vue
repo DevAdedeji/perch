@@ -27,6 +27,14 @@ interface WorkspaceDetail {
   allowedDomains: string[]
   businessHours: BusinessHoursMap | null
   timezone: string | null
+  unansweredReminderEnabled: boolean
+  unansweredReminderDelayMinutes: number
+  unansweredReminderBusinessHoursOnly: boolean
+  entitlement: {
+    isPro: boolean
+    plan: 'free' | 'pro'
+    features: { customReminderDelay: boolean, businessHoursReminders: boolean, removeBranding: boolean }
+  }
   role: 'admin' | 'agent'
 }
 
@@ -187,6 +195,43 @@ async function saveHours() {
     toast.add({ title: getErrorMessage(e, 'Could not save business hours'), color: 'error' })
   } finally {
     savingHours.value = false
+  }
+}
+
+/* unanswered-message email reminders */
+const reminderEnabled = ref(false)
+const reminderDelay = ref(15)
+const reminderBusinessHoursOnly = ref(false)
+const savingReminder = ref(false)
+const reminderOptions = [
+  { label: '5 minutes', value: 5 },
+  { label: '15 minutes', value: 15 },
+  { label: '30 minutes', value: 30 },
+  { label: '1 hour', value: 60 },
+  { label: '4 hours', value: 240 },
+  { label: '24 hours', value: 1440 }
+]
+
+watch(workspace, (w) => {
+  if (!w) return
+  reminderEnabled.value = w.unansweredReminderEnabled
+  reminderDelay.value = w.unansweredReminderDelayMinutes
+  reminderBusinessHoursOnly.value = w.unansweredReminderBusinessHoursOnly
+}, { immediate: true })
+
+async function saveReminder() {
+  if (savingReminder.value || !isAdmin.value) return
+  savingReminder.value = true
+  try {
+    await patchWorkspace({
+      unansweredReminderEnabled: reminderEnabled.value,
+      unansweredReminderDelayMinutes: reminderDelay.value,
+      unansweredReminderBusinessHoursOnly: reminderBusinessHoursOnly.value
+    }, reminderEnabled.value ? 'Email reminders saved' : 'Email reminders turned off')
+  } catch (error) {
+    toast.add({ title: getErrorMessage(error, 'Could not save email reminders'), color: 'error' })
+  } finally {
+    savingReminder.value = false
   }
 }
 
@@ -486,6 +531,7 @@ async function removeLogo() {
               v-model="widgetEditor"
               :disabled="!isAdmin"
               :saving="savingWidget"
+              :remove-branding-allowed="workspace?.entitlement.features.removeBranding"
               @save="saveWidgetCustomization"
             />
 
@@ -631,6 +677,85 @@ async function removeLogo() {
           >
             Save hours
           </UButton>
+        </section>
+
+        <!-- Unanswered-message reminders -->
+        <section class="rounded-2xl border-glow bg-elevated/30 p-5 sm:p-6">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <div class="flex flex-wrap items-center gap-2">
+                <h2 class="font-display font-semibold text-highlighted">
+                  Unanswered-message email reminders
+                </h2>
+                <UBadge
+                  v-if="!workspace?.entitlement.isPro"
+                  color="primary"
+                  variant="subtle"
+                  size="sm"
+                >
+                  15 min on Free
+                </UBadge>
+              </div>
+              <p class="mt-0.5 text-sm text-muted">
+                Email the assigned teammate when a visitor is still waiting. Unassigned chats notify admins.
+              </p>
+            </div>
+            <USwitch
+              v-model="reminderEnabled"
+              :disabled="!isAdmin"
+            />
+          </div>
+
+          <div
+            v-if="reminderEnabled"
+            class="mt-5 grid gap-5 sm:grid-cols-2"
+          >
+            <UFormField
+              label="Remind me after"
+              :help="workspace?.entitlement.isPro ? 'Choose how long a visitor can wait.' : 'Upgrade to Pro to customize the delay.'"
+            >
+              <USelect
+                v-model="reminderDelay"
+                :items="reminderOptions"
+                label-key="label"
+                value-key="value"
+                :disabled="!isAdmin || !workspace?.entitlement.features.customReminderDelay"
+                class="w-full"
+              />
+            </UFormField>
+            <div class="flex items-center justify-between gap-4 rounded-xl bg-default px-4 py-3 ring-1 ring-default">
+              <div>
+                <p class="text-sm font-medium text-highlighted">
+                  Business hours only
+                </p>
+                <p class="text-xs text-muted">
+                  Pause reminder emails while your team is away.
+                </p>
+              </div>
+              <USwitch
+                v-model="reminderBusinessHoursOnly"
+                :disabled="!isAdmin || !workspace?.entitlement.features.businessHoursReminders"
+              />
+            </div>
+          </div>
+
+          <div class="mt-4 flex flex-wrap items-center gap-3">
+            <UButton
+              v-if="isAdmin"
+              color="neutral"
+              :loading="savingReminder"
+              @click="saveReminder"
+            >
+              Save reminders
+            </UButton>
+            <NuxtLink
+              v-if="!workspace?.entitlement.isPro"
+              to="/billing"
+              class="text-xs font-medium text-primary-600 hover:underline dark:text-primary-400"
+            >
+              See Pro features
+            </NuxtLink>
+          </div>
         </section>
 
         <!-- Canned replies -->

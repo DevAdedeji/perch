@@ -1,7 +1,7 @@
 import { PERCH_PRODUCTION_ORIGIN } from './constants'
 
 /** Public pages that may appear in search results. */
-export const PERCH_INDEXABLE_PATHS = ['/', '/privacy', '/terms'] as const
+export const PERCH_INDEXABLE_PATHS = ['/', '/pricing', '/privacy', '/terms'] as const
 
 /** Private/product routes that crawlers do not need to request. */
 export const PERCH_ROBOTS_DISALLOWED_PATHS = [
@@ -10,6 +10,7 @@ export const PERCH_ROBOTS_DISALLOWED_PATHS = [
   '/admin/',
   '/articles',
   '/auth/',
+  '/billing',
   '/dashboard',
   '/installation',
   '/join/',
