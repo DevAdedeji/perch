@@ -119,10 +119,15 @@ export default defineEventHandler(async (event) => {
       size: workspace.widgetSize,
       theme: workspace.widgetTheme,
       show_branding: entitlement.isPro ? workspace.widgetShowBranding : true,
+      reply_email_enabled: workspace.visitorReplyEmailEnabled,
       has_articles: !!published
     },
     agent: agentName ? { name: agentName } : null,
-    visitor: { name: visitor!.name, email: visitor!.email },
+    visitor: {
+      name: visitor!.name,
+      email: visitor!.email,
+      reply_email_enabled: visitor!.replyEmailEnabled && !!visitor!.replyEmailConsentAt
+    },
     business_online: isBusinessOnline(workspace.id) && withinHours,
     business_state: withinHours ? businessPresence(workspace.id) : 'offline' as const,
     within_hours: withinHours,

@@ -99,6 +99,7 @@ export function serializeWorkspace(w: Workspace) {
     timezone: w.timezone,
     unansweredReminderEnabled: w.unansweredReminderEnabled,
     unansweredReminderDelayMinutes: w.unansweredReminderDelayMinutes,
-    unansweredReminderBusinessHoursOnly: w.unansweredReminderBusinessHoursOnly
+    unansweredReminderBusinessHoursOnly: w.unansweredReminderBusinessHoursOnly,
+    visitorReplyEmailEnabled: w.visitorReplyEmailEnabled
   }
 }

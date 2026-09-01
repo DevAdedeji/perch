@@ -10,7 +10,8 @@ const schema = z.object({
   email: z.string().trim().toLowerCase().email().max(200).optional(),
   // HMAC-SHA256 of user_id (or email when no user_id), keyed with the
   // workspace's identity secret — computed on the business's server
-  hash: z.string().regex(/^[a-f0-9]{64}$/i).optional()
+  hash: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
+  email_hash: z.string().regex(/^[a-f0-9]{64}$/i).optional()
 }).refine(d => d.user_id || d.name || d.email, { message: 'Nothing to identify' })
 
 /**
@@ -31,7 +32,7 @@ export default defineEventHandler(async (event) => {
   if (!result.success) {
     throw createError({ statusCode: 400, statusMessage: 'Invalid input' })
   }
-  const { site_id, visitor_session, user_id, name, email, hash } = result.data
+  const { site_id, visitor_session, user_id, name, email, hash, email_hash } = result.data
 
   const db = useDb()
   const { workspace, visitor } = await requireVisitorSession(event, site_id, visitor_session)
@@ -39,6 +40,7 @@ export default defineEventHandler(async (event) => {
   // the signed subject is the user_id when present, otherwise the email
   const subject = user_id ?? email
   let verified = false
+  let emailHostAsserted = false
 
   if (hash) {
     if (!workspace.identitySecret || !subject || !verifyIdentitySignature(workspace.identitySecret, subject, hash)) {
@@ -52,13 +54,30 @@ export default defineEventHandler(async (event) => {
     })
   }
 
+  if (email_hash) {
+    if (!workspace.identitySecret || !email || !verifyIdentitySignature(workspace.identitySecret, email, email_hash)) {
+      throw createError({ statusCode: 401, statusMessage: 'Email identity signature is invalid' })
+    }
+    emailHostAsserted = true
+  } else if (hash && email && !user_id) {
+    emailHostAsserted = verified
+  }
+
   const now = new Date()
+  const emailChanged = !!email && email !== visitor.email?.trim().toLowerCase()
   const [updated] = await db.update(visitors).set({
     lastSeenAt: now,
     identityVerified: verified,
     ...(user_id ? { externalId: user_id } : {}),
     ...(name ? { name } : {}),
-    ...(email ? { email } : {})
+    ...(email
+      ? {
+          email,
+          emailSource: emailHostAsserted ? 'host_asserted' as const : 'unsigned_identify' as const,
+          emailUpdatedAt: now,
+          ...(emailChanged ? { replyEmailEnabled: false, replyEmailConsentAt: null } : {})
+        }
+      : {})
   }).where(eq(visitors.id, visitor.id)).returning()
   const messagingAvailable = updated ? !await isVisitorMessagingBlocked(updated) : true
 
@@ -100,6 +119,7 @@ export default defineEventHandler(async (event) => {
   return {
     ok: true,
     verified,
+    email_verified: emailHostAsserted,
     messaging_available: messagingAvailable
   }
 })

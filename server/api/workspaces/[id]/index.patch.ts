@@ -26,7 +26,8 @@ const schema = z.object({
   timezone: z.string().max(64).refine(isValidTimezone, 'Unknown timezone').nullable().optional(),
   unansweredReminderEnabled: z.boolean().optional(),
   unansweredReminderDelayMinutes: z.number().int().min(5).max(1440).optional(),
-  unansweredReminderBusinessHoursOnly: z.boolean().optional()
+  unansweredReminderBusinessHoursOnly: z.boolean().optional(),
+  visitorReplyEmailEnabled: z.boolean().optional()
 })
 
 /** Update workspace settings (admin only). */

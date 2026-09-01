@@ -61,6 +61,11 @@ export interface VisitorContext {
     external_id: string | null
     identity_verified: boolean
     messaging_blocked: boolean
+    reply_email: {
+      eligible: boolean
+      status: 'pending' | 'processing' | 'sent' | 'failed' | 'canceled' | null
+      cancel_reason: string | null
+    }
     first_seen_at: string
     last_seen_at: string
     page_url: string | null

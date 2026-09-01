@@ -12,6 +12,7 @@ export interface LaunchEnvironment {
   NUXT_OAUTH_GOOGLE_REDIRECT_URL?: string
   RESEND_API_KEY?: string
   RESEND_FROM?: string
+  VISITOR_REPLY_SECRET?: string
   BACHS_SECRET_KEY?: string
   BACHS_WEBHOOK_SECRET?: string
   CLOUDINARY_CLOUD_NAME?: string
@@ -100,6 +101,9 @@ export function productionConfigErrors(environment: LaunchEnvironment): string[]
 
   if (!value(environment.RESEND_API_KEY) || !value(environment.RESEND_FROM)) {
     errors.push('RESEND_API_KEY and RESEND_FROM are required for production account recovery')
+  }
+  if (!isStrongSecret(environment.VISITOR_REPLY_SECRET)) {
+    errors.push('VISITOR_REPLY_SECRET must be a non-placeholder secret of at least 32 characters')
   }
   requireCompleteGroup(errors, environment, ['BACHS_SECRET_KEY', 'BACHS_WEBHOOK_SECRET'])
   requireCompleteGroup(errors, environment, [
