@@ -51,6 +51,14 @@ jobs:
       - name: Apply database migrations
         run: pnpm --filter @perch/db db:migrate
 
+      - name: Audit production dependencies
+        run: |
+          for attempt in 1 2 3; do
+            pnpm audit --prod --audit-level high && exit 0
+            [ "$attempt" -eq 3 ] && exit 1
+            sleep $((attempt * 5))
+          done
+
       - name: Lint
         run: pnpm lint
 
