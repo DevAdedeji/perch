@@ -223,6 +223,10 @@ export default defineWebSocketHandler({
           unsubscribe(channel, peer)
           break
         }
+        if (ctx.role === 'visitor') {
+          const visitor = await useDb().query.visitors.findFirst({ where: eq(visitors.id, ctx.vid as string) })
+          if (!visitor || await isVisitorMessagingBlocked(visitor)) break
+        }
         // sneak-peek: relay the visitor's draft to agents — WS-only, never stored.
         // strictly one-directional: an agent's draft must never reach the visitor.
         const rawPreview = (msg.payload as { preview?: unknown } | undefined)?.preview

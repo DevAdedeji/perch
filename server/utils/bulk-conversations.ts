@@ -97,6 +97,12 @@ export async function mutateConversationsInBulk(
     if (selected.some(conversation => !canAccessConversation(currentMember, conversation))) {
       throw createError({ statusCode: 403, statusMessage: 'You no longer have access to one or more selected conversations' })
     }
+    if (selected.some(conversation => conversation.isSpam)) {
+      throw createError({
+        statusCode: 409,
+        statusMessage: 'Restore spam conversations individually before applying bulk actions'
+      })
+    }
 
     const now = new Date()
     const changedConversationIds: string[] = []

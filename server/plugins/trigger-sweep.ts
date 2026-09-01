@@ -27,6 +27,13 @@ export default defineNitroPlugin(() => {
 
         for (const visitor of liveVisitors(workspaceId)) {
           if (!visitor.page_url) continue
+          const visitorRow = await useDb().query.visitors.findFirst({
+            where: (visitors, { and, eq }) => and(
+              eq(visitors.id, visitor.visitor_ref),
+              eq(visitors.workspaceId, workspaceId)
+            )
+          })
+          if (!visitorRow || await isVisitorMessagingBlocked(visitorRow)) continue
           const dwellMs = Date.now() - visitor.page_since
 
           for (const rule of rules) {

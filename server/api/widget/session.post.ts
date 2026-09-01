@@ -104,6 +104,7 @@ export default defineEventHandler(async (event) => {
 
   const withinHours = isWithinBusinessHours(workspace.businessHours, workspace.timezone)
   const entitlement = await workspaceEntitlement(workspace.id)
+  const messagingAvailable = !await isVisitorMessagingBlocked(visitor!)
 
   return {
     workspace: {
@@ -129,6 +130,7 @@ export default defineEventHandler(async (event) => {
     conversation_status: conversation?.status ?? null,
     csat_rating: conversation?.csatRating ?? null,
     conversation_id: conversation?.id ?? null,
+    messaging_available: messagingAvailable,
     agent_last_read_at: agentLastReadAt,
     messages: thread,
     visitor_id: visitor!.visitorId,

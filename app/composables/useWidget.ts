@@ -33,6 +33,7 @@ interface SessionResponse {
   visitor_session: string
   ws_ticket: string
   presence_channel: string
+  messaging_available: boolean
 }
 
 /**
@@ -56,6 +57,7 @@ export function useWidget(
   const conversationStatus = ref<'open' | 'unassigned' | 'resolved' | null>(null)
   const csatRating = ref<'good' | 'bad' | null>(null)
   const conversationId = ref<string | null>(null)
+  const messagingAvailable = ref(true)
   const messages = ref<Array<VisitorMessageDTO & { pending?: boolean, failed?: boolean }>>([])
   const status = ref<'loading' | 'ready' | 'error'>('loading')
   const agentTyping = ref(false)
@@ -135,6 +137,7 @@ export function useWidget(
     withinHours.value = res.within_hours ?? true
     awayLabel.value = res.away_label ?? null
     conversationId.value = res.conversation_id
+    messagingAvailable.value = res.messaging_available !== false
     conversationStatus.value = res.conversation_status ?? null
     csatRating.value = res.csat_rating ?? null
     messages.value = res.messages
@@ -276,6 +279,10 @@ export function useWidget(
           refreshAgent()
         }
         break
+      case 'visitor.messaging':
+        messagingAvailable.value = ev.payload.available
+        if (!ev.payload.available) sendTyping(false)
+        break
       case 'trigger.fire': {
         // proactive trigger — show an ephemeral bubble (never persisted; the
         // server threads the real text in if the visitor replies) + auto-open
@@ -320,10 +327,11 @@ export function useWidget(
 
   async function pushIdentity(traits: IdentityTraits) {
     try {
-      await $fetch('/api/widget/identify', {
+      const result = await $fetch<{ messaging_available: boolean }>('/api/widget/identify', {
         method: 'POST',
         body: { site_id: siteId, visitor_session: visitorSession, ...traits }
       })
+      messagingAvailable.value = result.messaging_available !== false
     } catch {
       // identity is best-effort from the widget's side; the session still works
     }
@@ -449,6 +457,16 @@ export function useWidget(
         uploadFns.delete(tempId)
       })
     } catch (e) {
+      const errorData = (e as { data?: { code?: string, data?: { code?: string } } }).data
+      const blocked = errorData?.code === 'MESSAGING_UNAVAILABLE'
+        || errorData?.data?.code === 'MESSAGING_UNAVAILABLE'
+      if (blocked) {
+        messagingAvailable.value = false
+        const index = messages.value.findIndex(message => message.id === tempId)
+        if (index !== -1) messages.value.splice(index, 1)
+        uploadFns.delete(tempId)
+        throw e
+      }
       const failedMsg = messages.value.find(m => m.id === tempId)
       if (failedMsg) {
         failedMsg.pending = false
@@ -531,6 +549,7 @@ export function useWidget(
     csatRating,
     sendCsat,
     conversationId,
+    messagingAvailable,
     messages,
     status,
     agentTyping,

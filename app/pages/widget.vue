@@ -15,7 +15,7 @@ const embeddedHostOrigin = useState<string>('perch-embed-origin', () =>
 
 const widget = useWidget(siteId.value, embedTicket.value, { installationPreview: installationPreview.value })
 const {
-  workspace, agentName, businessOnline, businessState, awayLabel, conversationId, conversationStatus, csatRating, messages, status, agentTyping, visitorName, agentReadAt
+  workspace, agentName, businessOnline, businessState, awayLabel, conversationId, conversationStatus, csatRating, messages, status, agentTyping, visitorName, agentReadAt, messagingAvailable
 } = widget
 
 /* CSAT: quick thumbs after a conversation closes */
@@ -227,6 +227,7 @@ const composerFocused = ref(false)
 
 const showPrechat = computed(() =>
   status.value === 'ready'
+  && messagingAvailable.value
   && !!workspace.value?.prechat_enabled
   && !conversationId.value
   && !visitorName.value
@@ -822,14 +823,16 @@ onBeforeUnmount(() => {
             />
           </span>
           <p class="font-display text-base font-semibold text-highlighted">
-            {{ greeting }}
+            {{ messagingAvailable ? greeting : 'Messaging unavailable' }}
           </p>
           <p class="text-sm text-muted max-w-60">
-            {{ businessOnline
-              ? intro
-              : awayLabel
-                ? `${offlineMessage} ${awayLabel}.`
-                : offlineMessage }}
+            {{ !messagingAvailable
+              ? 'This chat cannot receive new messages right now.'
+              : businessOnline
+                ? intro
+                : awayLabel
+                  ? `${offlineMessage} ${awayLabel}.`
+                  : offlineMessage }}
           </p>
         </div>
 
@@ -1033,68 +1036,81 @@ onBeforeUnmount(() => {
 
       <!-- composer -->
       <div class="shrink-0 border-t border-default bg-elevated/50 p-3">
-        <p
-          v-if="!businessOnline && messages.length"
-          class="pb-2 text-[11px] text-dimmed text-center"
+        <div
+          v-if="!messagingAvailable"
+          class="flex items-center justify-center gap-2 rounded-xl bg-elevated px-3 py-3 text-center text-xs text-muted ring-1 ring-default"
+          role="status"
         >
-          {{ awayLabel ? `We’re away right now — ${awayLabel}.` : 'We’re away right now — we’ll reply as soon as we’re back.' }}
-        </p>
-        <p
-          v-if="uploadError"
-          class="pb-2 text-[11px] text-red-500 text-center"
-        >
-          {{ uploadError }}
-        </p>
-        <div class="flex items-end gap-2">
-          <input
-            ref="fileEl"
-            type="file"
-            accept="image/*"
-            class="hidden"
-            @change="onFilePicked"
-          >
-          <button
-            class="grid place-items-center size-9 shrink-0 rounded-xl text-dimmed hover:text-highlighted hover:bg-elevated transition disabled:opacity-50"
-            :disabled="uploading"
-            aria-label="Attach an image (max 1 MB)"
-            @click="pickImage"
-          >
-            <UIcon
-              :name="uploading ? 'i-lucide-loader-circle' : 'i-lucide-image-plus'"
-              class="size-5"
-              :class="uploading && 'animate-spin'"
-            />
-          </button>
-          <div
-            class="flex-1 flex items-end rounded-xl bg-default px-3 py-1 transition-shadow min-w-0"
-            :class="composerFocused ? 'ring-2' : 'ring-1 ring-default'"
-            :style="composerFocused ? { '--tw-ring-color': accent } : {}"
-          >
-            <textarea
-              ref="composerEl"
-              v-model="draft"
-              rows="1"
-              placeholder="Type a message…"
-              class="flex-1 max-h-30 bg-transparent py-1.5 text-sm outline-none resize-none"
-              @input="onInput"
-              @keydown.enter.exact.prevent="onSend"
-              @focus="composerFocused = true"
-              @blur="onComposerBlur"
-            />
-          </div>
-          <button
-            class="grid place-items-center size-9 shrink-0 rounded-xl transition enabled:hover:brightness-110 enabled:active:scale-90 disabled:opacity-40"
-            :style="{ background: accent, color: onAccent }"
-            :disabled="!draft.trim()"
-            aria-label="Send"
-            @click="onSend"
-          >
-            <UIcon
-              name="i-lucide-arrow-up"
-              class="size-4"
-            />
-          </button>
+          <UIcon
+            name="i-lucide-message-circle-off"
+            class="size-4 shrink-0 text-dimmed"
+          />
+          Messaging is unavailable for this chat.
         </div>
+        <template v-else>
+          <p
+            v-if="!businessOnline && messages.length"
+            class="pb-2 text-[11px] text-dimmed text-center"
+          >
+            {{ awayLabel ? `We’re away right now — ${awayLabel}.` : 'We’re away right now — we’ll reply as soon as we’re back.' }}
+          </p>
+          <p
+            v-if="uploadError"
+            class="pb-2 text-[11px] text-red-500 text-center"
+          >
+            {{ uploadError }}
+          </p>
+          <div class="flex items-end gap-2">
+            <input
+              ref="fileEl"
+              type="file"
+              accept="image/*"
+              class="hidden"
+              @change="onFilePicked"
+            >
+            <button
+              class="grid place-items-center size-9 shrink-0 rounded-xl text-dimmed hover:text-highlighted hover:bg-elevated transition disabled:opacity-50"
+              :disabled="uploading"
+              aria-label="Attach an image (max 1 MB)"
+              @click="pickImage"
+            >
+              <UIcon
+                :name="uploading ? 'i-lucide-loader-circle' : 'i-lucide-image-plus'"
+                class="size-5"
+                :class="uploading && 'animate-spin'"
+              />
+            </button>
+            <div
+              class="flex-1 flex items-end rounded-xl bg-default px-3 py-1 transition-shadow min-w-0"
+              :class="composerFocused ? 'ring-2' : 'ring-1 ring-default'"
+              :style="composerFocused ? { '--tw-ring-color': accent } : {}"
+            >
+              <textarea
+                ref="composerEl"
+                v-model="draft"
+                rows="1"
+                placeholder="Type a message…"
+                class="flex-1 max-h-30 bg-transparent py-1.5 text-sm outline-none resize-none"
+                @input="onInput"
+                @keydown.enter.exact.prevent="onSend"
+                @focus="composerFocused = true"
+                @blur="onComposerBlur"
+              />
+            </div>
+            <button
+              class="grid place-items-center size-9 shrink-0 rounded-xl transition enabled:hover:brightness-110 enabled:active:scale-90 disabled:opacity-40"
+              :style="{ background: accent, color: onAccent }"
+              :disabled="!draft.trim()"
+              aria-label="Send"
+              @click="onSend"
+            >
+              <UIcon
+                name="i-lucide-arrow-up"
+                class="size-4"
+              />
+            </button>
+          </div>
+        </template>
       </div>
     </template>
 

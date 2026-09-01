@@ -57,6 +57,7 @@ export default defineEventHandler(async (event) => {
     .select({
       id: conversations.id,
       status: conversations.status,
+      isSpam: conversations.isSpam,
       assignedAgentId: conversations.assignedAgentId,
       collaboratorMemberIds: conversations.collaboratorMemberIds,
       priority: conversations.priority,
@@ -83,6 +84,7 @@ export default defineEventHandler(async (event) => {
     )
     .where(and(
       eq(conversations.workspaceId, workspaceId),
+      eq(conversations.isSpam, filters.spam === 'only'),
       filters.status ? eq(conversations.status, filters.status) : undefined,
       filters.priorities.length ? inArray(conversations.priority, filters.priorities) : undefined,
       filters.assignee === 'unassigned'
@@ -122,6 +124,7 @@ export default defineEventHandler(async (event) => {
     items: page.map(r => ({
       id: r.id,
       status: r.status,
+      isSpam: r.isSpam,
       assignedAgentId: r.assignedAgentId,
       collaboratorMemberIds: r.collaboratorMemberIds,
       priority: r.priority,
