@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 
 const loader = readFileSync(new URL('../packages/widget-loader/src/index.ts', import.meta.url), 'utf8')
 const endpoint = readFileSync(new URL('../server/api/widget/embed-ticket.post.ts', import.meta.url), 'utf8')
-const middleware = readFileSync(new URL('../server/middleware/security-headers.ts', import.meta.url), 'utf8')
+const middleware = readFileSync(new URL('../server/middleware/00-security-headers.ts', import.meta.url), 'utf8')
 const widget = readFileSync(new URL('../app/pages/widget.vue', import.meta.url), 'utf8')
 const websocket = readFileSync(new URL('../server/routes/api/ws.ts', import.meta.url), 'utf8')
 
