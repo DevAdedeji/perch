@@ -72,6 +72,7 @@ function scheduleArticleSearch() {
 }
 
 function toggleArticlePicker() {
+  if (internalNote.value) return
   articlePickerOpen.value = !articlePickerOpen.value
   if (!articlePickerOpen.value) {
     articleSearchController?.abort()
@@ -236,7 +237,7 @@ onBeforeUnmount(() => {
   <div class="shrink-0 border-t border-default bg-default p-3">
     <div class="relative">
       <div
-        v-if="articlePickerOpen"
+        v-if="articlePickerOpen && !internalNote"
         class="absolute bottom-full left-0 right-0 mb-2 rounded-xl bg-default ring-1 ring-default shadow-xl shadow-black/10 overflow-hidden z-10"
       >
         <div class="flex items-center justify-between gap-3 px-3 pt-3">
@@ -420,6 +421,7 @@ onBeforeUnmount(() => {
             @click="attachmentElement?.click()"
           />
           <UButton
+            v-if="!internalNote"
             size="sm"
             color="neutral"
             :variant="articlePickerOpen ? 'soft' : 'ghost'"
