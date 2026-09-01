@@ -2,7 +2,8 @@ import { createHmac } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { PERCH_PRO_PLAN, proPriceCents, toDecimalString } from '../packages/shared/src/billing'
 import { verifyBachsWebhookSignature } from '../server/utils/bachs'
-import { reminderIsDue, reminderRetryAt } from '../server/utils/unanswered-reminders'
+import { effectiveReminderSettings, reminderIsDue, reminderRetryAt } from '../server/utils/unanswered-reminders'
+import { subscriptionHasPaidAccess } from '../server/utils/billing'
 
 describe('Perch plan pricing', () => {
   it('keeps the yearly plan cheaper than twelve monthly payments', () => {
@@ -10,6 +11,13 @@ describe('Perch plan pricing', () => {
     expect(proPriceCents('yearly')).toBe(9000)
     expect(PERCH_PRO_PLAN.yearlyCents).toBeLessThan(PERCH_PRO_PLAN.monthlyCents * 12)
     expect(toDecimalString(900)).toBe('9.00')
+  })
+
+  it('keeps paid access only through a confirmed current period', () => {
+    const now = new Date('2026-09-01T12:00:00.000Z')
+    expect(subscriptionHasPaidAccess({ status: 'active', currentPeriodEnd: null }, now)).toBe(true)
+    expect(subscriptionHasPaidAccess({ status: 'canceled', currentPeriodEnd: new Date('2026-09-02T12:00:00.000Z') }, now)).toBe(true)
+    expect(subscriptionHasPaidAccess({ status: 'canceled', currentPeriodEnd: new Date('2026-08-31T12:00:00.000Z') }, now)).toBe(false)
   })
 })
 
@@ -31,6 +39,12 @@ describe('Bachs webhook verification', () => {
 })
 
 describe('unanswered reminder timing', () => {
+  it('clamps downgraded workspaces to the Free reminder settings', () => {
+    expect(effectiveReminderSettings({ delayMinutes: 5, businessHoursOnly: true, isPro: false })).toEqual({
+      delayMinutes: 15,
+      businessHoursOnly: false
+    })
+  })
   it('becomes due at the configured threshold', () => {
     const sentAt = new Date('2026-09-01T10:00:00Z')
     expect(reminderIsDue(sentAt, 15, new Date('2026-09-01T10:14:59Z'))).toBe(false)

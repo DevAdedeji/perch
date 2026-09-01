@@ -43,18 +43,16 @@ export default defineEventHandler(async (event) => {
   const patch = { ...result.data }
   const entitlement = await workspaceEntitlement(workspaceId)
   if (!entitlement.isPro) {
-    if (patch.unansweredReminderDelayMinutes !== undefined
-      && patch.unansweredReminderDelayMinutes !== PERCH_PRO_PLAN.freeReminderMinutes) {
-      throw createError({ statusCode: 402, statusMessage: 'Custom reminder timing is available on Perch Pro.' })
-    }
     if (patch.unansweredReminderBusinessHoursOnly) {
       throw createError({ statusCode: 402, statusMessage: 'Business-hours-only reminders are available on Perch Pro.' })
     }
     if (patch.widgetShowBranding === false) {
       throw createError({ statusCode: 402, statusMessage: 'Removing Perch branding is available on Perch Pro.' })
     }
-    if (patch.unansweredReminderEnabled !== undefined) {
+    if (patch.unansweredReminderEnabled !== undefined || patch.unansweredReminderDelayMinutes !== undefined) {
       patch.unansweredReminderDelayMinutes = PERCH_PRO_PLAN.freeReminderMinutes
+    }
+    if (patch.unansweredReminderEnabled !== undefined) {
       patch.unansweredReminderBusinessHoursOnly = false
     }
   }

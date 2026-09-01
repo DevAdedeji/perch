@@ -16,6 +16,8 @@ const newViewName = ref('')
 const savingView = ref(false)
 const snoozeOpen = ref(false)
 const customSnooze = ref('')
+const slaNow = ref(new Date())
+let slaClock: ReturnType<typeof setInterval> | undefined
 
 const filters: { label: string, value: InboxFilter }[] = [
   { label: 'All', value: 'all' },
@@ -64,7 +66,17 @@ function clearAdvancedFilters() {
   cr.priorityFilters.value = []
   cr.tagFilters.value = []
   cr.snoozedFilter.value = 'exclude'
+  cr.responseFilter.value = 'all'
 }
+
+onMounted(() => {
+  slaClock = setInterval(() => {
+    slaNow.value = new Date()
+  }, 30_000)
+})
+onBeforeUnmount(() => {
+  if (slaClock) clearInterval(slaClock)
+})
 
 function applySavedView(view: InboxSavedView) {
   cr.applySavedView(view)
@@ -498,6 +510,22 @@ const statusBadge = {
                 : cr.filter.value === f.value ? 'bg-primary-500/15 text-primary-700 dark:text-primary-400' : 'bg-elevated text-dimmed'"
             >{{ tabCount(f.value) }}</span>
           </button>
+          <button
+            class="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium whitespace-nowrap transition-colors"
+            :class="cr.responseFilter.value === 'breached'
+              ? 'bg-red-500/12 text-red-700 dark:text-red-400'
+              : 'text-muted hover:text-highlighted'"
+            :aria-pressed="cr.responseFilter.value === 'breached'"
+            @click="cr.responseFilter.value = cr.responseFilter.value === 'breached' ? 'all' : 'breached'"
+          >
+            Overdue
+            <span
+              class="rounded-full px-1.5 text-xs font-semibold tabular-nums"
+              :class="cr.counts.value.breached > 0
+                ? 'bg-red-500/15 text-red-700 dark:text-red-400'
+                : 'bg-elevated text-dimmed'"
+            >{{ cr.counts.value.breached }}</span>
+          </button>
         </div>
 
         <!-- search: name, email, or anything anyone said -->
@@ -651,7 +679,7 @@ const statusBadge = {
                   >
                     {{ c.preview || '—' }}
                   </p>
-                  <div class="mt-1.5 flex items-center gap-1.5">
+                  <div class="mt-1.5 flex flex-wrap items-center gap-1.5">
                     <span
                       v-if="c.priority !== 'normal'"
                       class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-semibold capitalize"
@@ -671,6 +699,10 @@ const statusBadge = {
                     >
                       {{ statusBadge[c.status].label }}
                     </UBadge>
+                    <ResponseSlaBadge
+                      :sla="c.responseSla"
+                      :now="slaNow"
+                    />
                     <span
                       v-if="c.assignedAgentId"
                       class="ml-auto flex items-center gap-1.5 shrink-0 rounded-full bg-elevated/70 ring-1 ring-default pl-2 pr-2.5 py-0.5"
@@ -780,6 +812,11 @@ const statusBadge = {
               {{ cr.activeConversation.value.visitor.email ?? cr.activeConversation.value.visitor.visitorId }}
             </p>
           </div>
+
+          <ResponseSlaBadge
+            :sla="cr.activeConversation.value.responseSla"
+            :now="slaNow"
+          />
 
           <div class="flex items-center gap-1 sm:gap-2 shrink-0">
             <UDropdownMenu
@@ -1063,6 +1100,7 @@ const statusBadge = {
 
             <ConversationComposer
               :key="cr.activeConversation.value.id"
+              :workspace-id="currentWorkspace?.workspaceId ?? null"
               :members="cr.members.value"
               :current-member-id="currentWorkspace?.memberId ?? null"
               :canned-responses="cr.canned.value"
@@ -1076,6 +1114,8 @@ const statusBadge = {
             <VisitorContextPanel
               :context="cr.context.value"
               :fallback-name="cr.activeConversation.value.visitor.name"
+              :available-tags="cr.workspaceTags.value"
+              :save-profile="cr.updateCustomerProfile"
             />
           </aside>
         </div>
@@ -1091,6 +1131,8 @@ const statusBadge = {
             <VisitorContextPanel
               :context="cr.context.value"
               :fallback-name="cr.activeConversation.value?.visitor.name ?? null"
+              :available-tags="cr.workspaceTags.value"
+              :save-profile="cr.updateCustomerProfile"
             />
           </template>
         </USlideover>

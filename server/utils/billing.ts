@@ -14,7 +14,10 @@ export interface WorkspaceEntitlement {
   features: { customReminderDelay: boolean, businessHoursReminders: boolean, removeBranding: boolean }
 }
 
-function hasPaidAccess(row: typeof workspaceSubscriptions.$inferSelect | undefined, now = new Date()) {
+export function subscriptionHasPaidAccess(
+  row: Pick<typeof workspaceSubscriptions.$inferSelect, 'status' | 'currentPeriodEnd'> | undefined,
+  now = new Date()
+) {
   if (!row) return false
   if (row.status === 'active' || row.status === 'trialing') return true
   if (row.status !== 'past_due' && row.status !== 'canceled') return false
@@ -23,7 +26,7 @@ function hasPaidAccess(row: typeof workspaceSubscriptions.$inferSelect | undefin
 
 export async function workspaceEntitlement(workspaceId: string): Promise<WorkspaceEntitlement> {
   const row = await useDb().query.workspaceSubscriptions.findFirst({ where: eq(workspaceSubscriptions.workspaceId, workspaceId) })
-  const isPro = hasPaidAccess(row)
+  const isPro = subscriptionHasPaidAccess(row)
   return {
     plan: isPro ? 'pro' : 'free',
     isPro,
@@ -128,7 +131,7 @@ export async function startWorkspaceCheckout(input: {
 export async function cancelWorkspacePlan(workspaceId: string) {
   const db = useDb()
   const row = await db.query.workspaceSubscriptions.findFirst({ where: eq(workspaceSubscriptions.workspaceId, workspaceId) })
-  if (!row || !hasPaidAccess(row)) throw createError({ statusCode: 409, statusMessage: 'Perch Pro is not active.' })
+  if (!row || !subscriptionHasPaidAccess(row)) throw createError({ statusCode: 409, statusMessage: 'Perch Pro is not active.' })
   if (!row.bachsSubscriptionId) {
     return { cancelAtPeriodEnd: true, currentPeriodEnd: row.currentPeriodEnd?.toISOString() ?? null }
   }

@@ -35,6 +35,15 @@ export default defineEventHandler(async (event) => {
     : undefined
 
   const db = useDb()
+  const workspace = await db.query.workspaces.findFirst({
+    where: (workspaces, { eq }) => eq(workspaces.id, workspaceId),
+    columns: { unansweredReminderDelayMinutes: true }
+  })
+  if (!workspace) throw createError({ statusCode: 404, statusMessage: 'Workspace not found' })
+  const responseTargetMinutes = effectiveResponseTargetMinutes(
+    workspace.unansweredReminderDelayMinutes,
+    (await workspaceEntitlement(workspaceId)).isPro
+  )
 
   let cursor = null
   if (beforeId) {
@@ -55,8 +64,8 @@ export default defineEventHandler(async (event) => {
       lastMessageAt: conversations.lastMessageAt,
       createdAt: conversations.createdAt,
       visitorRef: visitors.id,
-      visitorName: visitors.name,
-      visitorEmail: visitors.email,
+      visitorName: sql<string | null>`coalesce(${visitors.profileName}, ${visitors.name})`,
+      visitorEmail: sql<string | null>`coalesce(${visitors.profileEmail}, ${visitors.email})`,
       visitorPublicId: visitors.visitorId,
       lastReadAt: conversationReads.lastReadAt,
       preview: sql<string | null>`(select coalesce(nullif(m.content, ''), case when m.attachment_url is not null then '📷 Photo' end) from ${messages} m where m.conversation_id = ${conversations.id} order by m.created_at desc limit 1)`,
@@ -92,6 +101,9 @@ export default defineEventHandler(async (event) => {
         : filters.snoozed === 'only'
           ? sql`${conversations.snoozedUntil} > now()`
           : undefined,
+      filters.response === 'breached'
+        ? breachedResponseSlaCondition(responseTargetMinutes)
+        : undefined,
       scope,
       // tuple comparison keeps the order stable when timestamps collide
       cursor
@@ -103,6 +115,8 @@ export default defineEventHandler(async (event) => {
 
   const hasMore = rows.length > limit
   const page = rows.slice(0, limit)
+  const now = new Date()
+  const responseTimes = await responseSlaMessageTimes(db, page.map(row => row.id))
 
   return {
     items: page.map(r => ({
@@ -117,6 +131,14 @@ export default defineEventHandler(async (event) => {
       preview: r.preview ?? '',
       tags: r.tags ?? [],
       unread: !r.lastReadAt || r.lastMessageAt > r.lastReadAt,
+      responseSla: calculateResponseSla({
+        conversationStatus: r.status,
+        snoozedUntil: r.snoozedUntil,
+        latestVisitorAt: responseTimes.get(r.id)?.latestVisitorAt,
+        latestAgentAt: responseTimes.get(r.id)?.latestAgentAt,
+        targetMinutes: responseTargetMinutes,
+        now
+      }),
       visitor: {
         id: r.visitorRef,
         name: r.visitorName,

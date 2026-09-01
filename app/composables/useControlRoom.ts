@@ -1,5 +1,5 @@
 import { channels } from '@perch/shared'
-import type { ConversationPriority, ConversationStatus, MessageDTO, SavedInboxFilters, ServerEvent } from '@perch/shared'
+import type { ConversationPriority, ConversationStatus, MessageDTO, ResponseSlaDTO, SavedInboxFilters, ServerEvent } from '@perch/shared'
 
 export interface InboxItem {
   id: string
@@ -13,6 +13,7 @@ export interface InboxItem {
   preview: string
   tags: { id: string, name: string }[]
   unread: boolean
+  responseSla: ResponseSlaDTO
   visitor: { id: string, name: string | null, email: string | null, visitorId: string }
 }
 
@@ -46,6 +47,15 @@ export interface VisitorContext {
   visitor: {
     name: string | null
     email: string | null
+    profile_name: string | null
+    profile_email: string | null
+    reported_name: string | null
+    reported_email: string | null
+    company: string | null
+    job_title: string | null
+    internal_note: string | null
+    profile_version: number
+    tags: WorkspaceTag[]
     visitor_id: string
     external_id: string | null
     identity_verified: boolean
@@ -61,6 +71,20 @@ export interface VisitorContext {
     resolved_at: string | null
   }
   past_conversations: number
+  recent_conversations: Array<{
+    id: string
+    status: ConversationStatus
+    last_message_at: string
+  }>
+}
+
+export interface CustomerProfileUpdate {
+  name?: string | null
+  email?: string | null
+  company?: string | null
+  job_title?: string | null
+  internal_note?: string | null
+  tag_ids?: string[]
 }
 
 export type InboxFilter = 'all' | ConversationStatus
@@ -97,6 +121,7 @@ export function useControlRoom() {
   const priorityFilters = useState<ConversationPriority[]>('cr:priorityFilters', () => [])
   const tagFilters = useState<string[]>('cr:tagFilters', () => [])
   const snoozedFilter = useState<'exclude' | 'include' | 'only'>('cr:snoozedFilter', () => 'exclude')
+  const responseFilter = useState<'all' | 'breached'>('cr:responseFilter', () => 'all')
   const workspaceTags = useState<WorkspaceTag[]>('cr:tags', () => [])
   const savedViews = useState<InboxSavedView[]>('cr:savedViews', () => [])
   const loadingList = ref(false)
@@ -106,7 +131,7 @@ export function useControlRoom() {
   const visitorDraft = ref('')
 
   // per-status counts for the tabs — fetched independently of the active filter
-  const counts = useState('cr:counts', () => ({ unassigned: 0, open: 0, resolved: 0 }))
+  const counts = useState('cr:counts', () => ({ unassigned: 0, open: 0, resolved: 0, breached: 0 }))
 
   // composer `/shortcut` templates + the context panel for the open thread
   const canned = useState<CannedResponse[]>('cr:canned', () => [])
@@ -152,6 +177,7 @@ export function useControlRoom() {
     if (priorityFilters.value.length) params.set('priority', priorityFilters.value.join(','))
     if (tagFilters.value.length) params.set('tag', tagFilters.value.join(','))
     if (snoozedFilter.value !== 'exclude') params.set('snoozed', snoozedFilter.value)
+    if (responseFilter.value !== 'all') params.set('response', responseFilter.value)
   }
 
   function matchesFilters(conversation: InboxItem) {
@@ -164,6 +190,7 @@ export function useControlRoom() {
     const activelySnoozed = Boolean(conversation.snoozedUntil && new Date(conversation.snoozedUntil) > new Date())
     if (snoozedFilter.value === 'exclude' && activelySnoozed) return false
     if (snoozedFilter.value === 'only' && !activelySnoozed) return false
+    if (responseFilter.value === 'breached' && currentResponseSlaStatus(conversation.responseSla) !== 'breached') return false
     return true
   }
 
@@ -211,7 +238,7 @@ export function useControlRoom() {
 
   async function loadCounts() {
     if (!workspaceId.value) return
-    counts.value = await $fetch<{ unassigned: number, open: number, resolved: number }>(
+    counts.value = await $fetch<{ unassigned: number, open: number, resolved: number, breached: number }>(
       `/api/workspaces/${workspaceId.value}/conversation-counts`
     )
   }
@@ -404,6 +431,31 @@ export function useControlRoom() {
     }
   }
 
+  async function updateCustomerProfile(changes: CustomerProfileUpdate) {
+    const conversationId = activeId.value
+    const current = context.value
+    if (!conversationId || !current) return
+    try {
+      const updated = await $fetch<VisitorContext>(`/api/conversations/${conversationId}/customer`, {
+        method: 'PATCH',
+        body: { ...changes, expected_version: current.visitor.profile_version }
+      })
+      if (activeId.value !== conversationId) return
+      context.value = updated
+      const inboxItem = conversations.value.find(item => item.id === conversationId)
+      if (inboxItem) {
+        inboxItem.visitor.name = updated.visitor.name
+        inboxItem.visitor.email = updated.visitor.email
+      }
+      return updated
+    } catch (error) {
+      if ((error as { statusCode?: number }).statusCode === 409 && activeId.value === conversationId) {
+        context.value = await $fetch<VisitorContext>(`/api/conversations/${conversationId}/context`)
+      }
+      throw error
+    }
+  }
+
   /* live events */
   function applyEvent(ev: ServerEvent) {
     switch (ev.type) {
@@ -419,6 +471,14 @@ export function useControlRoom() {
         break
       case 'conversation.refresh':
         loadConversations()
+        if (activeId.value === ev.payload.conversation_id) {
+          const seq = threadSeq
+          $fetch<VisitorContext>(`/api/conversations/${ev.payload.conversation_id}/context`)
+            .then((updated) => {
+              if (seq === threadSeq && activeId.value === ev.payload.conversation_id) context.value = updated
+            })
+            .catch(() => {})
+        }
         break
       case 'conversation.updated': {
         const p = ev.payload
@@ -465,6 +525,10 @@ export function useControlRoom() {
           messages.value.push(m)
           visitorTyping.value = false
           visitorDraft.value = ''
+        }
+        if (!m.is_internal_note && (m.sender_type === 'visitor' || m.sender_type === 'agent')) {
+          loadConversations()
+          loadCounts()
         }
         break
       }
@@ -599,17 +663,18 @@ export function useControlRoom() {
     activeId.value = null
     messages.value = []
     conversations.value = []
-    counts.value = { unassigned: 0, open: 0, resolved: 0 }
+    counts.value = { unassigned: 0, open: 0, resolved: 0, breached: 0 }
     savedViews.value = []
     filter.value = 'all'
     assigneeFilter.value = 'any'
     priorityFilters.value = []
     tagFilters.value = []
     snoozedFilter.value = 'exclude'
+    responseFilter.value = 'all'
     if (next) loadAll()
   })
 
-  watch([filter, assigneeFilter, priorityFilters, tagFilters, snoozedFilter], () => loadConversations({ showLoader: true }), { deep: true })
+  watch([filter, assigneeFilter, priorityFilters, tagFilters, snoozedFilter, responseFilter], () => loadConversations({ showLoader: true }), { deep: true })
 
   function currentSavedFilters(): SavedInboxFilters {
     return {
@@ -627,6 +692,7 @@ export function useControlRoom() {
     priorityFilters.value = [...view.filters.priorities]
     tagFilters.value = [...view.filters.tag_ids]
     snoozedFilter.value = view.filters.snoozed
+    responseFilter.value = 'all'
   }
 
   async function saveCurrentView(name: string) {
@@ -670,6 +736,7 @@ export function useControlRoom() {
     priorityFilters,
     tagFilters,
     snoozedFilter,
+    responseFilter,
     workspaceTags,
     savedViews,
     currentSavedFilters,
@@ -691,6 +758,7 @@ export function useControlRoom() {
     resolve,
     reopen,
     organize,
+    updateCustomerProfile,
     reload: loadConversations
   }
 }

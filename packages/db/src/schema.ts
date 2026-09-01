@@ -182,6 +182,14 @@ export const visitors = pgTable('visitors', {
   visitorId: text('visitor_id').notNull(),
   name: text('name'),
   email: text('email'),
+  // Agent-maintained overrides stay separate from visitor-supplied identity.
+  // This prevents an internal edit from being presented as HMAC-verified data.
+  profileName: text('profile_name'),
+  profileEmail: text('profile_email'),
+  company: text('company'),
+  jobTitle: text('job_title'),
+  internalNote: text('internal_note'),
+  profileVersion: integer('profile_version').default(1).notNull(),
   // the host platform's own user id (via Perch.identify)
   externalId: text('external_id'),
   // true when the identify payload carried a valid HMAC signature
@@ -323,6 +331,15 @@ export const conversationTags = pgTable('conversation_tags', {
 }, t => [
   uniqueIndex('conversation_tags_uq').on(t.conversationId, t.tagId),
   index('conversation_tags_tag_idx').on(t.tagId)
+])
+
+/** Reusable workspace tags attached to a customer across every conversation. */
+export const visitorTags = pgTable('visitor_tags', {
+  visitorId: uuid('visitor_id').notNull().references(() => visitors.id, { onDelete: 'cascade' }),
+  tagId: uuid('tag_id').notNull().references(() => tags.id, { onDelete: 'cascade' })
+}, t => [
+  uniqueIndex('visitor_tags_uq').on(t.visitorId, t.tagId),
+  index('visitor_tags_tag_idx').on(t.tagId)
 ])
 
 /** The team lounge: one internal chat room per workspace (agents only, never visitors). */
