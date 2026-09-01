@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { ATTACHMENT_MAX_BYTES, ATTACHMENT_MIME_TYPES } from '@perch/shared'
 
 const authSchema = z.object({
   site_id: z.string().min(1).optional(),
@@ -33,8 +34,11 @@ export default defineEventHandler(async (event) => {
     .map(part => [part.name!, part.data.toString('utf8')]))
   const auth = authSchema.safeParse(fields)
   if (!auth.success || !file) throw createError({ statusCode: 400, statusMessage: 'Invalid upload' })
-  if (!file.type?.startsWith('image/') || file.data.length > ATTACHMENT_MAX_BYTES) {
-    throw createError({ statusCode: 413, statusMessage: 'Only images smaller than 1 MB are allowed' })
+  if (!file.type || !(ATTACHMENT_MIME_TYPES as readonly string[]).includes(file.type)) {
+    throw createError({ statusCode: 415, statusMessage: 'Use a JPG, PNG, GIF, or WebP image' })
+  }
+  if (file.data.length > ATTACHMENT_MAX_BYTES) {
+    throw createError({ statusCode: 413, statusMessage: 'Images must be smaller than 1 MB' })
   }
 
   const session = await getUserSession(event)
