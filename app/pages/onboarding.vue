@@ -198,8 +198,10 @@ async function finish() {
             <input
               ref="logoEl"
               type="file"
-              accept="image/*"
+              accept="image/jpeg,image/png,image/gif,image/webp"
               class="sr-only"
+              tabindex="-1"
+              aria-hidden="true"
               @change="onLogoPicked"
             >
             <button
