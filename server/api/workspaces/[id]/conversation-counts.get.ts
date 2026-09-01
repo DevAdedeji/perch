@@ -30,6 +30,7 @@ export default defineEventHandler(async (event) => {
     .from(conversations)
     .where(and(
       eq(conversations.workspaceId, workspaceId),
+      eq(conversations.isSpam, false),
       sql`(${conversations.snoozedUntil} is null or ${conversations.snoozedUntil} <= now())`,
       scope
     ))
@@ -39,8 +40,14 @@ export default defineEventHandler(async (event) => {
   for (const row of rows) result[row.status] = Number(row.total)
   const [response] = await db.select({ total: count() }).from(conversations).where(and(
     eq(conversations.workspaceId, workspaceId),
+    eq(conversations.isSpam, false),
     scope,
     breachedResponseSlaCondition(responseTargetMinutes)
   ))
-  return { ...result, breached: Number(response?.total ?? 0) }
+  const [spam] = await db.select({ total: count() }).from(conversations).where(and(
+    eq(conversations.workspaceId, workspaceId),
+    eq(conversations.isSpam, true),
+    scope
+  ))
+  return { ...result, spam: Number(spam?.total ?? 0), breached: Number(response?.total ?? 0) }
 })

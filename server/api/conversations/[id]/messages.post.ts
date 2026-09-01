@@ -24,6 +24,9 @@ export default defineEventHandler(async (event) => {
   if (result.data.attachment_url && !isOwnCloudinaryImageUrl(result.data.attachment_url, cloudinaryConfig().cloudName)) {
     throw createError({ statusCode: 400, statusMessage: 'Invalid attachment' })
   }
+  if (conversation.isSpam && !result.data.is_internal_note) {
+    throw createError({ statusCode: 409, statusMessage: 'Restore this conversation before replying' })
+  }
 
   // Mention recipients are deduplicated, cannot include the author, and must
   // belong to the same workspace. The validated ids are persisted with the

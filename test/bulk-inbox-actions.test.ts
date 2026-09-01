@@ -10,7 +10,8 @@ import { MAX_BULK_CONVERSATIONS } from '../packages/shared/src/constants'
 import {
   bulkConversationActionSchema,
   canBulkAssignConversation,
-  mutateConversationsInBulk
+  mutateConversationsInBulk,
+  type BulkConversationAction
 } from '../server/utils/bulk-conversations'
 
 const uuid = () => randomUUID()
@@ -73,9 +74,11 @@ describe.skipIf(!databaseUrl)('bulk inbox database integration', () => {
   const otherMemberId = uuid()
   const visitorOneId = uuid()
   const visitorTwoId = uuid()
+  const spamVisitorId = uuid()
   const otherVisitorId = uuid()
   const conversationOneId = uuid()
   const conversationTwoId = uuid()
+  const spamConversationId = uuid()
   const otherConversationId = uuid()
   const tagId = uuid()
 
@@ -97,11 +100,22 @@ describe.skipIf(!databaseUrl)('bulk inbox database integration', () => {
     await db.insert(schema.visitors).values([
       { id: visitorOneId, workspaceId, visitorId: `visitor_${uuid()}` },
       { id: visitorTwoId, workspaceId, visitorId: `visitor_${uuid()}` },
+      { id: spamVisitorId, workspaceId, visitorId: `visitor_${uuid()}` },
       { id: otherVisitorId, workspaceId: otherWorkspaceId, visitorId: `visitor_${uuid()}` }
     ])
     await db.insert(schema.conversations).values([
       { id: conversationOneId, workspaceId, visitorRef: visitorOneId, status: 'unassigned' },
       { id: conversationTwoId, workspaceId, visitorRef: visitorTwoId, status: 'unassigned' },
+      {
+        id: spamConversationId,
+        workspaceId,
+        visitorRef: spamVisitorId,
+        status: 'resolved',
+        resolvedAt: new Date(),
+        isSpam: true,
+        spamMarkedAt: new Date(),
+        spamMarkedByMemberId: adminMemberId
+      },
       { id: otherConversationId, workspaceId: otherWorkspaceId, visitorRef: otherVisitorId, status: 'unassigned' }
     ])
     await db.insert(schema.tags).values({ id: tagId, workspaceId, name: 'priority-customer' })
@@ -159,6 +173,33 @@ describe.skipIf(!databaseUrl)('bulk inbox database integration', () => {
 
     const rows = await db.select().from(schema.conversations).where(inArray(schema.conversations.id, [conversationOneId, conversationTwoId]))
     expect(rows.every(row => row.assignedAgentId === null && row.status === 'unassigned')).toBe(true)
+  })
+
+  it('requires the explicit restore flow before any bulk mutation of spam', async () => {
+    const actions: BulkConversationAction[] = [
+      { action: 'assign', conversation_ids: [spamConversationId], member_id: agentMemberId },
+      { action: 'resolve', conversation_ids: [spamConversationId] },
+      { action: 'reopen', conversation_ids: [spamConversationId] },
+      { action: 'add_tag', conversation_ids: [spamConversationId], tag_id: tagId },
+      { action: 'remove_tag', conversation_ids: [spamConversationId], tag_id: tagId }
+    ]
+
+    for (const input of actions) {
+      await expect(mutateConversationsInBulk(appDb, workspaceId, {
+        userId: adminUserId,
+        memberId: adminMemberId,
+        name: 'Bulk Admin'
+      }, input)).rejects.toMatchObject({ statusCode: 409 })
+    }
+
+    const conversation = await db.query.conversations.findFirst({
+      where: eq(schema.conversations.id, spamConversationId)
+    })
+    expect(conversation).toMatchObject({ isSpam: true, status: 'resolved', assignedAgentId: null })
+    const appliedTags = await db.query.conversationTags.findMany({
+      where: eq(schema.conversationTags.conversationId, spamConversationId)
+    })
+    expect(appliedTags).toHaveLength(0)
   })
 
   it('records only real resolutions and reopens assigned and pooled work sensibly', async () => {

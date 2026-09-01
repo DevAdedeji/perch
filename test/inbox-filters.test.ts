@@ -17,7 +17,8 @@ describe('inbox filters', () => {
       priorities: [],
       tagIds: [],
       snoozed: 'exclude',
-      response: 'all'
+      response: 'all',
+      spam: 'exclude'
     })
   })
 

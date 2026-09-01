@@ -4,6 +4,7 @@ import type { ConversationPriority, ConversationStatus, MessageDTO, ResponseSlaD
 export interface InboxItem {
   id: string
   status: ConversationStatus
+  isSpam: boolean
   assignedAgentId: string | null
   collaboratorMemberIds: string[]
   priority: ConversationPriority
@@ -59,6 +60,7 @@ export interface VisitorContext {
     visitor_id: string
     external_id: string | null
     identity_verified: boolean
+    messaging_blocked: boolean
     first_seen_at: string
     last_seen_at: string
     page_url: string | null
@@ -99,7 +101,7 @@ export interface BulkConversationResult {
   unchanged_count: number
 }
 
-export type InboxFilter = 'all' | ConversationStatus
+export type InboxFilter = 'all' | ConversationStatus | 'spam'
 
 /**
  * Drives the Control Room: loads the inbox + a selected thread over REST, wires
@@ -143,7 +145,7 @@ export function useControlRoom() {
   const visitorDraft = ref('')
 
   // per-status counts for the tabs — fetched independently of the active filter
-  const counts = useState('cr:counts', () => ({ unassigned: 0, open: 0, resolved: 0, breached: 0 }))
+  const counts = useState('cr:counts', () => ({ unassigned: 0, open: 0, resolved: 0, spam: 0, breached: 0 }))
 
   // composer `/shortcut` templates + the context panel for the open thread
   const canned = useState<CannedResponse[]>('cr:canned', () => [])
@@ -184,7 +186,8 @@ export function useControlRoom() {
   }
 
   function appendFilters(params: URLSearchParams) {
-    if (filter.value !== 'all') params.set('status', filter.value)
+    if (filter.value === 'spam') params.set('spam', 'only')
+    else if (filter.value !== 'all') params.set('status', filter.value)
     if (assigneeFilter.value !== 'any') params.set('assignee', assigneeFilter.value)
     if (priorityFilters.value.length) params.set('priority', priorityFilters.value.join(','))
     if (tagFilters.value.length) params.set('tag', tagFilters.value.join(','))
@@ -193,7 +196,8 @@ export function useControlRoom() {
   }
 
   function matchesFilters(conversation: InboxItem) {
-    if (filter.value !== 'all' && conversation.status !== filter.value) return false
+    if (filter.value === 'spam' ? !conversation.isSpam : conversation.isSpam) return false
+    if (filter.value !== 'all' && filter.value !== 'spam' && conversation.status !== filter.value) return false
     if (priorityFilters.value.length && !priorityFilters.value.includes(conversation.priority)) return false
     if (assigneeFilter.value === 'unassigned' && conversation.assignedAgentId) return false
     if (assigneeFilter.value === 'me' && conversation.assignedAgentId !== myMemberId.value) return false
@@ -250,7 +254,7 @@ export function useControlRoom() {
 
   async function loadCounts() {
     if (!workspaceId.value) return
-    counts.value = await $fetch<{ unassigned: number, open: number, resolved: number, breached: number }>(
+    counts.value = await $fetch<{ unassigned: number, open: number, resolved: number, spam: number, breached: number }>(
       `/api/workspaces/${workspaceId.value}/conversation-counts`
     )
   }
@@ -427,6 +431,18 @@ export function useControlRoom() {
   async function reopen(id: string) {
     await $fetch(`/api/conversations/${id}/reopen`, { method: 'POST' })
   }
+  async function markSpam(id: string) {
+    const result = await $fetch<{ visitor_blocked: boolean }>(`/api/conversations/${id}/spam`, { method: 'POST' })
+    if (activeId.value === id) deselect()
+    await Promise.all([loadConversations(), loadCounts()])
+    return result
+  }
+  async function restoreSpam(id: string) {
+    const result = await $fetch<{ visitor_blocked: boolean }>(`/api/conversations/${id}/spam`, { method: 'DELETE' })
+    if (activeId.value === id) deselect()
+    await Promise.all([loadConversations(), loadCounts()])
+    return result
+  }
   async function organize(id: string, changes: { priority?: ConversationPriority, snoozed_until?: string | null }) {
     const { conversation } = await $fetch<{ conversation: { priority: ConversationPriority, snoozed_until: string | null } }>(`/api/conversations/${id}/organize`, {
       method: 'PATCH',
@@ -499,6 +515,7 @@ export function useControlRoom() {
           const assignmentChanged = c.assignedAgentId !== p.assigned_agent_id
           const statusChanged = c.status !== p.status
           c.status = p.status
+          c.isSpam = p.is_spam
           c.assignedAgentId = p.assigned_agent_id
           c.collaboratorMemberIds = p.collaborator_member_ids
           c.priority = p.priority
@@ -685,7 +702,7 @@ export function useControlRoom() {
     activeId.value = null
     messages.value = []
     conversations.value = []
-    counts.value = { unassigned: 0, open: 0, resolved: 0, breached: 0 }
+    counts.value = { unassigned: 0, open: 0, resolved: 0, spam: 0, breached: 0 }
     savedViews.value = []
     filter.value = 'all'
     assigneeFilter.value = 'any'
@@ -780,6 +797,8 @@ export function useControlRoom() {
     claim,
     resolve,
     reopen,
+    markSpam,
+    restoreSpam,
     organize,
     updateCustomerProfile,
     reload: loadConversations

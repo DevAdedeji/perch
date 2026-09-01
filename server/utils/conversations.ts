@@ -18,7 +18,8 @@ export function serializeConversation(c: Conversation): ConversationDTO {
     last_message_at: c.lastMessageAt.toISOString(),
     created_at: c.createdAt.toISOString(),
     updated_at: c.updatedAt.toISOString(),
-    resolved_at: c.resolvedAt ? c.resolvedAt.toISOString() : null
+    resolved_at: c.resolvedAt ? c.resolvedAt.toISOString() : null,
+    is_spam: c.isSpam
   }
 }
 
@@ -118,6 +119,8 @@ export async function ingestVisitorMessage(input: IncomingVisitorMessage) {
           : {})
       }
     }).returning()
+
+    await assertVisitorCanMessage(visitor!, tx)
 
     const existing = await tx.query.conversations.findFirst({
       where: eq(conversations.visitorRef, visitor!.id),
@@ -257,6 +260,9 @@ export async function addAgentMessage(input: AgentMessageInput) {
     const [current] = await tx.select().from(conversations)
       .where(eq(conversations.id, input.conversationId)).for('update')
     if (!current) throw createError({ statusCode: 404, statusMessage: 'Conversation not found' })
+    if (current.isSpam && !input.isInternalNote) {
+      throw createError({ statusCode: 409, statusMessage: 'Restore this conversation before replying' })
+    }
     const collaboratorMemberIds = input.isInternalNote && input.mentionRecipientIds?.length
       ? [...new Set([...current.collaboratorMemberIds, ...input.mentionRecipientIds])]
       : current.collaboratorMemberIds
@@ -341,6 +347,9 @@ export async function startAgentConversation(input: StartConversationInput) {
       .where(and(eq(visitors.id, input.visitorRef), eq(visitors.workspaceId, input.workspaceId)))
       .returning()
     if (!visitor) throw createError({ statusCode: 404, statusMessage: 'Visitor not found' })
+    if (await isVisitorMessagingBlocked(visitor, tx)) {
+      throw createError({ statusCode: 409, statusMessage: 'Messaging is disabled for this visitor' })
+    }
 
     const existing = await tx.query.conversations.findFirst({
       where: and(eq(conversations.visitorRef, input.visitorRef), ne(conversations.status, 'resolved')),
@@ -554,7 +563,8 @@ export function publishConversationUpdate(c: Conversation, options: { previousAs
     collaborator_member_ids: c.collaboratorMemberIds,
     priority: c.priority,
     snoozed_until: c.snoozedUntil?.toISOString() ?? null,
-    last_message_at: c.lastMessageAt.toISOString()
+    last_message_at: c.lastMessageAt.toISOString(),
+    is_spam: c.isSpam
   }
   const workspaceChannel = channels.workspace(c.workspaceId)
   publishFiltered(workspaceChannel, { type: 'conversation.updated', payload }, inboxScope(c.assignedAgentId, c.collaboratorMemberIds))

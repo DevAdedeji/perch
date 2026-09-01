@@ -215,6 +215,9 @@ export const conversations = pgTable('conversations', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+  isSpam: boolean('is_spam').default(false).notNull(),
+  spamMarkedAt: timestamp('spam_marked_at', { withTimezone: true }),
+  spamMarkedByMemberId: uuid('spam_marked_by_member_id').references(() => workspaceMembers.id, { onDelete: 'set null' }),
   // CSAT: the visitor's post-resolve rating (one per conversation, overwritable)
   csatRating: text('csat_rating', { enum: ['good', 'bad'] }),
   csatComment: text('csat_comment'),
@@ -227,7 +230,36 @@ export const conversations = pgTable('conversations', {
   // Defense in depth for concurrent widget and agent-initiated starts.
   uniqueIndex('conversations_visitor_active_uq')
     .on(t.visitorRef)
-    .where(sql`${t.status} in ('unassigned', 'open')`)
+    .where(sql`${t.status} in ('unassigned', 'open')`),
+  index('conversations_workspace_spam_recency_idx').on(t.workspaceId, t.isSpam, t.lastMessageAt),
+  check(
+    'conversations_spam_state_ck',
+    sql`(${t.isSpam} = true and ${t.spamMarkedAt} is not null) or (${t.isSpam} = false and ${t.spamMarkedAt} is null)`
+  )
+])
+
+/** Reversible workspace-local messaging blocks. The target row keeps PII out of block records. */
+export const visitorBlocks = pgTable('visitor_blocks', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  visitorRef: uuid('visitor_ref').notNull().references(() => visitors.id, { onDelete: 'cascade' }),
+  sourceConversationId: uuid('source_conversation_id').references(() => conversations.id, { onDelete: 'set null' }),
+  blockedByMemberId: uuid('blocked_by_member_id').references(() => workspaceMembers.id, { onDelete: 'set null' }),
+  blockedAt: timestamp('blocked_at', { withTimezone: true }).defaultNow().notNull(),
+  unblockedByMemberId: uuid('unblocked_by_member_id').references(() => workspaceMembers.id, { onDelete: 'set null' }),
+  unblockedAt: timestamp('unblocked_at', { withTimezone: true })
+}, t => [
+  uniqueIndex('visitor_blocks_active_visitor_uq')
+    .on(t.visitorRef)
+    .where(sql`${t.unblockedAt} is null`),
+  index('visitor_blocks_workspace_recency_idx').on(t.workspaceId, t.blockedAt),
+  index('visitor_blocks_workspace_active_idx')
+    .on(t.workspaceId, t.visitorRef)
+    .where(sql`${t.unblockedAt} is null`),
+  check(
+    'visitor_blocks_unblocked_state_ck',
+    sql`${t.unblockedAt} is not null or ${t.unblockedByMemberId} is null`
+  )
 ])
 
 /** Saved inbox filters are private to one workspace membership. */
@@ -617,6 +649,8 @@ export type Visitor = typeof visitors.$inferSelect
 export type NewVisitor = typeof visitors.$inferInsert
 export type Conversation = typeof conversations.$inferSelect
 export type NewConversation = typeof conversations.$inferInsert
+export type VisitorBlock = typeof visitorBlocks.$inferSelect
+export type NewVisitorBlock = typeof visitorBlocks.$inferInsert
 export type InboxSavedView = typeof inboxSavedViews.$inferSelect
 export type NewInboxSavedView = typeof inboxSavedViews.$inferInsert
 export type AutomationRule = typeof automationRules.$inferSelect

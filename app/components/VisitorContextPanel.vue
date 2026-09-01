@@ -147,6 +147,17 @@ const pageHost = computed(() => {
           />
           Verified site identity
         </span>
+        <span
+          v-if="context?.visitor.messaging_blocked"
+          class="inline-flex shrink-0 items-center gap-1 rounded-full bg-red-500/10 px-1.5 py-0.5 text-[10px] font-medium text-red-700 ring-1 ring-red-500/25 dark:text-red-400"
+          title="This visitor cannot send new messages to this workspace."
+        >
+          <UIcon
+            name="i-lucide-shield-ban"
+            class="size-3"
+          />
+          Messaging blocked
+        </span>
       </div>
     </div>
 

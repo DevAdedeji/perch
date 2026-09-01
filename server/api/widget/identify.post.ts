@@ -60,6 +60,7 @@ export default defineEventHandler(async (event) => {
     ...(name ? { name } : {}),
     ...(email ? { email } : {})
   }).where(eq(visitors.id, visitor.id)).returning()
+  const messagingAvailable = updated ? !await isVisitorMessagingBlocked(updated) : true
 
   // keep the live roster's identity snapshot fresh
   if (updated) {
@@ -68,14 +69,16 @@ export default defineEventHandler(async (event) => {
       email: updated.email,
       verified: updated.identityVerified
     })
-    const conversation = await db.query.conversations.findFirst({
-      where: and(
-        eq(conversations.workspaceId, workspace.id),
-        eq(conversations.visitorRef, updated.id),
-        ne(conversations.status, 'resolved')
-      ),
-      orderBy: desc(conversations.lastMessageAt)
-    })
+    const conversation = messagingAvailable
+      ? await db.query.conversations.findFirst({
+          where: and(
+            eq(conversations.workspaceId, workspace.id),
+            eq(conversations.visitorRef, updated.id),
+            ne(conversations.status, 'resolved')
+          ),
+          orderBy: desc(conversations.lastMessageAt)
+        })
+      : null
     if (conversation) {
       try {
         const automated = await runEntryAutomations(conversation, updated)
@@ -94,5 +97,9 @@ export default defineEventHandler(async (event) => {
     }
   }
 
-  return { ok: true, verified }
+  return {
+    ok: true,
+    verified,
+    messaging_available: messagingAvailable
+  }
 })

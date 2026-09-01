@@ -86,6 +86,12 @@ export interface ConversationUpdatedPayload {
   priority: ConversationPriority
   snoozed_until: string | null
   last_message_at: string
+  is_spam: boolean
+}
+
+export interface VisitorMessagingPayload {
+  /** Privacy-safe availability only; no moderation reason crosses into the widget. */
+  available: boolean
 }
 
 export interface ConversationRemovedPayload {
@@ -209,6 +215,7 @@ export type ServerEvent = | { type: 'message.new', payload: MessageDTO }
   | { type: 'visitor.page', payload: VisitorPageChangedPayload }
   | { type: 'trigger.fire', payload: TriggerFirePayload }
   | { type: 'visitor.conversation.started', payload: ConversationStartedPayload }
+  | { type: 'visitor.messaging', payload: VisitorMessagingPayload }
 
 export type ServerEventType = ServerEvent['type']
 

@@ -27,6 +27,7 @@ export interface InboxFilters {
   tagIds: string[]
   snoozed: 'exclude' | 'include' | 'only'
   response: 'all' | 'breached'
+  spam: 'exclude' | 'only'
 }
 
 export function parseInboxFilters(query: Record<string, unknown>) {
@@ -36,19 +37,21 @@ export function parseInboxFilters(query: Record<string, unknown>) {
     priorities: z.preprocess(value => unique(list(value)), z.array(z.enum(CONVERSATION_PRIORITIES)).max(CONVERSATION_PRIORITIES.length)),
     tagIds: z.preprocess(value => unique(list(value)), z.array(uuid).max(10)),
     snoozed: z.preprocess(value => typeof value === 'string' && value ? value : 'exclude', z.enum(['exclude', 'include', 'only'])),
-    response: z.preprocess(value => typeof value === 'string' && value ? value : 'all', z.enum(['all', 'breached']))
+    response: z.preprocess(value => typeof value === 'string' && value ? value : 'all', z.enum(['all', 'breached'])),
+    spam: z.preprocess(value => typeof value === 'string' && value ? value : 'exclude', z.enum(['exclude', 'only']))
   }).safeParse({
     status: query.status,
     assignee: query.assignee,
     priorities: query.priority,
     tagIds: query.tag,
     snoozed: query.snoozed,
-    response: query.response
+    response: query.response,
+    spam: query.spam
   })
 }
 
 export const savedInboxFiltersSchema: z.ZodType<SavedInboxFilters> = z.object({
-  status: z.union([z.literal('all'), z.enum(CONVERSATION_STATUSES)]),
+  status: z.union([z.literal('all'), z.literal('spam'), z.enum(CONVERSATION_STATUSES)]),
   assignee: assigneeSchema,
   priorities: z.array(z.enum(CONVERSATION_PRIORITIES)).max(CONVERSATION_PRIORITIES.length).transform(unique),
   tag_ids: z.array(uuid).max(10).transform(unique),

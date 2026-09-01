@@ -8,6 +8,7 @@ const props = defineProps<{
   members: TeamMember[]
   currentMemberId: string | null
   cannedResponses: CannedResponse[]
+  publicReplyDisabled?: boolean
   sendReply: (
     content: string,
     isInternalNote?: boolean,
@@ -23,7 +24,7 @@ const props = defineProps<{
 
 const toast = useToast()
 const reply = ref('')
-const internalNote = ref(false)
+const internalNote = ref(props.publicReplyDisabled ?? false)
 const composerElement = ref<{ textareaRef?: HTMLTextAreaElement } | null>(null)
 
 interface HelpSuggestion {
@@ -91,6 +92,9 @@ function suggestArticle(article: HelpSuggestion) {
 
 watch(internalNote, (enabled) => {
   if (enabled) articlePickerOpen.value = false
+})
+watch(() => props.publicReplyDisabled, (disabled) => {
+  if (disabled) internalNote.value = true
 })
 
 const mentionIndex = ref(0)
@@ -203,7 +207,7 @@ async function send() {
 
   pickedMentions.clear()
   reply.value = ''
-  internalNote.value = false
+  internalNote.value = props.publicReplyDisabled ?? false
   await props.sendReply(text, note, undefined, mentionIds)
 }
 
@@ -235,6 +239,16 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="shrink-0 border-t border-default bg-default p-3">
+    <p
+      v-if="publicReplyDisabled"
+      class="mb-2 flex items-center gap-1.5 text-xs text-muted"
+    >
+      <UIcon
+        name="i-lucide-shield-ban"
+        class="size-3.5 text-red-500"
+      />
+      Visitor replies are blocked. You can still leave a private note.
+    </p>
     <div class="relative">
       <div
         v-if="articlePickerOpen && !internalNote"
@@ -435,6 +449,7 @@ onBeforeUnmount(() => {
           <USwitch
             v-model="internalNote"
             size="sm"
+            :disabled="publicReplyDisabled"
           />
           <span
             class="text-xs"

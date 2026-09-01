@@ -67,6 +67,7 @@ export interface ConversationDTO {
   created_at: string
   updated_at: string
   resolved_at: string | null
+  is_spam: boolean
 }
 
 export type ResponseSlaStatus = 'due' | 'approaching' | 'breached' | 'answered' | 'paused'
@@ -83,7 +84,7 @@ export interface ResponseSlaDTO {
 export type InboxSnoozedFilter = 'exclude' | 'include' | 'only'
 
 export interface SavedInboxFilters {
-  status: ConversationStatus | 'all'
+  status: ConversationStatus | 'all' | 'spam'
   assignee: 'any' | 'me' | 'unassigned' | string
   priorities: ConversationPriority[]
   tag_ids: string[]

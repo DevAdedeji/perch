@@ -52,6 +52,7 @@ export default defineEventHandler(async (event) => {
     }
     const { visitor } = await requireVisitorSession(event, site_id, visitor_session)
     assertRateLimit('attach-upload:visitor', visitor.id, { max: 10, windowMs: 60 * 1000 })
+    await assertVisitorCanMessage(visitor)
   }
 
   const { cloudName, apiKey, apiSecret } = cloudinaryConfig()
