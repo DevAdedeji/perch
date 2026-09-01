@@ -51,6 +51,7 @@ describe('public help API boundary', () => {
 
   it('keeps agent suggestions authenticated, workspace scoped, and published only', () => {
     expect(agentSearchSource).toContain('requireMembership(event, workspaceId)')
+    expect(agentSearchSource).toContain(`assertRateLimit('article-search:member', member.id`)
     expect(agentSearchSource).toContain('listPublishedHelpSuggestions(db, workspaceId')
     expect(serviceSource).toContain(`eq(articles.status, 'published')`)
     expect(serviceSource).toContain('.limit(AGENT_HELP_SUGGESTION_LIMIT)')

@@ -88,6 +88,10 @@ function suggestArticle(article: HelpSuggestion) {
   focusComposer()
 }
 
+watch(internalNote, (enabled) => {
+  if (enabled) articlePickerOpen.value = false
+})
+
 const mentionIndex = ref(0)
 const pickedMentions = new Map<string, string>()
 const currentMention = computed(() => internalNote.value ? activeMention(reply.value) : null)
@@ -405,6 +409,7 @@ onBeforeUnmount(() => {
             @change="onAttachmentPicked"
           >
           <UButton
+            v-if="!internalNote"
             size="sm"
             color="neutral"
             variant="ghost"

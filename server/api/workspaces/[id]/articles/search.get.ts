@@ -7,7 +7,8 @@ const querySchema = z.object({
 
 export default defineEventHandler(async (event) => {
   const workspaceId = getRouterParam(event, 'id')!
-  await requireMembership(event, workspaceId)
+  const { member } = await requireMembership(event, workspaceId)
+  assertRateLimit('article-search:member', member.id, { max: 120, windowMs: 60 * 1000 })
 
   const query = await getValidatedQuery(event, value => querySchema.safeParse(value))
   if (!query.success) {
