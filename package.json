@@ -20,7 +20,7 @@
     "@sentry/nuxt": "^10.64.0",
     "@vueuse/motion": "^3.0.3",
     "nuxt": "^4.5.2",
-    "nuxt-auth-utils": "^0.5.29",
+    "nuxt-auth-utils": "^0.5.30",
     "tailwindcss": "^4.3.1",
     "zod": "^4.4.3"
   },
