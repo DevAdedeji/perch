@@ -10,6 +10,10 @@ export default defineEventHandler(async (event) => {
   }
   const { name, widgetPrimaryColor, logoUrl } = result.data
 
+  if (logoUrl && !isOwnCloudinaryImageUrl(logoUrl, cloudinaryConfig().cloudName)) {
+    throw createError({ statusCode: 400, statusMessage: 'Invalid logo upload' })
+  }
+
   const db = useDb()
 
   // insert with a fresh site_id, retrying on the (rare) unique collision
