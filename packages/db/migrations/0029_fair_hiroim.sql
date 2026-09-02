@@ -1,4 +1,25 @@
 CREATE TYPE "public"."billing_reconciliation_status" AS ENUM('pending', 'processing', 'retrying', 'idle', 'failed');--> statement-breakpoint
+ALTER TABLE "workspace_invoices" ADD COLUMN "checkout_claim_token" text;--> statement-breakpoint
+ALTER TABLE "workspace_invoices" ADD COLUMN "checkout_claimed_at" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "workspace_invoices" ADD COLUMN "reconcile_until" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "workspace_invoices" ADD COLUMN "checkout_closed_at" timestamp with time zone;--> statement-breakpoint
+UPDATE "workspace_invoices" SET "checkout_closed_at" = "updated_at";--> statement-breakpoint
+WITH "open_checkout" AS (
+	SELECT DISTINCT ON ("invoice"."workspace_id") "invoice"."id"
+	FROM "workspace_invoices" AS "invoice"
+	LEFT JOIN "workspace_subscriptions" AS "subscription"
+		ON "subscription"."workspace_id" = "invoice"."workspace_id"
+		AND "subscription"."last_invoice_reference" = "invoice"."reference"
+	WHERE "invoice"."status" = 'pending'
+		OR ("invoice"."status" = 'paid' AND "subscription"."workspace_id" IS NULL)
+	ORDER BY "invoice"."workspace_id", "invoice"."created_at" DESC
+)
+UPDATE "workspace_invoices" AS "invoice"
+SET "checkout_closed_at" = NULL,
+	"reconcile_until" = now() + interval '24 hours'
+FROM "open_checkout"
+WHERE "invoice"."id" = "open_checkout"."id";--> statement-breakpoint
+CREATE UNIQUE INDEX "workspace_invoices_open_checkout_uq" ON "workspace_invoices" USING btree ("workspace_id") WHERE "workspace_invoices"."checkout_closed_at" is null;--> statement-breakpoint
 CREATE TABLE "billing_reconciliation_jobs" (
 	"workspace_id" uuid PRIMARY KEY NOT NULL,
 	"status" "billing_reconciliation_status" DEFAULT 'pending' NOT NULL,
@@ -23,5 +44,5 @@ WHERE "bachs_subscription_id" IS NOT NULL
 UNION
 SELECT DISTINCT "workspace_id", 'pending'::billing_reconciliation_status, now()
 FROM "workspace_invoices"
-WHERE "status" = 'pending' AND "bachs_checkout_id" IS NOT NULL
+WHERE "checkout_closed_at" IS NULL AND "bachs_checkout_id" IS NOT NULL
 ON CONFLICT ("workspace_id") DO NOTHING;

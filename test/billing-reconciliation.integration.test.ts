@@ -4,7 +4,7 @@ import { drizzle } from '../packages/db/node_modules/drizzle-orm/postgres-js/ind
 import { eq } from '../packages/db/node_modules/drizzle-orm/index.js'
 import postgres from '../packages/db/node_modules/postgres/src/index.js'
 import * as schema from '../packages/db/src/schema'
-import { applyWorkspaceSubscriptionState, reconcileWorkspaceBilling, reconcileWorkspaceSubscriptionEvent, runBillingReconciliationSweep, startWorkspaceCheckout, workspaceEntitlement } from '../server/utils/billing'
+import { applyWorkspaceSubscriptionState, cancelWorkspacePlan, reconcileWorkspaceBilling, reconcileWorkspaceSubscriptionEvent, runBillingReconciliationSweep, startWorkspaceCheckout, workspaceBillingCustomer, workspaceEntitlement } from '../server/utils/billing'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
 
@@ -15,8 +15,9 @@ describe.skipIf(!databaseUrl)('billing reconciliation database integration', () 
   const checkoutId = `checkout_${randomUUID()}`
   const subscriptionId = `subscription_${randomUUID()}`
   let reference = ''
-  let checkoutStatus: 'succeeded' | 'refunded' = 'succeeded'
+  let checkoutStatus: 'succeeded' | 'failed' | 'refunded' = 'succeeded'
   let checkoutAmount = '9.00'
+  let checkoutSubscriptionId: string | null = null
   let providerRequests: string[] = []
 
   function checkoutPayload() {
@@ -27,6 +28,7 @@ describe.skipIf(!databaseUrl)('billing reconciliation database integration', () 
       amount: checkoutAmount,
       currency: 'USD',
       reference,
+      subscription_id: checkoutSubscriptionId,
       charge: {
         payment_id: `payment_${checkoutId}`,
         status: checkoutStatus,
@@ -69,11 +71,16 @@ describe.skipIf(!databaseUrl)('billing reconciliation database integration', () 
     reference = `invoice_${randomUUID()}`
     checkoutStatus = 'succeeded'
     checkoutAmount = '9.00'
+    checkoutSubscriptionId = null
     providerRequests = []
-    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input)
       providerRequests.push(url)
-      const payload = url.includes('/checkout-sessions/') ? checkoutPayload() : subscriptionPayload()
+      const payload = url.includes('/checkout-sessions/')
+        ? checkoutPayload()
+        : init?.method === 'DELETE'
+          ? { ...subscriptionPayload(), cancel_at_period_end: true }
+          : subscriptionPayload()
       return new Response(JSON.stringify(payload), { status: 200, headers: { 'Content-Type': 'application/json' } })
     }))
   })
@@ -124,6 +131,149 @@ describe.skipIf(!databaseUrl)('billing reconciliation database integration', () 
     expect(second.invoicesChanged).toBe(0)
     expect(providerRequests).toHaveLength(4)
     expect((await workspaceEntitlement(workspaceId)).isPro).toBe(true)
+  })
+
+  it('serializes distinct checkout requests before making one provider checkout call', async () => {
+    let checkoutPosts = 0
+    let releaseCheckout!: () => void
+    let checkoutStarted!: () => void
+    const started = new Promise<void>((resolve) => {
+      checkoutStarted = resolve
+    })
+    const released = new Promise<void>((resolve) => {
+      releaseCheckout = resolve
+    })
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input)
+      providerRequests.push(url)
+      if (url.includes('/products')) {
+        return new Response(JSON.stringify({
+          items: [{ id: 'product_monthly', metadata: { perch_plan: 'workspace_pro_monthly' } }]
+        }), { status: 200 })
+      }
+      if (url.endsWith('/checkout-sessions') && init?.method === 'POST') {
+        checkoutPosts++
+        const body = JSON.parse(String(init.body)) as { reference: string }
+        reference = body.reference
+        checkoutStarted()
+        await released
+        return new Response(JSON.stringify({
+          checkout_id: checkoutId,
+          checkout_url: 'https://checkout.bachs.io/session/serialized',
+          reference
+        }), { status: 200 })
+      }
+      return new Response(JSON.stringify(checkoutPayload()), { status: 200 })
+    }))
+
+    const first = startWorkspaceCheckout({
+      workspaceId,
+      interval: 'monthly',
+      requestId: randomUUID(),
+      customer: { email: 'verified@example.com', name: 'Verified Admin' },
+      origin: 'https://staging.useperch.xyz'
+    })
+    await started
+    await expect(startWorkspaceCheckout({
+      workspaceId,
+      interval: 'monthly',
+      requestId: randomUUID(),
+      customer: { email: 'verified@example.com', name: 'Verified Admin' },
+      origin: 'https://staging.useperch.xyz'
+    })).rejects.toThrow('already being prepared')
+    expect(checkoutPosts).toBe(1)
+    releaseCheckout()
+    await expect(first).resolves.toMatchObject({
+      checkoutUrl: 'https://checkout.bachs.io/session/serialized'
+    })
+    expect(checkoutPosts).toBe(1)
+    expect(await db.query.workspaceInvoices.findMany({
+      where: eq(schema.workspaceInvoices.workspaceId, workspaceId)
+    })).toHaveLength(1)
+  })
+
+  it('requires the paying admin email to be verified before checkout', async () => {
+    const userId = randomUUID()
+    await db.insert(schema.users).values({
+      id: userId,
+      email: `unverified-${userId}@example.com`,
+      name: 'Unverified Admin'
+    })
+    await db.insert(schema.workspaceMembers).values({
+      workspaceId,
+      userId,
+      role: 'admin'
+    })
+    try {
+      await expect(workspaceBillingCustomer(workspaceId, userId)).rejects.toThrow('Verify your email')
+      await db.update(schema.users).set({ emailVerifiedAt: new Date() }).where(eq(schema.users.id, userId))
+      await expect(workspaceBillingCustomer(workspaceId, userId)).resolves.toMatchObject({
+        email: `unverified-${userId}@example.com`,
+        name: 'Unverified Admin'
+      })
+    } finally {
+      await db.delete(schema.workspaceMembers).where(eq(schema.workspaceMembers.userId, userId))
+      await db.delete(schema.users).where(eq(schema.users.id, userId))
+    }
+  })
+
+  it('reports honestly when a manual refresh has no provider resource to check', async () => {
+    await expect(reconcileWorkspaceBilling(workspaceId)).rejects.toThrow(
+      'There is no Bachs checkout or subscription connected'
+    )
+    expect(providerRequests).toHaveLength(0)
+    expect(await db.query.billingReconciliationJobs.findFirst({
+      where: eq(schema.billingReconciliationJobs.workspaceId, workspaceId)
+    })).toMatchObject({ status: 'idle', attempts: 0 })
+  })
+
+  it('recovers a failed checkout that later becomes paid when its webhook was missed', async () => {
+    await insertInvoice('failed')
+    await db.update(schema.workspaceInvoices).set({
+      reconcileUntil: new Date('2026-09-03T00:00:00Z')
+    }).where(eq(schema.workspaceInvoices.reference, reference))
+    checkoutStatus = 'failed'
+
+    const failed = await reconcileWorkspaceBilling(workspaceId, {
+      now: new Date('2026-09-02T00:00:00Z')
+    })
+    expect(failed.nextCheckAt).toBe('2026-09-02T01:00:00.000Z')
+    expect(failed.awaitingSubscription).toBe(false)
+
+    checkoutStatus = 'succeeded'
+    checkoutSubscriptionId = subscriptionId
+    const recovered = await reconcileWorkspaceBilling(workspaceId, {
+      now: new Date('2026-09-02T02:00:00Z')
+    })
+    expect(recovered).toMatchObject({
+      invoicesChanged: 1,
+      subscriptionChecked: true,
+      subscriptionUpdated: true,
+      providerResourcesChecked: 2,
+      awaitingSubscription: false
+    })
+    expect((await workspaceEntitlement(workspaceId)).isPro).toBe(true)
+  })
+
+  it('stops polling a terminal checkout after its late-success window closes', async () => {
+    await insertInvoice('failed')
+    await db.update(schema.workspaceInvoices).set({
+      reconcileUntil: new Date('2026-09-02T01:00:00Z')
+    }).where(eq(schema.workspaceInvoices.reference, reference))
+    checkoutStatus = 'failed'
+
+    const result = await reconcileWorkspaceBilling(workspaceId, {
+      now: new Date('2026-09-02T01:00:01Z')
+    })
+    expect(result.nextCheckAt).toBeNull()
+    const invoice = await db.query.workspaceInvoices.findFirst({
+      where: eq(schema.workspaceInvoices.reference, reference)
+    })
+    expect(invoice?.checkoutClosedAt).toBeInstanceOf(Date)
+    const job = await db.query.billingReconciliationJobs.findFirst({
+      where: eq(schema.billingReconciliationJobs.workspaceId, workspaceId)
+    })
+    expect(job?.status).toBe('idle')
   })
 
   it('confirms payment but keeps Pro off when the provider subscription identity is unavailable', async () => {
@@ -200,6 +350,40 @@ describe.skipIf(!databaseUrl)('billing reconciliation database integration', () 
     expect(providerRequests).toHaveLength(0)
   })
 
+  it('rejects cancellation metadata for a different workspace without changing local renewal', async () => {
+    await insertInvoice('paid')
+    await db.insert(schema.workspaceSubscriptions).values({
+      workspaceId,
+      status: 'active',
+      interval: 'monthly',
+      currentPeriodEnd: new Date('2026-10-01T00:00:00Z'),
+      bachsSubscriptionId: subscriptionId,
+      lastInvoiceReference: reference
+    })
+    const provider = vi.fn(async () => new Response(JSON.stringify({
+      ...subscriptionPayload(),
+      cancel_at_period_end: true,
+      metadata: { ...subscriptionPayload().metadata, workspaceId: randomUUID() }
+    }), { status: 200 }))
+    vi.stubGlobal('fetch', provider)
+
+    await expect(cancelWorkspacePlan(workspaceId)).rejects.toThrow(
+      'cancellation did not match this workspace billing record'
+    )
+    expect(await db.query.workspaceSubscriptions.findFirst({
+      where: eq(schema.workspaceSubscriptions.workspaceId, workspaceId)
+    })).toMatchObject({ cancelAtPeriodEnd: false, status: 'active' })
+    expect(provider).toHaveBeenCalledWith(
+      expect.any(URL),
+      expect.objectContaining({
+        method: 'DELETE',
+        headers: expect.objectContaining({
+          'Idempotency-Key': `perch-cancel-${workspaceId}-${subscriptionId}`
+        })
+      })
+    )
+  })
+
   it('replaces an expired subscription only after a newer canonical checkout lineage succeeds', async () => {
     const oldReference = `old_${randomUUID()}`
     await db.insert(schema.workspaceInvoices).values({
@@ -210,6 +394,7 @@ describe.skipIf(!databaseUrl)('billing reconciliation database integration', () 
       amountCents: 900,
       currency: 'USD',
       bachsCheckoutId: `old_checkout_${randomUUID()}`,
+      checkoutClosedAt: new Date('2026-08-01T00:00:00Z'),
       paidAt: new Date('2026-07-01T00:00:00Z'),
       periodStart: new Date('2026-07-01T00:00:00Z'),
       periodEnd: new Date('2026-08-01T00:00:00Z'),
@@ -247,6 +432,15 @@ describe.skipIf(!databaseUrl)('billing reconciliation database integration', () 
     })
     const outcome = await applyWorkspaceSubscriptionState(subscriptionPayload())
     expect(outcome).toMatchObject({ applied: false, reason: 'stale-invoice' })
+    expect(vi.mocked(fetch)).toHaveBeenCalledWith(
+      expect.any(URL),
+      expect.objectContaining({
+        method: 'DELETE',
+        headers: expect.objectContaining({
+          'Idempotency-Key': `perch-conflicting-subscription-${workspaceId}-${subscriptionId}`
+        })
+      })
+    )
   })
 
   it('serializes manual and automatic checks and requeues a request that arrives during a claim', async () => {
@@ -287,9 +481,10 @@ describe.skipIf(!databaseUrl)('billing reconciliation database integration', () 
     await checkoutWaiting
     await expect(reconcileWorkspaceBilling(workspaceId, { source: 'sweep' })).resolves.toBeNull()
     await expect(reconcileWorkspaceBilling(workspaceId)).rejects.toThrow('already being checked')
-    expect(providerRequests).toHaveLength(2)
+    expect(providerRequests).toHaveLength(1)
     releaseCheckout()
     await first
+    expect(providerRequests).toHaveLength(2)
 
     const job = await db.query.billingReconciliationJobs.findFirst({
       where: eq(schema.billingReconciliationJobs.workspaceId, workspaceId)
@@ -457,7 +652,71 @@ describe.skipIf(!databaseUrl)('billing reconciliation database integration', () 
     expect(job?.lastCheckedAt).toBeInstanceOf(Date)
   })
 
+  it('fences a lease-expired worker from regranting access after a newer refund and cancellation', async () => {
+    await insertInvoice('paid')
+    await db.insert(schema.workspaceSubscriptions).values({
+      workspaceId,
+      status: 'active',
+      interval: 'monthly',
+      currentPeriodEnd: new Date('2026-10-01T00:00:00Z'),
+      bachsSubscriptionId: subscriptionId,
+      lastInvoiceReference: reference
+    })
+    let releaseOldCheckout!: () => void
+    let oldCheckoutStarted!: () => void
+    const oldStarted = new Promise<void>((resolve) => {
+      oldCheckoutStarted = resolve
+    })
+    const oldReleased = new Promise<void>((resolve) => {
+      releaseOldCheckout = resolve
+    })
+    let checkoutReads = 0
+    let subscriptionReads = 0
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const url = String(input)
+      if (url.includes('/checkout-sessions/')) {
+        checkoutReads++
+        if (checkoutReads === 1) {
+          oldCheckoutStarted()
+          await oldReleased
+          return new Response(JSON.stringify(checkoutPayload()), { status: 200 })
+        }
+        return new Response(JSON.stringify({
+          ...checkoutPayload(),
+          charge: { ...checkoutPayload().charge, status: 'refunded' }
+        }), { status: 200 })
+      }
+      subscriptionReads++
+      return new Response(JSON.stringify(subscriptionReads === 1
+        ? { ...subscriptionPayload(), status: 'canceled', cancel_at_period_end: true }
+        : subscriptionPayload()), { status: 200 })
+    }))
+
+    const staleWorker = reconcileWorkspaceBilling(workspaceId, {
+      now: new Date('2026-09-02T00:00:00Z')
+    })
+    await oldStarted
+    const newerWorker = await reconcileWorkspaceBilling(workspaceId, {
+      now: new Date('2026-09-02T00:11:00Z')
+    })
+    expect(newerWorker.invoicesChanged).toBe(1)
+    expect((await workspaceEntitlement(workspaceId)).isPro).toBe(false)
+
+    releaseOldCheckout()
+    await expect(staleWorker).rejects.toThrow('newer billing check replaced')
+    const invoice = await db.query.workspaceInvoices.findFirst({
+      where: eq(schema.workspaceInvoices.reference, reference)
+    })
+    const subscription = await db.query.workspaceSubscriptions.findFirst({
+      where: eq(schema.workspaceSubscriptions.workspaceId, workspaceId)
+    })
+    expect(invoice?.status).toBe('failed')
+    expect(subscription?.status).toBe('canceled')
+    expect((await workspaceEntitlement(workspaceId)).isPro).toBe(false)
+  })
+
   it('dead-letters repeated provider failures and lets an admin recover safely', async () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     await insertInvoice()
     await db.insert(schema.workspaceSubscriptions).values({
       workspaceId,
@@ -471,12 +730,16 @@ describe.skipIf(!databaseUrl)('billing reconciliation database integration', () 
     for (let attempt = 0; attempt < 6; attempt++) {
       await expect(reconcileWorkspaceBilling(workspaceId, {
         now: new Date(`2026-09-02T0${attempt + 1}:00:00Z`)
-      })).rejects.toThrow('invalid subscription')
+      })).rejects.toThrow('invalid checkout session')
     }
     let job = await db.query.billingReconciliationJobs.findFirst({
       where: eq(schema.billingReconciliationJobs.workspaceId, workspaceId)
     })
     expect(job).toMatchObject({ status: 'failed', attempts: 6, nextAttemptAt: null })
+    expect(errorSpy).toHaveBeenCalledWith(
+      '[billing-reconciliation] job moved to dead letter',
+      expect.objectContaining({ workspaceId, attempts: 6, correlationId: expect.any(String) })
+    )
 
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
       const url = String(input)
@@ -489,5 +752,6 @@ describe.skipIf(!databaseUrl)('billing reconciliation database integration', () 
     })
     expect(job?.attempts).toBe(0)
     expect(job?.status).toBe('pending')
+    errorSpy.mockRestore()
   })
 })

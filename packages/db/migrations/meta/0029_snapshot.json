@@ -5295,6 +5295,30 @@
           "primaryKey": false,
           "notNull": false
         },
+        "checkout_claim_token": {
+          "name": "checkout_claim_token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "checkout_claimed_at": {
+          "name": "checkout_claimed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reconcile_until": {
+          "name": "reconcile_until",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "checkout_closed_at": {
+          "name": "checkout_closed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
         "last_error": {
           "name": "last_error",
           "type": "text",
@@ -5323,6 +5347,22 @@
         }
       },
       "indexes": {
+        "workspace_invoices_open_checkout_uq": {
+          "name": "workspace_invoices_open_checkout_uq",
+          "columns": [
+            {
+              "expression": "workspace_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"workspace_invoices\".\"checkout_closed_at\" is null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
         "workspace_invoices_workspace_created_idx": {
           "name": "workspace_invoices_workspace_created_idx",
           "columns": [

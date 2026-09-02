@@ -7,6 +7,7 @@ import {
   bachsConfigured,
   bachsSubscriptionSchema,
   bachsWebhookEventSchema,
+  cancelBachsSubscription,
   getBachsCheckoutSession,
   isApprovedBachsCheckoutUrl,
   verifyBachsWebhookSignature
@@ -188,6 +189,41 @@ describe('Bachs environment boundary', () => {
 
     await expect(getBachsCheckoutSession('checkout_retry')).resolves.toMatchObject({ checkout_id: 'checkout_retry' })
     expect(provider).toHaveBeenCalledTimes(3)
+    vi.unstubAllGlobals()
+  })
+
+  it('sends a stable idempotency key when canceling a subscription', async () => {
+    Object.assign(globalThis, {
+      useRuntimeConfig: () => ({
+        bachsEnvironment: 'sandbox',
+        bachsSecretKey: 'sk_sandbox_example',
+        bachsWebhookSecret: 'whsec_example'
+      })
+    })
+    const provider = vi.fn(async () => new Response(JSON.stringify({
+      id: 'subscription_123',
+      status: 'active',
+      cancel_at_period_end: true,
+      metadata: {
+        workspaceId: 'workspace_123',
+        invoiceReference: 'invoice_123',
+        interval: 'monthly',
+        perchPlan: 'workspace_pro'
+      },
+      product: { id: 'product_123', metadata: { perch_plan: 'workspace_pro_monthly' } }
+    }), { status: 200 }))
+    vi.stubGlobal('fetch', provider)
+
+    await cancelBachsSubscription('subscription_123', 'perch-cancel-workspace_123-subscription_123')
+    expect(provider).toHaveBeenCalledWith(
+      expect.any(URL),
+      expect.objectContaining({
+        method: 'DELETE',
+        headers: expect.objectContaining({
+          'Idempotency-Key': 'perch-cancel-workspace_123-subscription_123'
+        })
+      })
+    )
     vi.unstubAllGlobals()
   })
 })

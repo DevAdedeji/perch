@@ -130,12 +130,17 @@ export const workspaceInvoices = pgTable('workspace_invoices', {
   bachsCheckoutId: text('bachs_checkout_id'),
   checkoutUrl: text('checkout_url'),
   bachsChargeId: text('bachs_charge_id'),
+  checkoutClaimToken: text('checkout_claim_token'),
+  checkoutClaimedAt: timestamp('checkout_claimed_at', { withTimezone: true }),
+  reconcileUntil: timestamp('reconcile_until', { withTimezone: true }),
+  checkoutClosedAt: timestamp('checkout_closed_at', { withTimezone: true }),
   lastError: text('last_error'),
   paidAt: timestamp('paid_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
 }, t => [
   check('workspace_invoices_amount_ck', sql`${t.amountCents} > 0`),
+  uniqueIndex('workspace_invoices_open_checkout_uq').on(t.workspaceId).where(sql`${t.checkoutClosedAt} is null`),
   index('workspace_invoices_workspace_created_idx').on(t.workspaceId, t.createdAt)
 ])
 

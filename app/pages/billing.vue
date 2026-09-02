@@ -145,6 +145,9 @@ async function refreshProvider(options: { silent?: boolean, notify?: boolean } =
       method: 'POST'
     })
     if (workspaceId.value !== requestedWorkspaceId) return false
+    if (result.providerResourcesChecked === 0) {
+      throw new Error('No Bachs checkout or subscription was available to verify.')
+    }
     overview.value = result.overview
     lastProviderCheck.value = result.checkedAt
     loadError.value = ''
@@ -152,8 +155,8 @@ async function refreshProvider(options: { silent?: boolean, notify?: boolean } =
       toast.add({
         title: result.awaitingSubscription ? 'Payment details checked' : 'Billing status is up to date',
         description: result.awaitingSubscription
-          ? 'Payment is confirmed, but Pro stays off until Bachs provides the matching subscription details.'
-          : `Checked ${result.invoicesChecked} checkout${result.invoicesChecked === 1 ? '' : 's'} directly with Bachs.`,
+          ? 'The checkout is paid, but Bachs has not linked a subscription yet. Pro stays off until the matching subscription event arrives.'
+          : `Verified ${result.providerResourcesChecked} billing record${result.providerResourcesChecked === 1 ? '' : 's'} directly with Bachs.`,
         color: result.awaitingSubscription ? 'warning' : 'success',
         icon: result.awaitingSubscription ? 'i-lucide-clock' : 'i-lucide-circle-check'
       })
@@ -297,7 +300,7 @@ function date(value: string) {
           color="warning"
           variant="subtle"
           title="Waiting for subscription confirmation"
-          description="Bachs confirmed the checkout payment, but has not provided the matching subscription details yet. Pro remains off so access is never granted from an incomplete payment record."
+          description="Bachs confirmed the checkout payment, but no matching subscription is connected yet. Pro remains off until Bachs sends that subscription record; checking again can verify the checkout but cannot invent a missing subscription."
           icon="i-lucide-clock"
         />
         <UAlert

@@ -7,7 +7,13 @@ export default defineNitroPlugin(() => {
     if (running) return
     running = true
     try {
-      await runBillingReconciliationSweep()
+      const result = await runBillingReconciliationSweep()
+      if (result.failed > 0) {
+        console.error('[billing-reconciliation] sweep completed with failed jobs', {
+          checked: result.checked,
+          failed: result.failed
+        })
+      }
     } catch (error) {
       console.error('[billing-reconciliation] sweep failed', {
         error: String((error as Error)?.message ?? error).slice(0, 300)

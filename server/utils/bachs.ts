@@ -35,6 +35,7 @@ export const bachsCheckoutSessionSchema = z.object({
   amount: z.string().regex(/^\d+(?:\.\d+)?$/),
   currency: z.string().min(3).max(8),
   reference: z.string().nullable(),
+  subscription_id: z.string().min(1).max(500).nullable().optional(),
   charge: z.object({
     payment_id: z.string().min(1),
     status: z.enum([
@@ -308,9 +309,10 @@ export async function getBachsSubscription(subscriptionId: string) {
   )
 }
 
-export async function cancelBachsSubscription(subscriptionId: string) {
+export async function cancelBachsSubscription(subscriptionId: string, idempotencyKey: string) {
   return parseProviderResponse(bachsSubscriptionSchema, await bachsFetch<unknown>(`/subscriptions/${encodeURIComponent(subscriptionId)}`, {
     method: 'DELETE',
+    idempotencyKey,
     body: { cancel_at_period_end: true }
   }), 'subscription')
 }

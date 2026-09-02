@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { and, billingReconciliationJobs, billingWebhookDeliveries, desc, eq, inArray, isNull, lt, ne, or, sql, users, workspaceInvoices, workspaceMembers, workspaceSubscriptions } from '@perch/db'
+import { and, billingReconciliationJobs, billingWebhookDeliveries, desc, eq, inArray, isNull, lt, ne, or, sql, users, workspaceInvoices, workspaceMembers, workspaces, workspaceSubscriptions } from '@perch/db'
 import type { BillingInterval, SubscriptionStatus } from '@perch/shared'
 import { PERCH_PRO_PLAN, proPriceCents } from '@perch/shared'
 import type { BachsCheckoutSession, BachsSubscription } from './bachs'
@@ -32,6 +32,8 @@ const RECONCILIATION_MAX_FAILURES = 6
 const RECONCILIATION_SWEEP_LIMIT = 5
 const RECONCILIATION_POLL_MS = 2 * 60_000
 const RECONCILIATION_SUBSCRIPTION_MS = 6 * 60 * 60_000
+const CHECKOUT_CREATION_LEASE_MS = 2 * 60_000
+const CHECKOUT_LATE_SUCCESS_WINDOW_MS = 24 * 60 * 60_000
 
 type BillingReconciliationSource = 'manual' | 'sweep' | 'webhook'
 
@@ -169,63 +171,135 @@ export async function startWorkspaceCheckout(input: {
   origin: string
 }) {
   assertPublicReturnUrl(input.origin)
-  const entitlement = await workspaceEntitlement(input.workspaceId)
-  if (entitlement.isPro) throw createError({ statusCode: 409, statusMessage: 'Perch Pro is already active for this workspace.' })
-
   const db = useDb()
   const reference = `perch-workspace-${input.workspaceId}-${input.requestId}`
-  const existing = await db.query.workspaceInvoices.findFirst({ where: eq(workspaceInvoices.reference, reference) })
-  if (existing?.status === 'pending' && existing.checkoutUrl && existing.bachsCheckoutId) {
-    const canonicalCheckout = await getBachsCheckoutSession(existing.bachsCheckoutId)
-    if (isApprovedBachsCheckoutUrl(existing.checkoutUrl)
-      && checkoutMatchesInvoice(canonicalCheckout, existing)
-      && checkoutPaymentState(canonicalCheckout) === 'pending') {
-      return { checkoutUrl: existing.checkoutUrl, reference }
-    }
-    throw createError({ statusCode: 409, statusMessage: 'That checkout attempt can no longer be resumed.' })
-  }
-  if (existing) throw createError({ statusCode: 409, statusMessage: 'That checkout attempt has already finished.' })
+  const claimToken = randomUUID()
+  const now = new Date()
+  const staleClaim = new Date(now.getTime() - CHECKOUT_CREATION_LEASE_MS)
+  const reservation = await db.transaction(async (tx) => {
+    const [workspace] = await tx.select({ id: workspaces.id }).from(workspaces)
+      .where(eq(workspaces.id, input.workspaceId)).limit(1).for('update')
+    if (!workspace) throw createError({ statusCode: 404, statusMessage: 'Workspace not found.' })
 
-  const start = new Date()
-  const end = periodEnd(start, input.interval)
-  const [invoice] = await db.insert(workspaceInvoices).values({
-    workspaceId: input.workspaceId,
-    reference,
-    interval: input.interval,
-    amountCents: proPriceCents(input.interval),
-    periodStart: start,
-    periodEnd: end
-  }).returning()
+    const subscription = await tx.query.workspaceSubscriptions.findFirst({
+      where: eq(workspaceSubscriptions.workspaceId, input.workspaceId)
+    })
+    const paidInvoice = subscription?.lastInvoiceReference
+      ? await tx.query.workspaceInvoices.findFirst({ where: and(
+          eq(workspaceInvoices.workspaceId, input.workspaceId),
+          eq(workspaceInvoices.reference, subscription.lastInvoiceReference)
+        ) })
+      : undefined
+    if (subscriptionHasPaidAccess(subscription, paidInvoice?.status === 'paid', now)) {
+      throw createError({ statusCode: 409, statusMessage: 'Perch Pro is already active for this workspace.' })
+    }
+
+    const openInvoice = await tx.query.workspaceInvoices.findFirst({ where: and(
+      eq(workspaceInvoices.workspaceId, input.workspaceId),
+      isNull(workspaceInvoices.checkoutClosedAt)
+    ), orderBy: desc(workspaceInvoices.createdAt) })
+    if (openInvoice) {
+      if (openInvoice.checkoutUrl && openInvoice.bachsCheckoutId) {
+        return { invoice: openInvoice, ownsProviderCreation: false }
+      }
+      const claimExpired = !openInvoice.checkoutClaimedAt || openInvoice.checkoutClaimedAt < staleClaim
+      if (!claimExpired) return { invoice: openInvoice, ownsProviderCreation: false }
+      const [claimed] = await tx.update(workspaceInvoices).set({
+        checkoutClaimToken: claimToken,
+        checkoutClaimedAt: now,
+        updatedAt: sql`now()`
+      }).where(and(
+        eq(workspaceInvoices.id, openInvoice.id),
+        or(isNull(workspaceInvoices.checkoutClaimedAt), lt(workspaceInvoices.checkoutClaimedAt, staleClaim))
+      )).returning()
+      return { invoice: claimed ?? openInvoice, ownsProviderCreation: Boolean(claimed) }
+    }
+
+    const start = now
+    const [invoice] = await tx.insert(workspaceInvoices).values({
+      workspaceId: input.workspaceId,
+      reference,
+      interval: input.interval,
+      amountCents: proPriceCents(input.interval),
+      periodStart: start,
+      periodEnd: periodEnd(start, input.interval),
+      checkoutClaimToken: claimToken,
+      checkoutClaimedAt: now,
+      reconcileUntil: new Date(now.getTime() + CHECKOUT_LATE_SUCCESS_WINDOW_MS)
+    }).returning()
+    return { invoice: invoice!, ownsProviderCreation: true }
+  })
+
+  if (reservation.invoice.checkoutUrl && reservation.invoice.bachsCheckoutId) {
+    const canonicalCheckout = await getBachsCheckoutSession(reservation.invoice.bachsCheckoutId)
+    if (!isApprovedBachsCheckoutUrl(reservation.invoice.checkoutUrl)
+      || !checkoutMatchesInvoice(canonicalCheckout, reservation.invoice)) {
+      throw createError({ statusCode: 502, statusMessage: 'The existing Bachs checkout could not be verified.' })
+    }
+    const state = checkoutPaymentState(canonicalCheckout)
+    if (state === 'pending') {
+      return { checkoutUrl: reservation.invoice.checkoutUrl, reference: reservation.invoice.reference }
+    }
+    await enqueueBillingReconciliation(input.workspaceId, now)
+    throw createError({
+      statusCode: 409,
+      statusMessage: state === 'paid'
+        ? 'Payment was received and is waiting for subscription confirmation.'
+        : 'The previous checkout is still inside its late-payment safety window. Check Bachs status before trying again.'
+    })
+  }
+  if (!reservation.ownsProviderCreation) {
+    throw createError({ statusCode: 409, statusMessage: 'A checkout is already being prepared for this workspace. Please retry shortly.' })
+  }
 
   try {
-    const productId = await ensurePerchProProduct(input.interval)
+    const productId = await ensurePerchProProduct(reservation.invoice.interval)
+    const [renewedCheckoutClaim] = await db.update(workspaceInvoices).set({
+      checkoutClaimedAt: sql`now()`,
+      updatedAt: sql`now()`
+    }).where(and(
+      eq(workspaceInvoices.id, reservation.invoice.id),
+      eq(workspaceInvoices.checkoutClaimToken, claimToken)
+    )).returning({ id: workspaceInvoices.id })
+    if (!renewedCheckoutClaim) {
+      throw createError({ statusCode: 409, statusMessage: 'A newer checkout request replaced this attempt.' })
+    }
     const checkout = await createSubscriptionCheckout({
       productId,
-      reference,
+      reference: reservation.invoice.reference,
       customer: input.customer,
       successUrl: `${input.origin}/billing?paid=1`,
       cancelUrl: `${input.origin}/billing`,
       metadata: {
         workspaceId: input.workspaceId,
-        interval: input.interval,
+        interval: reservation.invoice.interval,
         perchPlan: 'workspace_pro',
-        invoiceReference: reference
+        invoiceReference: reservation.invoice.reference
       }
     })
     if (!isApprovedBachsCheckoutUrl(checkout.checkout_url)) {
       throw createError({ statusCode: 502, statusMessage: 'Bachs did not return a trusted checkout URL.' })
     }
     const canonicalCheckout = await getBachsCheckoutSession(checkout.checkout_id)
-    const expectedInvoice = { ...invoice!, bachsCheckoutId: checkout.checkout_id }
+    const expectedInvoice = { ...reservation.invoice, bachsCheckoutId: checkout.checkout_id }
     if (!checkoutMatchesInvoice(canonicalCheckout, expectedInvoice)) {
       throw createError({ statusCode: 502, statusMessage: 'Bachs checkout did not match the expected plan.' })
     }
     await db.transaction(async (tx) => {
-      await tx.update(workspaceInvoices).set({
+      const [updatedInvoice] = await tx.update(workspaceInvoices).set({
         bachsCheckoutId: checkout.checkout_id,
         checkoutUrl: checkout.checkout_url,
+        checkoutClaimToken: null,
+        checkoutClaimedAt: null,
+        lastError: null,
         updatedAt: sql`now()`
-      }).where(eq(workspaceInvoices.id, invoice!.id))
+      }).where(and(
+        eq(workspaceInvoices.id, reservation.invoice.id),
+        eq(workspaceInvoices.checkoutClaimToken, claimToken)
+      )).returning({ id: workspaceInvoices.id })
+      if (!updatedInvoice) {
+        throw createError({ statusCode: 409, statusMessage: 'This checkout creation lease expired before it could be saved.' })
+      }
       await tx.insert(billingReconciliationJobs).values({ workspaceId: input.workspaceId })
         .onConflictDoUpdate({
           target: billingReconciliationJobs.workspaceId,
@@ -239,13 +313,18 @@ export async function startWorkspaceCheckout(input: {
           }
         })
     })
-    return { checkoutUrl: checkout.checkout_url, reference }
+    return { checkoutUrl: checkout.checkout_url, reference: reservation.invoice.reference }
   } catch (error) {
     await db.update(workspaceInvoices).set({
-      status: 'failed',
+      checkoutClaimToken: null,
+      checkoutClaimedAt: null,
       lastError: String((error as { statusMessage?: string })?.statusMessage ?? error).slice(0, 1000),
       updatedAt: sql`now()`
-    }).where(eq(workspaceInvoices.id, invoice!.id))
+    }).where(and(
+      eq(workspaceInvoices.id, reservation.invoice.id),
+      eq(workspaceInvoices.checkoutClaimToken, claimToken)
+    ))
+    await enqueueBillingReconciliation(input.workspaceId, now)
     throw error
   }
 }
@@ -267,20 +346,50 @@ export async function cancelWorkspacePlan(workspaceId: string) {
     if (!row.bachsSubscriptionId) {
       throw createError({ statusCode: 409, statusMessage: 'The billing provider subscription could not be confirmed.' })
     }
-    const subscription = await cancelBachsSubscription(row.bachsSubscriptionId)
-    if (subscription.id !== row.bachsSubscriptionId) {
+    const subscriptionId = row.bachsSubscriptionId
+    if (!await renewBillingReconciliationClaim(workspaceId, claim.token)) {
+      throw createError({ statusCode: 503, statusMessage: 'A newer billing check replaced this cancellation request.' })
+    }
+    const subscription = await cancelBachsSubscription(
+      subscriptionId,
+      `perch-cancel-${workspaceId}-${subscriptionId}`
+    )
+    if (subscription.id !== subscriptionId) {
       throw createError({ statusCode: 502, statusMessage: 'Bachs returned a different subscription.' })
+    }
+    const identity = providerSubscriptionIdentity(subscription)
+    if (!identity
+      || identity.workspaceId !== workspaceId
+      || identity.invoiceReference !== row.lastInvoiceReference
+      || identity.interval !== row.interval) {
+      throw createError({ statusCode: 502, statusMessage: 'Bachs cancellation did not match this workspace billing record.' })
     }
     if (!subscription.cancel_at_period_end && subscription.status !== 'canceled') {
       throw createError({ statusCode: 502, statusMessage: 'Bachs did not confirm the cancellation.' })
     }
     const end = subscription.current_period_end ? new Date(subscription.current_period_end) : row.currentPeriodEnd
-    await db.update(workspaceSubscriptions).set({
-      status: subscription.status,
-      cancelAtPeriodEnd: true,
-      currentPeriodEnd: end,
-      updatedAt: sql`now()`
-    }).where(eq(workspaceSubscriptions.workspaceId, workspaceId))
+    const updated = await db.transaction(async (tx) => {
+      const [activeClaim] = await tx.select({ token: billingReconciliationJobs.claimToken })
+        .from(billingReconciliationJobs)
+        .where(and(
+          eq(billingReconciliationJobs.workspaceId, workspaceId),
+          eq(billingReconciliationJobs.claimToken, claim.token)
+        )).limit(1).for('update')
+      if (!activeClaim) return false
+      const [updatedSubscription] = await tx.update(workspaceSubscriptions).set({
+        status: subscription.status,
+        cancelAtPeriodEnd: true,
+        currentPeriodEnd: end,
+        updatedAt: sql`now()`
+      }).where(and(
+        eq(workspaceSubscriptions.workspaceId, workspaceId),
+        eq(workspaceSubscriptions.bachsSubscriptionId, subscriptionId)
+      )).returning({ workspaceId: workspaceSubscriptions.workspaceId })
+      return Boolean(updatedSubscription)
+    })
+    if (!updated) {
+      throw createError({ statusCode: 503, statusMessage: 'A newer billing check replaced this cancellation result. Please check the current status.' })
+    }
     await finishBillingReconciliation(workspaceId, claim.token, nextSuccessfulBillingCheck({
       pendingCheckout: false,
       subscription,
@@ -305,6 +414,7 @@ export async function billingOverview(workspaceId: string) {
       amountCents: workspaceInvoices.amountCents,
       currency: workspaceInvoices.currency,
       paidAt: workspaceInvoices.paidAt,
+      checkoutClosedAt: workspaceInvoices.checkoutClosedAt,
       createdAt: workspaceInvoices.createdAt
     }).from(workspaceInvoices).where(eq(workspaceInvoices.workspaceId, workspaceId))
       .orderBy(desc(workspaceInvoices.createdAt)).limit(24),
@@ -316,9 +426,9 @@ export async function billingOverview(workspaceId: string) {
     checkoutEnabled: billingCheckoutEnabled() && bachsConfigured(),
     providerConfigured: bachsConfigured(),
     hasBillingHistory: invoices.length > 0 || entitlement.providerSubscriptionConnected,
-    needsProviderSubscription: invoices[0]?.status === 'paid' && (
-      !subscription?.bachsSubscriptionId || subscription.lastInvoiceReference !== invoices[0].reference
-    ),
+    needsProviderSubscription: invoices.some(invoice => invoice.status === 'paid'
+      && !invoice.checkoutClosedAt
+      && (!subscription?.bachsSubscriptionId || subscription.lastInvoiceReference !== invoice.reference)),
     reconciliation: reconciliation
       ? {
           status: reconciliation.status,
@@ -328,7 +438,12 @@ export async function billingOverview(workspaceId: string) {
         }
       : null,
     invoices: invoices.map(row => ({
-      ...row,
+      id: row.id,
+      reference: row.reference,
+      status: row.status,
+      interval: row.interval,
+      amountCents: row.amountCents,
+      currency: row.currency,
       paidAt: row.paidAt?.toISOString() ?? null,
       createdAt: row.createdAt.toISOString()
     }))
@@ -340,99 +455,220 @@ export async function applyWorkspaceSubscriptionState(subscription: BachsSubscri
   if (!identity) {
     return { applied: false, reason: 'not-perch-pro' as const }
   }
-  const { workspaceId, invoiceReference, interval } = identity
-  const db = useDb()
-  const [invoice, existingSubscription] = await Promise.all([
-    db.query.workspaceInvoices.findFirst({ where: and(
-      eq(workspaceInvoices.workspaceId, workspaceId),
-      eq(workspaceInvoices.reference, invoiceReference),
-      eq(workspaceInvoices.interval, interval)
-    ) }),
-    db.query.workspaceSubscriptions.findFirst({ where: eq(workspaceSubscriptions.workspaceId, workspaceId) })
-  ])
-  if (!invoice?.bachsCheckoutId || !invoiceMatchesPerchPlan(invoice)) {
-    return { applied: false, reason: 'unknown-invoice' as const }
+  const now = new Date()
+  const claim = await claimBillingReconciliation(identity.workspaceId, 'webhook', now)
+  if (!claim) {
+    await enqueueBillingReconciliation(identity.workspaceId, now)
+    throw createError({ statusCode: 503, statusMessage: 'Billing status is already being checked. Please retry shortly.' })
   }
-  const existingInvoice = existingSubscription?.lastInvoiceReference
-    ? await db.query.workspaceInvoices.findFirst({ where: and(
-        eq(workspaceInvoices.workspaceId, workspaceId),
-        eq(workspaceInvoices.reference, existingSubscription.lastInvoiceReference)
-      ) })
-    : undefined
-  const replacingLineage = Boolean(existingSubscription && (
-    (existingSubscription.lastInvoiceReference && existingSubscription.lastInvoiceReference !== invoiceReference)
-    || (existingSubscription.bachsSubscriptionId && existingSubscription.bachsSubscriptionId !== subscription.id)
-  ))
-  if (replacingLineage) {
-    const existingStillPaid = subscriptionHasPaidAccess(existingSubscription, existingInvoice?.status === 'paid')
-    const incomingIsNewer = Boolean(existingInvoice && invoice.createdAt > existingInvoice.createdAt)
-    if (existingStillPaid || !incomingIsNewer) {
-      return { applied: false, reason: 'stale-invoice' as const }
+  try {
+    const invoice = await useDb().query.workspaceInvoices.findFirst({ where: and(
+      eq(workspaceInvoices.workspaceId, identity.workspaceId),
+      eq(workspaceInvoices.reference, identity.invoiceReference),
+      eq(workspaceInvoices.interval, identity.interval)
+    ) })
+    const applied = await applyCanonicalBillingSnapshot({
+      workspaceId: identity.workspaceId,
+      claimToken: claim.token,
+      invoice,
+      checkout: null,
+      subscription,
+      now
+    })
+    if (applied.staleClaim) {
+      throw createError({ statusCode: 503, statusMessage: 'A newer billing check replaced this provider response.' })
     }
+    if (applied.conflictingSubscriptionId) {
+      if (!await renewBillingReconciliationClaim(identity.workspaceId, claim.token)) {
+        throw createError({ statusCode: 503, statusMessage: 'A newer billing check replaced this cancellation request.' })
+      }
+      const canceled = await cancelBachsSubscription(
+        applied.conflictingSubscriptionId,
+        `perch-conflicting-subscription-${identity.workspaceId}-${applied.conflictingSubscriptionId}`
+      )
+      const canceledIdentity = providerSubscriptionIdentity(canceled)
+      if (canceled.id !== applied.conflictingSubscriptionId
+        || !canceledIdentity
+        || canceledIdentity.workspaceId !== identity.workspaceId
+        || canceledIdentity.invoiceReference !== identity.invoiceReference
+        || (!canceled.cancel_at_period_end && canceled.status !== 'canceled')) {
+        throw createError({ statusCode: 502, statusMessage: 'Bachs did not safely cancel the conflicting subscription.' })
+      }
+    }
+    await finishBillingReconciliation(identity.workspaceId, claim.token, nextSuccessfulBillingCheck({
+      pendingCheckout: false,
+      subscription,
+      now
+    }), new Date())
+    return applied.subscriptionIgnored
+      ? { applied: false, reason: 'stale-invoice' as const, workspaceId: identity.workspaceId }
+      : { applied: applied.subscriptionUpdated, workspaceId: identity.workspaceId }
+  } catch (error) {
+    await failBillingReconciliation(identity.workspaceId, claim.token, error, now)
+    throw error
   }
-  const end = providerPaidThroughEnd(subscription)
-  await db.insert(workspaceSubscriptions).values({
-    workspaceId,
-    status: subscription.status,
-    interval,
-    currentPeriodEnd: end,
-    cancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end),
-    bachsSubscriptionId: subscription.id,
-    lastInvoiceReference: invoiceReference
-  }).onConflictDoUpdate({
-    target: workspaceSubscriptions.workspaceId,
-    set: {
-      status: subscription.status,
-      interval,
-      currentPeriodEnd: end,
-      cancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end),
-      bachsSubscriptionId: subscription.id,
-      lastInvoiceReference: invoiceReference,
-      updatedAt: sql`now()`
-    }
-  })
-  return { applied: true, workspaceId }
 }
 
-async function markWorkspaceInvoicePaid(reference: string, chargeId?: string | null) {
+async function applyCanonicalBillingSnapshot(input: {
+  workspaceId: string
+  claimToken: string
+  invoice: typeof workspaceInvoices.$inferSelect | undefined
+  checkout: BachsCheckoutSession | null
+  subscription: BachsSubscription | null
+  now: Date
+}) {
   return useDb().transaction(async (tx) => {
-    const [invoice] = await tx.select().from(workspaceInvoices).where(eq(workspaceInvoices.reference, reference)).limit(1).for('update')
-    if (!invoice) return { applied: false, reason: 'unknown-reference' as const }
-    if (invoice.status === 'paid') return { applied: false, reason: 'already-paid' as const, workspaceId: invoice.workspaceId }
-    await tx.update(workspaceInvoices).set({
-      status: 'paid', paidAt: sql`now()`, bachsChargeId: chargeId ?? invoice.bachsChargeId, lastError: null, updatedAt: sql`now()`
-    }).where(eq(workspaceInvoices.id, invoice.id))
-    return { applied: true, reason: 'paid' as const, workspaceId: invoice.workspaceId }
-  })
-}
+    const [activeClaim] = await tx.select({ token: billingReconciliationJobs.claimToken })
+      .from(billingReconciliationJobs)
+      .where(and(
+        eq(billingReconciliationJobs.workspaceId, input.workspaceId),
+        eq(billingReconciliationJobs.claimToken, input.claimToken)
+      )).limit(1).for('update')
+    if (!activeClaim) return { staleClaim: true as const }
 
-async function markWorkspaceInvoiceProviderFailed(reference: string, reason: string) {
-  return useDb().transaction(async (tx) => {
-    const [invoice] = await tx.select().from(workspaceInvoices).where(eq(workspaceInvoices.reference, reference)).limit(1).for('update')
-    if (!invoice) return { applied: false, reason: 'unknown-reference' as const }
-    if (invoice.status === 'failed' && invoice.lastError === reason) {
-      return { applied: false, reason: 'already-failed' as const, workspaceId: invoice.workspaceId }
+    const invoice = input.invoice
+      ? (await tx.select().from(workspaceInvoices).where(and(
+          eq(workspaceInvoices.id, input.invoice.id),
+          eq(workspaceInvoices.workspaceId, input.workspaceId)
+        )).limit(1).for('update'))[0]
+      : undefined
+    if (input.checkout && (!invoice || !checkoutMatchesInvoice(input.checkout, invoice))) {
+      throw createError({ statusCode: 502, statusMessage: 'Bachs checkout did not match the local invoice.' })
     }
-    await tx.update(workspaceInvoices).set({
-      status: 'failed', paidAt: null, lastError: reason.slice(0, 1000), updatedAt: sql`now()`
-    }).where(eq(workspaceInvoices.id, invoice.id))
-    return { applied: true, reason: 'provider-failed' as const, workspaceId: invoice.workspaceId }
-  })
-}
 
-async function syncWorkspaceInvoiceFromCanonicalCheckout(
-  invoice: typeof workspaceInvoices.$inferSelect,
-  checkout: BachsCheckoutSession
-) {
-  if (!checkoutMatchesInvoice(checkout, invoice)) {
-    throw createError({ statusCode: 502, statusMessage: 'Bachs checkout did not match the local invoice.' })
-  }
-  const state = checkoutPaymentState(checkout)
-  if (state === 'failed') {
-    return markWorkspaceInvoiceProviderFailed(invoice.reference, `Bachs checkout is ${checkout.charge?.status ?? checkout.status}.`)
-  }
-  if (state === 'pending') return { applied: false, reason: 'provider-pending' as const, workspaceId: invoice.workspaceId }
-  return markWorkspaceInvoicePaid(invoice.reference, checkout.charge?.payment_id)
+    let invoiceOutcome: {
+      applied: boolean
+      reason: 'unknown-checkout' | 'provider-pending' | 'provider-failed' | 'paid' | 'already-paid'
+      workspaceId: string
+    } = { applied: false, reason: 'unknown-checkout', workspaceId: input.workspaceId }
+    let pendingCheckout = false
+    let terminalRecoveryUntil: Date | null = null
+    if (input.checkout && invoice) {
+      const state = checkoutPaymentState(input.checkout)
+      if (state === 'pending') {
+        pendingCheckout = true
+        invoiceOutcome = { applied: false, reason: 'provider-pending', workspaceId: input.workspaceId }
+      } else if (state === 'failed') {
+        const reason = `Bachs checkout is ${input.checkout.charge?.status ?? input.checkout.status}.`.slice(0, 1000)
+        const insideRecoveryWindow = Boolean(invoice.reconcileUntil && invoice.reconcileUntil > input.now)
+        terminalRecoveryUntil = insideRecoveryWindow ? invoice.reconcileUntil : null
+        const changed = invoice.status !== 'failed'
+          || invoice.lastError !== reason
+          || (!insideRecoveryWindow && !invoice.checkoutClosedAt)
+        if (changed) {
+          await tx.update(workspaceInvoices).set({
+            status: 'failed',
+            paidAt: null,
+            checkoutClosedAt: insideRecoveryWindow ? null : sql`now()`,
+            lastError: reason,
+            updatedAt: sql`now()`
+          }).where(eq(workspaceInvoices.id, invoice.id))
+        }
+        invoiceOutcome = { applied: changed, reason: 'provider-failed', workspaceId: input.workspaceId }
+      } else {
+        const changed = invoice.status !== 'paid'
+          || invoice.bachsChargeId !== (input.checkout.charge?.payment_id ?? invoice.bachsChargeId)
+        if (changed) {
+          await tx.update(workspaceInvoices).set({
+            status: 'paid',
+            paidAt: invoice.paidAt ?? sql`now()`,
+            bachsChargeId: input.checkout.charge?.payment_id ?? invoice.bachsChargeId,
+            lastError: null,
+            updatedAt: sql`now()`
+          }).where(eq(workspaceInvoices.id, invoice.id))
+        }
+        invoiceOutcome = {
+          applied: changed,
+          reason: changed ? 'paid' : 'already-paid',
+          workspaceId: input.workspaceId
+        }
+      }
+    }
+
+    let subscriptionUpdated = false
+    let subscriptionIgnored = false
+    let conflictingSubscriptionId: string | null = null
+    if (input.subscription) {
+      const identity = providerSubscriptionIdentity(input.subscription)
+      if (!identity || identity.workspaceId !== input.workspaceId) {
+        throw createError({ statusCode: 502, statusMessage: 'Bachs subscription did not match this workspace.' })
+      }
+      const [subscriptionInvoice] = await tx.select().from(workspaceInvoices).where(and(
+        eq(workspaceInvoices.workspaceId, input.workspaceId),
+        eq(workspaceInvoices.reference, identity.invoiceReference),
+        eq(workspaceInvoices.interval, identity.interval)
+      )).limit(1).for('update')
+      if (!subscriptionInvoice?.bachsCheckoutId || !invoiceMatchesPerchPlan(subscriptionInvoice)) {
+        throw createError({ statusCode: 502, statusMessage: 'Bachs subscription did not match a valid Perch invoice.' })
+      }
+      const [existingSubscription] = await tx.select().from(workspaceSubscriptions)
+        .where(eq(workspaceSubscriptions.workspaceId, input.workspaceId)).limit(1).for('update')
+      const existingInvoice = existingSubscription?.lastInvoiceReference
+        ? (await tx.select().from(workspaceInvoices).where(and(
+            eq(workspaceInvoices.workspaceId, input.workspaceId),
+            eq(workspaceInvoices.reference, existingSubscription.lastInvoiceReference)
+          )).limit(1))[0]
+        : undefined
+      const replacingLineage = Boolean(existingSubscription && (
+        (existingSubscription.lastInvoiceReference && existingSubscription.lastInvoiceReference !== identity.invoiceReference)
+        || (existingSubscription.bachsSubscriptionId && existingSubscription.bachsSubscriptionId !== input.subscription.id)
+      ))
+      const incomingWasSuperseded = Boolean(
+        subscriptionInvoice.checkoutClosedAt
+        && existingSubscription?.lastInvoiceReference !== identity.invoiceReference
+      )
+      if (replacingLineage) {
+        const existingStillPaid = subscriptionHasPaidAccess(
+          existingSubscription,
+          existingInvoice?.status === 'paid',
+          input.now
+        )
+        const incomingIsNewer = Boolean(existingInvoice && subscriptionInvoice.createdAt > existingInvoice.createdAt)
+        if (incomingWasSuperseded || existingStillPaid || !incomingIsNewer) {
+          subscriptionIgnored = true
+          conflictingSubscriptionId = input.subscription.id
+        }
+      }
+      if (!subscriptionIgnored) {
+        const end = providerPaidThroughEnd(input.subscription)
+        await tx.insert(workspaceSubscriptions).values({
+          workspaceId: input.workspaceId,
+          status: input.subscription.status,
+          interval: identity.interval,
+          currentPeriodEnd: end,
+          cancelAtPeriodEnd: Boolean(input.subscription.cancel_at_period_end),
+          bachsSubscriptionId: input.subscription.id,
+          lastInvoiceReference: identity.invoiceReference
+        }).onConflictDoUpdate({
+          target: workspaceSubscriptions.workspaceId,
+          set: {
+            status: input.subscription.status,
+            interval: identity.interval,
+            currentPeriodEnd: end,
+            cancelAtPeriodEnd: Boolean(input.subscription.cancel_at_period_end),
+            bachsSubscriptionId: input.subscription.id,
+            lastInvoiceReference: identity.invoiceReference,
+            updatedAt: sql`now()`
+          }
+        })
+        await tx.update(workspaceInvoices).set({
+          checkoutClosedAt: subscriptionInvoice.checkoutClosedAt ?? sql`now()`,
+          updatedAt: sql`now()`
+        }).where(eq(workspaceInvoices.id, subscriptionInvoice.id))
+        subscriptionUpdated = true
+      }
+    }
+
+    return {
+      staleClaim: false as const,
+      invoiceOutcome,
+      subscriptionUpdated,
+      subscriptionIgnored,
+      conflictingSubscriptionId,
+      pendingCheckout,
+      terminalRecoveryUntil
+    }
+  })
 }
 
 async function enqueueBillingReconciliation(workspaceId: string, now = new Date()) {
@@ -499,6 +735,18 @@ async function claimBillingReconciliation(
   return job ? { token, job } : null
 }
 
+async function renewBillingReconciliationClaim(workspaceId: string, token: string) {
+  const [renewed] = await useDb().update(billingReconciliationJobs).set({
+    claimedAt: sql`now()`,
+    updatedAt: sql`now()`
+  }).where(and(
+    eq(billingReconciliationJobs.workspaceId, workspaceId),
+    eq(billingReconciliationJobs.status, 'processing'),
+    eq(billingReconciliationJobs.claimToken, token)
+  )).returning({ workspaceId: billingReconciliationJobs.workspaceId })
+  return Boolean(renewed)
+}
+
 function billingReconciliationRetryAt(attempts: number, now: Date) {
   const delays = [5, 15, 60, 180, 360, 360]
   return new Date(now.getTime() + delays[Math.min(attempts - 1, delays.length - 1)]! * 60_000)
@@ -506,10 +754,17 @@ function billingReconciliationRetryAt(attempts: number, now: Date) {
 
 function nextSuccessfulBillingCheck(input: {
   pendingCheckout: boolean
+  terminalRecoveryUntil?: Date | null
   subscription: BachsSubscription | null
   now: Date
 }) {
   if (input.pendingCheckout) return new Date(input.now.getTime() + RECONCILIATION_POLL_MS)
+  if (input.terminalRecoveryUntil && input.terminalRecoveryUntil > input.now) {
+    return new Date(Math.min(
+      input.now.getTime() + 60 * 60_000,
+      input.terminalRecoveryUntil.getTime()
+    ))
+  }
   if (!input.subscription) return null
   const end = providerPaidThroughEnd(input.subscription)
   if (input.subscription.status === 'canceled' && (!end || end <= input.now)) return null
@@ -556,7 +811,7 @@ async function failBillingReconciliation(workspaceId: string, token: string, err
   const terminal = attempts >= RECONCILIATION_MAX_FAILURES && !current.requestedAt
   const nowIso = now.toISOString()
   const retryIso = terminal ? null : billingReconciliationRetryAt(attempts, now).toISOString()
-  await useDb().update(billingReconciliationJobs).set({
+  const [updated] = await useDb().update(billingReconciliationJobs).set({
     status: sql`case when ${billingReconciliationJobs.requestedAt} is not null then 'retrying'::billing_reconciliation_status else ${terminal ? 'failed' : 'retrying'}::billing_reconciliation_status end`,
     attempts,
     claimToken: null,
@@ -568,7 +823,14 @@ async function failBillingReconciliation(workspaceId: string, token: string, err
   }).where(and(
     eq(billingReconciliationJobs.workspaceId, workspaceId),
     eq(billingReconciliationJobs.claimToken, token)
-  ))
+  )).returning({ status: billingReconciliationJobs.status })
+  if (updated?.status === 'failed') {
+    console.error('[billing-reconciliation] job moved to dead letter', {
+      workspaceId,
+      correlationId: token,
+      attempts
+    })
+  }
 }
 
 interface ReconcileWorkspaceBillingOptions {
@@ -581,37 +843,38 @@ interface ReconcileWorkspaceBillingOptions {
   now?: Date
 }
 
-async function reconcileWorkspaceBillingUnderClaim(workspaceId: string, options: ReconcileWorkspaceBillingOptions) {
+async function reconcileWorkspaceBillingUnderClaim(
+  workspaceId: string,
+  claimToken: string,
+  options: ReconcileWorkspaceBillingOptions
+) {
   const db = useDb()
   const subscriptionRow = await db.query.workspaceSubscriptions.findFirst({
     where: eq(workspaceSubscriptions.workspaceId, workspaceId)
   })
-  const subscriptionId = options.subscriptionId ?? subscriptionRow?.bachsSubscriptionId ?? null
-  const canonicalSubscription = options.subscriptionSnapshot
-    ?? (subscriptionId ? await getBachsSubscription(subscriptionId) : null)
-  const subscriptionIdentity = canonicalSubscription ? providerSubscriptionIdentity(canonicalSubscription) : null
-  if (canonicalSubscription && canonicalSubscription.id !== subscriptionId) {
-    throw createError({ statusCode: 502, statusMessage: 'Bachs returned a different subscription.' })
-  }
-  if (canonicalSubscription && (!subscriptionIdentity || subscriptionIdentity.workspaceId !== workspaceId)) {
+  const snapshotIdentity = options.subscriptionSnapshot
+    ? providerSubscriptionIdentity(options.subscriptionSnapshot)
+    : null
+  if (options.subscriptionSnapshot && (!snapshotIdentity || snapshotIdentity.workspaceId !== workspaceId)) {
     throw createError({ statusCode: 502, statusMessage: 'Bachs subscription did not match this workspace.' })
   }
 
-  // There is no documented Bachs lookup from an invoice to a subscription.
-  // Reconciliation therefore reads only the current checkout and the one
-  // already-known subscription: two provider resources at most.
-  const latestPendingInvoice = !options.invoiceReference && !options.checkoutId && !options.subscriptionSnapshot
+  // A canonical checkout may expose its subscription id after payment. That
+  // lets Perch recover a missed webhook without listing or guessing provider
+  // resources. Each reconciliation still reads at most one checkout and one
+  // exact subscription.
+  const latestOpenInvoice = !options.invoiceReference && !options.checkoutId && !options.subscriptionSnapshot
     ? await db.query.workspaceInvoices.findFirst({ where: and(
         eq(workspaceInvoices.workspaceId, workspaceId),
-        eq(workspaceInvoices.status, 'pending'),
+        isNull(workspaceInvoices.checkoutClosedAt),
         sql`${workspaceInvoices.bachsCheckoutId} is not null`
       ), orderBy: desc(workspaceInvoices.createdAt) })
     : undefined
   const targetReference = options.invoiceReference
-    ?? (options.subscriptionSnapshot ? subscriptionIdentity?.invoiceReference : null)
-    ?? latestPendingInvoice?.reference
+    ?? (options.subscriptionSnapshot ? snapshotIdentity?.invoiceReference : null)
+    ?? latestOpenInvoice?.reference
     ?? subscriptionRow?.lastInvoiceReference
-    ?? subscriptionIdentity?.invoiceReference
+    ?? snapshotIdentity?.invoiceReference
     ?? null
   let invoice = options.checkoutId
     ? await db.query.workspaceInvoices.findFirst({ where: and(
@@ -627,7 +890,7 @@ async function reconcileWorkspaceBillingUnderClaim(workspaceId: string, options:
   if (!invoice) {
     invoice = await db.query.workspaceInvoices.findFirst({ where: and(
       eq(workspaceInvoices.workspaceId, workspaceId),
-      eq(workspaceInvoices.status, 'pending'),
+      isNull(workspaceInvoices.checkoutClosedAt),
       sql`${workspaceInvoices.bachsCheckoutId} is not null`
     ), orderBy: desc(workspaceInvoices.createdAt) })
   }
@@ -637,6 +900,19 @@ async function reconcileWorkspaceBillingUnderClaim(workspaceId: string, options:
 
   if (canonicalCheckout && !checkoutMatchesInvoice(canonicalCheckout, invoice!)) {
     throw createError({ statusCode: 502, statusMessage: 'Bachs checkout did not match the local invoice.' })
+  }
+  const subscriptionId = options.subscriptionId
+    ?? subscriptionRow?.bachsSubscriptionId
+    ?? canonicalCheckout?.subscription_id
+    ?? null
+  const canonicalSubscription = options.subscriptionSnapshot
+    ?? (subscriptionId ? await getBachsSubscription(subscriptionId) : null)
+  const subscriptionIdentity = canonicalSubscription ? providerSubscriptionIdentity(canonicalSubscription) : null
+  if (canonicalSubscription && canonicalSubscription.id !== subscriptionId) {
+    throw createError({ statusCode: 502, statusMessage: 'Bachs returned a different subscription.' })
+  }
+  if (canonicalSubscription && (!subscriptionIdentity || subscriptionIdentity.workspaceId !== workspaceId)) {
+    throw createError({ statusCode: 502, statusMessage: 'Bachs subscription did not match this workspace.' })
   }
   if (subscriptionIdentity) {
     const subscriptionInvoice = invoice?.reference === subscriptionIdentity.invoiceReference
@@ -651,27 +927,56 @@ async function reconcileWorkspaceBillingUnderClaim(workspaceId: string, options:
     }
   }
 
-  const invoiceOutcome = canonicalCheckout
-    ? await syncWorkspaceInvoiceFromCanonicalCheckout(invoice!, canonicalCheckout)
-    : { applied: false, reason: 'unknown-checkout' as const, workspaceId }
-  let subscriptionUpdated = false
-  let subscriptionIgnored = false
-  if (canonicalSubscription) {
-    const applied = await applyWorkspaceSubscriptionState(canonicalSubscription)
-    if (applied.applied) subscriptionUpdated = true
-    else if (applied.reason === 'stale-invoice') subscriptionIgnored = true
-    else throw createError({ statusCode: 502, statusMessage: 'Bachs subscription could not be safely reconciled.' })
+  const providerResourcesChecked = (canonicalCheckout ? 1 : 0) + (canonicalSubscription ? 1 : 0)
+  if (providerResourcesChecked === 0) {
+    throw createError({
+      statusCode: 409,
+      statusMessage: 'There is no Bachs checkout or subscription connected to this workspace yet.'
+    })
+  }
+
+  const applied = await applyCanonicalBillingSnapshot({
+    workspaceId,
+    claimToken,
+    invoice,
+    checkout: canonicalCheckout,
+    subscription: canonicalSubscription,
+    now: options.now ?? new Date()
+  })
+  if (applied.staleClaim) {
+    throw createError({
+      statusCode: 503,
+      statusMessage: 'A newer billing check replaced this provider response. Please check the current status.'
+    })
+  }
+  if (applied.conflictingSubscriptionId && canonicalSubscription) {
+    if (!await renewBillingReconciliationClaim(workspaceId, claimToken)) {
+      throw createError({ statusCode: 503, statusMessage: 'A newer billing check replaced this cancellation request.' })
+    }
+    const canceled = await cancelBachsSubscription(
+      applied.conflictingSubscriptionId,
+      `perch-conflicting-subscription-${workspaceId}-${applied.conflictingSubscriptionId}`
+    )
+    const canceledIdentity = providerSubscriptionIdentity(canceled)
+    if (canceled.id !== applied.conflictingSubscriptionId
+      || !canceledIdentity
+      || canceledIdentity.workspaceId !== workspaceId
+      || canceledIdentity.invoiceReference !== providerSubscriptionIdentity(canonicalSubscription)?.invoiceReference
+      || (!canceled.cancel_at_period_end && canceled.status !== 'canceled')) {
+      throw createError({ statusCode: 502, statusMessage: 'Bachs did not safely cancel the conflicting subscription.' })
+    }
   }
   return {
-    invoiceOutcome,
+    invoiceOutcome: applied.invoiceOutcome,
     invoicesChecked: canonicalCheckout ? 1 : 0,
-    invoicesChanged: invoiceOutcome.applied ? 1 : 0,
+    invoicesChanged: applied.invoiceOutcome.applied ? 1 : 0,
     subscriptionChecked: Boolean(canonicalSubscription),
-    subscriptionUpdated,
-    subscriptionIgnored,
-    pendingCheckout: canonicalCheckout ? checkoutPaymentState(canonicalCheckout) === 'pending' : false,
+    subscriptionUpdated: applied.subscriptionUpdated,
+    subscriptionIgnored: applied.subscriptionIgnored,
+    pendingCheckout: applied.pendingCheckout,
+    terminalRecoveryUntil: applied.terminalRecoveryUntil,
     canonicalSubscription,
-    providerResourcesChecked: (canonicalCheckout ? 1 : 0) + (canonicalSubscription ? 1 : 0)
+    providerResourcesChecked
   }
 }
 
@@ -685,9 +990,10 @@ export async function reconcileWorkspaceBilling(workspaceId: string, options: Re
     throw createError({ statusCode: 503, statusMessage: 'Billing status is already being checked. Please retry shortly.' })
   }
   try {
-    const result = await reconcileWorkspaceBillingUnderClaim(workspaceId, options)
+    const result = await reconcileWorkspaceBillingUnderClaim(workspaceId, claim.token, { ...options, now })
     const nextAttemptAt = nextSuccessfulBillingCheck({
       pendingCheckout: result.pendingCheckout,
+      terminalRecoveryUntil: result.terminalRecoveryUntil,
       subscription: result.canonicalSubscription,
       now
     })
@@ -708,6 +1014,11 @@ export async function reconcileWorkspaceBilling(workspaceId: string, options: Re
       overview
     }
   } catch (error) {
+    if ((error as { statusCode?: number })?.statusCode === 409
+      && String((error as { statusMessage?: string })?.statusMessage).startsWith('There is no Bachs checkout')) {
+      await finishBillingReconciliation(workspaceId, claim.token, null, new Date())
+      throw error
+    }
     await failBillingReconciliation(workspaceId, claim.token, error, now)
     throw error
   }
@@ -807,9 +1118,16 @@ export async function failBillingWebhook(id: string, error: unknown) {
 }
 
 export async function workspaceBillingCustomer(workspaceId: string, userId: string) {
-  const [row] = await useDb().select({ email: users.email, name: users.name })
+  const [row] = await useDb().select({
+    email: users.email,
+    name: users.name,
+    emailVerifiedAt: users.emailVerifiedAt
+  })
     .from(workspaceMembers).innerJoin(users, eq(users.id, workspaceMembers.userId))
     .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId))).limit(1)
   if (!row) throw createError({ statusCode: 403, statusMessage: 'Workspace membership required.' })
-  return row
+  if (!row.emailVerifiedAt) {
+    throw createError({ statusCode: 403, statusMessage: 'Verify your email address before starting a paid subscription.' })
+  }
+  return { email: row.email, name: row.name }
 }
