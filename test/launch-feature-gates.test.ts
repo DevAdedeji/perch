@@ -38,10 +38,10 @@ describe('launch feature gates', () => {
   it('publishes one server-owned attachment capability to both composers', () => {
     expect(authRoute).toContain('attachmentsAvailable: imageAttachmentsAvailable()')
     expect(widgetSessionRoute).toContain('attachments_available: imageAttachmentsAvailable()')
-    expect(agentComposer).toContain(':disabled="!attachmentsAvailable"')
-    expect(agentComposer).toContain('Image uploads unavailable')
-    expect(widgetPage).toContain(':disabled="uploading || !workspace?.attachments_available"')
-    expect(widgetPage).toContain('Images unavailable')
+    expect(agentComposer).toContain('v-if="!internalNote && attachmentsAvailable"')
+    expect(agentComposer).not.toContain('Image uploads unavailable')
+    expect(widgetPage).toContain('v-if="workspace?.attachments_available"')
+    expect(widgetPage).not.toContain('Images unavailable')
   })
 
   it('keeps existing image rendering and accurately describes durable webhooks', () => {

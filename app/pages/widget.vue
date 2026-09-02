@@ -1136,10 +1136,11 @@ onBeforeUnmount(() => {
               @change="onFilePicked"
             >
             <button
+              v-if="workspace?.attachments_available"
               class="grid place-items-center size-9 shrink-0 rounded-xl text-dimmed hover:text-highlighted hover:bg-elevated transition disabled:opacity-50"
-              :disabled="uploading || !workspace?.attachments_available"
-              :title="workspace?.attachments_available ? 'Attach an image (max 1 MB)' : 'Image attachments are not available for this chat'"
-              :aria-label="workspace?.attachments_available ? 'Attach an image (max 1 MB)' : 'Image attachments unavailable'"
+              :disabled="uploading"
+              title="Attach an image (max 1 MB)"
+              aria-label="Attach an image (max 1 MB)"
               @click="pickImage"
             >
               <UIcon
@@ -1148,10 +1149,6 @@ onBeforeUnmount(() => {
                 :class="uploading && 'animate-spin'"
               />
             </button>
-            <span
-              v-if="!workspace?.attachments_available"
-              class="self-center text-[11px] text-dimmed"
-            >Images unavailable</span>
             <div
               class="flex-1 flex items-end rounded-xl bg-default px-3 py-1 transition-shadow min-w-0"
               :class="composerFocused ? 'ring-2' : 'ring-1 ring-default'"

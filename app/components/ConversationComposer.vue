@@ -430,22 +430,17 @@ onBeforeUnmount(() => {
             @change="onAttachmentPicked"
           >
           <UButton
-            v-if="!internalNote"
+            v-if="!internalNote && attachmentsAvailable"
             size="sm"
             color="neutral"
             variant="ghost"
             square
             icon="i-lucide-image-plus"
             :loading="uploading"
-            :disabled="!attachmentsAvailable"
-            :title="attachmentsAvailable ? 'Attach an image (max 1 MB)' : 'Image attachments are unavailable until storage is configured'"
-            :aria-label="attachmentsAvailable ? 'Attach an image (max 1 MB)' : 'Image attachments unavailable'"
+            title="Attach an image (max 1 MB)"
+            aria-label="Attach an image (max 1 MB)"
             @click="attachmentElement?.click()"
           />
-          <span
-            v-if="!attachmentsAvailable && !internalNote"
-            class="text-[11px] text-dimmed"
-          >Image uploads unavailable</span>
           <UButton
             v-if="!internalNote"
             size="sm"
