@@ -13,9 +13,22 @@ const productCache = new Map<BillingInterval, string>()
 const bachsEnvironmentSchema = z.enum(['sandbox', 'live'])
 const providerDateSchema = z.string().refine(value => !Number.isNaN(Date.parse(value)), 'Invalid provider date')
 const providerMetadataSchema = z.record(z.string(), z.string()).nullable().optional()
-const providerProductSchema = z.object({
+const providerPriceSchema = z.object({
+  currency: z.string().min(3).max(8),
+  price_type: z.literal('fixed'),
+  amount: z.string().regex(/^\d+(?:\.\d+)?$/)
+}).passthrough()
+
+const providerBillingCycleSchema = z.object({
+  interval: z.enum(['month', 'year']),
+  frequency: z.number().int().positive()
+}).passthrough()
+
+export const bachsProductSchema = z.object({
   id: z.string().min(1),
-  metadata: providerMetadataSchema
+  metadata: providerMetadataSchema,
+  price: providerPriceSchema,
+  billing_cycle: providerBillingCycleSchema
 }).passthrough()
 
 const checkoutCreatedSchema = z.object({
@@ -56,7 +69,7 @@ export const bachsSubscriptionSchema = z.object({
   trial_end: providerDateSchema.nullable().optional(),
   cancel_at_period_end: z.boolean().optional(),
   metadata: providerMetadataSchema,
-  product: providerProductSchema.nullable().optional()
+  product: bachsProductSchema
 }).passthrough()
 
 export const bachsWebhookEventSchema = z.object({
@@ -72,6 +85,7 @@ export const bachsWebhookEventSchema = z.object({
 
 export type BachsCheckoutSession = z.infer<typeof bachsCheckoutSessionSchema>
 export type BachsSubscription = z.infer<typeof bachsSubscriptionSchema>
+export type BachsProduct = z.infer<typeof bachsProductSchema>
 export type BachsWebhookEvent = z.infer<typeof bachsWebhookEventSchema>
 
 function configuredSecretKey() {
@@ -215,19 +229,28 @@ export function isApprovedBachsCheckoutUrl(value: string | undefined): value is 
 }
 
 interface ProductPage {
-  items?: Array<z.infer<typeof providerProductSchema>>
+  items?: BachsProduct[]
   pagination?: { has_more?: boolean, next_cursor?: string | null }
 }
 
 const productPageSchema = z.object({
-  items: z.array(providerProductSchema).optional(),
+  items: z.array(bachsProductSchema).optional(),
   pagination: z.object({
     has_more: z.boolean().optional(),
     next_cursor: z.string().nullable().optional()
   }).optional()
 }).passthrough()
 
-async function findProduct(planKey: string) {
+export function productMatchesPerchPlan(product: BachsProduct, interval: BillingInterval) {
+  return product.metadata?.perch_plan === `workspace_pro_${interval}`
+    && product.price.price_type === 'fixed'
+    && product.price.currency.toUpperCase() === PERCH_PRO_PLAN.currency
+    && product.price.amount === toDecimalString(proPriceCents(interval))
+    && product.billing_cycle.interval === (interval === 'yearly' ? 'year' : 'month')
+    && product.billing_cycle.frequency === 1
+}
+
+async function findProduct(interval: BillingInterval) {
   let cursor: string | undefined
   do {
     const page = parseProviderResponse(
@@ -235,7 +258,7 @@ async function findProduct(planKey: string) {
       await bachsFetch<unknown>('/products', { query: { limit: 100, cursor } }),
       'product list'
     ) as ProductPage
-    const match = (page.items ?? []).find(product => product.metadata?.perch_plan === planKey)
+    const match = (page.items ?? []).find(product => productMatchesPerchPlan(product, interval))
     if (match) return match
     cursor = page.pagination?.has_more ? page.pagination.next_cursor ?? undefined : undefined
   } while (cursor)
@@ -246,12 +269,12 @@ export async function ensurePerchProProduct(interval: BillingInterval) {
   const cached = productCache.get(interval)
   if (cached) return cached
   const planKey = `workspace_pro_${interval}`
-  const existing = await findProduct(planKey)
+  const existing = await findProduct(interval)
   if (existing) {
     productCache.set(interval, existing.id)
     return existing.id
   }
-  const product = parseProviderResponse(providerProductSchema, await bachsFetch<unknown>('/products', {
+  const product = parseProviderResponse(bachsProductSchema, await bachsFetch<unknown>('/products', {
     method: 'POST',
     idempotencyKey: `perch-${planKey}`,
     body: {
@@ -266,6 +289,9 @@ export async function ensurePerchProProduct(interval: BillingInterval) {
       metadata: { perch_plan: planKey }
     }
   }), 'product')
+  if (!productMatchesPerchPlan(product, interval)) {
+    throw createError({ statusCode: 502, statusMessage: 'Bachs returned a product with unexpected recurring terms.' })
+  }
   productCache.set(interval, product.id)
   return product.id
 }

@@ -1,6 +1,6 @@
 {
-  "id": "dc5547bb-84f8-432d-ba97-cc97a7c9a75b",
-  "prevId": "22a8898f-b271-4900-ad67-2e2a0ae9ba9a",
+  "id": "5567698e-e75a-4931-8947-25b3244be47a",
+  "prevId": "dc5547bb-84f8-432d-ba97-cc97a7c9a75b",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -856,6 +856,185 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.billing_financial_conflicts": {
+      "name": "billing_financial_conflicts",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "workspace_id": {
+          "name": "workspace_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'duplicate_subscription'"
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'open'"
+        },
+        "canonical_subscription_id": {
+          "name": "canonical_subscription_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "conflicting_subscription_id": {
+          "name": "conflicting_subscription_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "invoice_reference": {
+          "name": "invoice_reference",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "amount_cents": {
+          "name": "amount_cents",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "currency": {
+          "name": "currency",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "provider_charge_id": {
+          "name": "provider_charge_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "attempts": {
+          "name": "attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "correlation_id": {
+          "name": "correlation_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "last_error": {
+          "name": "last_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resolved_at": {
+          "name": "resolved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "billing_financial_conflicts_subscription_uq": {
+          "name": "billing_financial_conflicts_subscription_uq",
+          "columns": [
+            {
+              "expression": "conflicting_subscription_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "billing_financial_conflicts_status_updated_idx": {
+          "name": "billing_financial_conflicts_status_updated_idx",
+          "columns": [
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "updated_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "billing_financial_conflicts_workspace_id_workspaces_id_fk": {
+          "name": "billing_financial_conflicts_workspace_id_workspaces_id_fk",
+          "tableFrom": "billing_financial_conflicts",
+          "tableTo": "workspaces",
+          "columnsFrom": [
+            "workspace_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "billing_financial_conflicts_kind_ck": {
+          "name": "billing_financial_conflicts_kind_ck",
+          "value": "\"billing_financial_conflicts\".\"kind\" = 'duplicate_subscription'"
+        },
+        "billing_financial_conflicts_status_ck": {
+          "name": "billing_financial_conflicts_status_ck",
+          "value": "\"billing_financial_conflicts\".\"status\" in ('open', 'resolved')"
+        },
+        "billing_financial_conflicts_attempts_ck": {
+          "name": "billing_financial_conflicts_attempts_ck",
+          "value": "\"billing_financial_conflicts\".\"attempts\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.billing_reconciliation_jobs": {
       "name": "billing_reconciliation_jobs",
       "schema": "",
@@ -914,6 +1093,12 @@
         },
         "last_error": {
           "name": "last_error",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "correlation_id": {
+          "name": "correlation_id",
           "type": "text",
           "primaryKey": false,
           "notNull": false
@@ -1019,6 +1204,12 @@
           "primaryKey": false,
           "notNull": true,
           "default": 1
+        },
+        "claim_token": {
+          "name": "claim_token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "last_error": {
           "name": "last_error",
@@ -5279,6 +5470,12 @@
         },
         "bachs_checkout_id": {
           "name": "bachs_checkout_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "bachs_product_id": {
+          "name": "bachs_product_id",
           "type": "text",
           "primaryKey": false,
           "notNull": false

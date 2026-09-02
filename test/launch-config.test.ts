@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   assertProductionConfig,
+  BACHS_RECURRING_RESPONSE_CONTRACT_VERIFIED,
   normalizeLaunchOrigin,
   productionConfigErrors,
   type LaunchEnvironment
@@ -75,10 +76,14 @@ describe('launch configuration', () => {
       PERCH_BILLING_CHECKOUT_ENABLED: 'sometimes'
     })).toContain('PERCH_BILLING_CHECKOUT_ENABLED must be true or false')
 
-    expect(productionConfigErrors({
+    const completeProviderErrors = productionConfigErrors({
       ...validEnvironment,
       PERCH_BILLING_CHECKOUT_ENABLED: 'true'
-    })).toEqual([])
+    })
+    expect(BACHS_RECURRING_RESPONSE_CONTRACT_VERIFIED).toBe(false)
+    expect(completeProviderErrors).toContain(
+      'PERCH_BILLING_CHECKOUT_ENABLED=true requires an authoritative Bachs recurring-response contract'
+    )
 
     expect(productionConfigErrors({
       ...validEnvironment,

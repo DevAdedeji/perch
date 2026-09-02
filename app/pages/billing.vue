@@ -9,11 +9,15 @@ interface BillingOverview {
   providerConfigured: boolean
   hasBillingHistory: boolean
   needsProviderSubscription: boolean
+  needsFinancialReview: boolean
   reconciliation: {
     status: 'pending' | 'processing' | 'retrying' | 'idle' | 'failed'
     lastCheckedAt: string | null
     nextAttemptAt: string | null
     needsAttention: boolean
+    attempts: number
+    error: string | null
+    correlationId: string | null
   } | null
   entitlement: {
     plan: 'free' | 'pro'
@@ -128,7 +132,9 @@ async function checkPaymentAfterReturn(pollSequence: number) {
   toast.add({
     title: loaded ? 'Payment is still being verified' : 'Payment status could not be refreshed',
     description: loaded
-      ? 'Perch will keep checking safely in the background. Pro activates only after payment confirmation.'
+      ? (overview.value?.reconciliation?.nextAttemptAt
+          ? 'Perch scheduled another provider check. Pro activates only after payment confirmation.'
+          : 'Perch is waiting for the signed subscription confirmation. Use Check Bachs status if it does not arrive.')
       : 'Your payment was not marked as failed. You can safely retry from this page.',
     color: 'neutral',
     icon: 'i-lucide-clock'
@@ -167,7 +173,11 @@ async function refreshProvider(options: { silent?: boolean, notify?: boolean } =
       loadError.value = getErrorMessage(error, 'Payment status could not be refreshed')
     }
     if (options.notify !== false) {
-      toast.add({ title: loadError.value, description: 'Nothing was changed. You can safely retry.', color: 'error' })
+      toast.add({
+        title: loadError.value,
+        description: 'The latest confirmed billing details are shown. A provider update may have been recorded before the later step failed; review alerts before retrying.',
+        color: 'error'
+      })
     }
     return false
   } finally {
@@ -273,7 +283,7 @@ function date(value: string) {
           Plans and billing could not load
         </h2>
         <p class="mx-auto mt-1 max-w-md text-sm text-muted">
-          {{ loadError }} Nothing was changed.
+          {{ loadError }} No billing action is available until the current details load.
         </p>
         <UButton
           class="mt-4"
@@ -292,8 +302,16 @@ function date(value: string) {
           color="error"
           variant="subtle"
           title="Automatic billing checks need attention"
-          description="Perch stopped retrying after repeated provider failures. An admin can check Bachs again safely; Pro access still follows the last confirmed paid period and cannot extend indefinitely."
+          description="Perch stopped automatic checks after repeated provider failures or an unresolved checkout exceeded its bounded verification window. An admin can check Bachs again safely; Pro access still follows the last confirmed paid period and cannot extend indefinitely."
           icon="i-lucide-triangle-alert"
+        />
+        <UAlert
+          v-if="overview.needsFinancialReview"
+          color="error"
+          variant="subtle"
+          title="Duplicate subscription needs financial review"
+          description="Perch found another provider subscription and blocked reconciliation. An operator must verify cancellation and review the duplicate charge/refund before this alert can be resolved."
+          icon="i-lucide-badge-dollar-sign"
         />
         <UAlert
           v-if="overview.needsProviderSubscription"

@@ -8,6 +8,7 @@ import {
   bachsSubscriptionSchema,
   bachsWebhookEventSchema,
   cancelBachsSubscription,
+  ensurePerchProProduct,
   getBachsCheckoutSession,
   isApprovedBachsCheckoutUrl,
   verifyBachsWebhookSignature
@@ -73,10 +74,10 @@ describe('canonical Bachs payment data', () => {
       id: 'sub_123',
       status: 'active' as const,
       metadata: { workspaceId: 'workspace_123', invoiceReference: 'invoice_123', perchPlan: 'workspace_pro', interval: 'monthly' },
-      product: { id: 'product_123', metadata: { perch_plan: 'workspace_pro_monthly' } }
+      product: { id: 'product_123', price: { currency: 'USD', price_type: 'fixed' as const, amount: '9.00' }, billing_cycle: { interval: 'month' as const, frequency: 1 }, metadata: { perch_plan: 'workspace_pro_monthly' } }
     }
     expect(providerSubscriptionIdentity(subscription)).toEqual({
-      workspaceId: 'workspace_123', invoiceReference: 'invoice_123', interval: 'monthly'
+      workspaceId: 'workspace_123', invoiceReference: 'invoice_123', interval: 'monthly', productId: 'product_123'
     })
     expect(providerSubscriptionIdentity({
       ...subscription,
@@ -85,6 +86,14 @@ describe('canonical Bachs payment data', () => {
     expect(providerSubscriptionIdentity({
       ...subscription,
       product: { ...subscription.product, metadata: { perch_plan: 'another_product' } }
+    })).toBeNull()
+    expect(providerSubscriptionIdentity({
+      ...subscription,
+      product: { ...subscription.product, price: { ...subscription.product.price, amount: '8.99' } }
+    })).toBeNull()
+    expect(providerSubscriptionIdentity({
+      ...subscription,
+      product: { ...subscription.product, billing_cycle: { interval: 'year' as const, frequency: 1 } }
     })).toBeNull()
   })
 
@@ -113,7 +122,7 @@ describe('canonical Bachs payment data', () => {
     expect(bachsSubscriptionSchema.safeParse({
       id: 'sub_123', status: 'active', current_period_end: '2026-10-01T00:00:00.000Z',
       metadata: { workspaceId: 'workspace', interval: 'monthly', perchPlan: 'workspace_pro', invoiceReference: 'invoice_123' },
-      product: { id: 'product_123', metadata: { perch_plan: 'workspace_pro_monthly' } }
+      product: { id: 'product_123', price: { currency: 'USD', price_type: 'fixed' as const, amount: '9.00' }, billing_cycle: { interval: 'month' as const, frequency: 1 }, metadata: { perch_plan: 'workspace_pro_monthly' } }
     }).success).toBe(true)
     expect(bachsSubscriptionSchema.safeParse({ id: 'sub_123', status: 'unexpected' }).success).toBe(false)
     expect(bachsWebhookEventSchema.safeParse({ id: '', type: 'invoice.paid' }).success).toBe(false)
@@ -210,7 +219,7 @@ describe('Bachs environment boundary', () => {
         interval: 'monthly',
         perchPlan: 'workspace_pro'
       },
-      product: { id: 'product_123', metadata: { perch_plan: 'workspace_pro_monthly' } }
+      product: { id: 'product_123', price: { currency: 'USD', price_type: 'fixed' as const, amount: '9.00' }, billing_cycle: { interval: 'month' as const, frequency: 1 }, metadata: { perch_plan: 'workspace_pro_monthly' } }
     }), { status: 200 }))
     vi.stubGlobal('fetch', provider)
 
@@ -224,6 +233,33 @@ describe('Bachs environment boundary', () => {
         })
       })
     )
+    vi.unstubAllGlobals()
+  })
+
+  it('does not reuse a metadata match whose recurring terms differ', async () => {
+    Object.assign(globalThis, {
+      useRuntimeConfig: () => ({
+        bachsEnvironment: 'sandbox',
+        bachsSecretKey: 'sk_sandbox_example',
+        bachsWebhookSecret: 'whsec_example'
+      })
+    })
+    const valid = {
+      id: 'product_yearly_correct',
+      metadata: { perch_plan: 'workspace_pro_yearly' },
+      price: { currency: 'USD', price_type: 'fixed', amount: '90.00' },
+      billing_cycle: { interval: 'year', frequency: 1 }
+    }
+    const provider = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        items: [{ ...valid, id: 'product_yearly_wrong', price: { ...valid.price, amount: '9.00' } }]
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(valid), { status: 200 }))
+    vi.stubGlobal('fetch', provider)
+
+    await expect(ensurePerchProProduct('yearly')).resolves.toBe('product_yearly_correct')
+    expect(provider).toHaveBeenCalledTimes(2)
+    expect(provider.mock.calls[1]?.[1]).toMatchObject({ method: 'POST' })
     vi.unstubAllGlobals()
   })
 })

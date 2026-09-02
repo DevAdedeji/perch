@@ -221,7 +221,7 @@ Useful scripts: `pnpm build` (production Nitro bundle), `pnpm preview`, `pnpm li
 | `VISITOR_REPLY_EMAIL_DELIVERY_ENABLED` | Independent delivery safety gate. It requires feature exposure and must remain `false` until the approved scheduled worker and Resend bounce/complaint webhook are configured |
 | `RESEND_WEBHOOK_SECRET` | Planned signed Resend webhook secret for durable bounce/complaint suppression; visitor reply delivery must stay disabled until this external setup is complete |
 | `BACHS_ENV` / `BACHS_SECRET_KEY` / `BACHS_WEBHOOK_SECRET` | Bachs subscription environment, API key, and webhook signature secret. Configure all three together |
-| `PERCH_BILLING_CHECKOUT_ENABLED` | Fail-closed gate for new paid checkouts. Keep `false` until the complete Bachs configuration and checkout acceptance checks are ready; disabling it does not interrupt existing subscriptions or webhooks |
+| `PERCH_BILLING_CHECKOUT_ENABLED` | Fail-closed gate for new paid checkouts. The application also keeps this closed until Bachs' canonical recurring product/subscription response contract is authoritatively verified; disabling it does not interrupt existing subscriptions or webhooks |
 | `SENTRY_DSN` | *(optional)* server-side error tracking; the client DSN lives in `sentry.client.config.ts` |
 | `CLOUDINARY_CLOUD_NAME` / `CLOUDINARY_API_KEY` / `CLOUDINARY_API_SECRET` | *(optional)* signed image attachments. Configure all three to expose uploads; existing attachment rendering remains available without upload credentials |
 | `PERCH_PUBLIC_URL` | Canonical origin used in prerendered SEO metadata, password, verification, and invite links; set it to `https://useperch.xyz` during both the production build and runtime |

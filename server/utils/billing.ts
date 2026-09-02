@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { and, billingReconciliationJobs, billingWebhookDeliveries, desc, eq, inArray, isNull, lt, ne, or, sql, users, workspaceInvoices, workspaceMembers, workspaces, workspaceSubscriptions } from '@perch/db'
+import { and, billingFinancialConflicts, billingReconciliationJobs, billingWebhookDeliveries, desc, eq, inArray, isNull, lt, ne, or, sql, users, workspaceInvoices, workspaceMembers, workspaces, workspaceSubscriptions } from '@perch/db'
 import type { BillingInterval, SubscriptionStatus } from '@perch/shared'
 import { PERCH_PRO_PLAN, proPriceCents } from '@perch/shared'
 import type { BachsCheckoutSession, BachsSubscription } from './bachs'
@@ -11,9 +11,10 @@ import {
   getBachsCheckoutSession,
   getBachsSubscription,
   isApprovedBachsCheckoutUrl,
+  productMatchesPerchPlan,
   BACHS_MAX_GET_ATTEMPTS
 } from './bachs'
-import { explicitlyEnabled } from '../../config/launch'
+import { BACHS_RECURRING_RESPONSE_CONTRACT_VERIFIED, explicitlyEnabled } from '../../config/launch'
 
 export interface WorkspaceEntitlement {
   plan: 'free' | 'pro'
@@ -39,8 +40,9 @@ type BillingReconciliationSource = 'manual' | 'sweep' | 'webhook'
 
 export function billingCheckoutEnabled() {
   const config = useRuntimeConfig()
-  return config.billingCheckoutEnabled === true
-    || explicitlyEnabled(process.env.PERCH_BILLING_CHECKOUT_ENABLED)
+  return BACHS_RECURRING_RESPONSE_CONTRACT_VERIFIED
+    && (config.billingCheckoutEnabled === true
+      || explicitlyEnabled(process.env.PERCH_BILLING_CHECKOUT_ENABLED))
 }
 
 export function subscriptionHasPaidAccess(
@@ -153,14 +155,14 @@ export function providerSubscriptionIdentity(subscription: BachsSubscription) {
   const invoiceReference = subscription.metadata?.invoiceReference
   const metadataInterval = subscription.metadata?.interval
   if (!workspaceId || !invoiceReference || subscription.metadata?.perchPlan !== 'workspace_pro') return null
-  const productPlan = subscription.product?.metadata?.perch_plan
+  const productPlan = subscription.product.metadata?.perch_plan
   const interval: BillingInterval | null = productPlan === 'workspace_pro_yearly'
     ? 'yearly'
     : productPlan === 'workspace_pro_monthly'
       ? 'monthly'
       : null
-  if (!interval || metadataInterval !== interval) return null
-  return { workspaceId, invoiceReference, interval }
+  if (!interval || metadataInterval !== interval || !productMatchesPerchPlan(subscription.product, interval)) return null
+  return { workspaceId, invoiceReference, interval, productId: subscription.product.id }
 }
 
 export async function startWorkspaceCheckout(input: {
@@ -199,6 +201,12 @@ export async function startWorkspaceCheckout(input: {
       isNull(workspaceInvoices.checkoutClosedAt)
     ), orderBy: desc(workspaceInvoices.createdAt) })
     if (openInvoice) {
+      if (openInvoice.interval !== input.interval) {
+        throw createError({
+          statusCode: 409,
+          statusMessage: `A ${openInvoice.interval} checkout is already open. Finish or close it before choosing ${input.interval}.`
+        })
+      }
       if (openInvoice.checkoutUrl && openInvoice.bachsCheckoutId) {
         return { invoice: openInvoice, ownsProviderCreation: false }
       }
@@ -255,6 +263,7 @@ export async function startWorkspaceCheckout(input: {
   try {
     const productId = await ensurePerchProProduct(reservation.invoice.interval)
     const [renewedCheckoutClaim] = await db.update(workspaceInvoices).set({
+      bachsProductId: productId,
       checkoutClaimedAt: sql`now()`,
       updatedAt: sql`now()`
     }).where(and(
@@ -281,7 +290,7 @@ export async function startWorkspaceCheckout(input: {
       throw createError({ statusCode: 502, statusMessage: 'Bachs did not return a trusted checkout URL.' })
     }
     const canonicalCheckout = await getBachsCheckoutSession(checkout.checkout_id)
-    const expectedInvoice = { ...reservation.invoice, bachsCheckoutId: checkout.checkout_id }
+    const expectedInvoice = { ...reservation.invoice, bachsCheckoutId: checkout.checkout_id, bachsProductId: productId }
     if (!checkoutMatchesInvoice(canonicalCheckout, expectedInvoice)) {
       throw createError({ statusCode: 502, statusMessage: 'Bachs checkout did not match the expected plan.' })
     }
@@ -404,7 +413,7 @@ export async function cancelWorkspacePlan(workspaceId: string) {
 
 export async function billingOverview(workspaceId: string) {
   const db = useDb()
-  const [entitlement, invoices, reconciliation, subscription] = await Promise.all([
+  const [entitlement, invoices, reconciliation, subscription, financialConflicts] = await Promise.all([
     workspaceEntitlement(workspaceId),
     db.select({
       id: workspaceInvoices.id,
@@ -419,7 +428,13 @@ export async function billingOverview(workspaceId: string) {
     }).from(workspaceInvoices).where(eq(workspaceInvoices.workspaceId, workspaceId))
       .orderBy(desc(workspaceInvoices.createdAt)).limit(24),
     db.query.billingReconciliationJobs.findFirst({ where: eq(billingReconciliationJobs.workspaceId, workspaceId) }),
-    db.query.workspaceSubscriptions.findFirst({ where: eq(workspaceSubscriptions.workspaceId, workspaceId) })
+    db.query.workspaceSubscriptions.findFirst({ where: eq(workspaceSubscriptions.workspaceId, workspaceId) }),
+    db.select({ id: billingFinancialConflicts.id })
+      .from(billingFinancialConflicts)
+      .where(and(
+        eq(billingFinancialConflicts.workspaceId, workspaceId),
+        eq(billingFinancialConflicts.status, 'open')
+      )).limit(1)
   ])
   return {
     entitlement,
@@ -429,12 +444,16 @@ export async function billingOverview(workspaceId: string) {
     needsProviderSubscription: invoices.some(invoice => invoice.status === 'paid'
       && !invoice.checkoutClosedAt
       && (!subscription?.bachsSubscriptionId || subscription.lastInvoiceReference !== invoice.reference)),
+    needsFinancialReview: financialConflicts.length > 0,
     reconciliation: reconciliation
       ? {
           status: reconciliation.status,
           lastCheckedAt: reconciliation.lastCheckedAt?.toISOString() ?? null,
           nextAttemptAt: reconciliation.nextAttemptAt?.toISOString() ?? null,
-          needsAttention: reconciliation.status === 'failed'
+          needsAttention: reconciliation.status === 'failed',
+          attempts: reconciliation.attempts,
+          error: reconciliation.lastError ? safeBillingError(reconciliation.lastError) : null,
+          correlationId: reconciliation.correlationId
         }
       : null,
     invoices: invoices.map(row => ({
@@ -447,65 +466,6 @@ export async function billingOverview(workspaceId: string) {
       paidAt: row.paidAt?.toISOString() ?? null,
       createdAt: row.createdAt.toISOString()
     }))
-  }
-}
-
-export async function applyWorkspaceSubscriptionState(subscription: BachsSubscription) {
-  const identity = providerSubscriptionIdentity(subscription)
-  if (!identity) {
-    return { applied: false, reason: 'not-perch-pro' as const }
-  }
-  const now = new Date()
-  const claim = await claimBillingReconciliation(identity.workspaceId, 'webhook', now)
-  if (!claim) {
-    await enqueueBillingReconciliation(identity.workspaceId, now)
-    throw createError({ statusCode: 503, statusMessage: 'Billing status is already being checked. Please retry shortly.' })
-  }
-  try {
-    const invoice = await useDb().query.workspaceInvoices.findFirst({ where: and(
-      eq(workspaceInvoices.workspaceId, identity.workspaceId),
-      eq(workspaceInvoices.reference, identity.invoiceReference),
-      eq(workspaceInvoices.interval, identity.interval)
-    ) })
-    const applied = await applyCanonicalBillingSnapshot({
-      workspaceId: identity.workspaceId,
-      claimToken: claim.token,
-      invoice,
-      checkout: null,
-      subscription,
-      now
-    })
-    if (applied.staleClaim) {
-      throw createError({ statusCode: 503, statusMessage: 'A newer billing check replaced this provider response.' })
-    }
-    if (applied.conflictingSubscriptionId) {
-      if (!await renewBillingReconciliationClaim(identity.workspaceId, claim.token)) {
-        throw createError({ statusCode: 503, statusMessage: 'A newer billing check replaced this cancellation request.' })
-      }
-      const canceled = await cancelBachsSubscription(
-        applied.conflictingSubscriptionId,
-        `perch-conflicting-subscription-${identity.workspaceId}-${applied.conflictingSubscriptionId}`
-      )
-      const canceledIdentity = providerSubscriptionIdentity(canceled)
-      if (canceled.id !== applied.conflictingSubscriptionId
-        || !canceledIdentity
-        || canceledIdentity.workspaceId !== identity.workspaceId
-        || canceledIdentity.invoiceReference !== identity.invoiceReference
-        || (!canceled.cancel_at_period_end && canceled.status !== 'canceled')) {
-        throw createError({ statusCode: 502, statusMessage: 'Bachs did not safely cancel the conflicting subscription.' })
-      }
-    }
-    await finishBillingReconciliation(identity.workspaceId, claim.token, nextSuccessfulBillingCheck({
-      pendingCheckout: false,
-      subscription,
-      now
-    }), new Date())
-    return applied.subscriptionIgnored
-      ? { applied: false, reason: 'stale-invoice' as const, workspaceId: identity.workspaceId }
-      : { applied: applied.subscriptionUpdated, workspaceId: identity.workspaceId }
-  } catch (error) {
-    await failBillingReconciliation(identity.workspaceId, claim.token, error, now)
-    throw error
   }
 }
 
@@ -542,11 +502,13 @@ async function applyCanonicalBillingSnapshot(input: {
       workspaceId: string
     } = { applied: false, reason: 'unknown-checkout', workspaceId: input.workspaceId }
     let pendingCheckout = false
+    let pendingRecoveryUntil: Date | null = null
     let terminalRecoveryUntil: Date | null = null
     if (input.checkout && invoice) {
       const state = checkoutPaymentState(input.checkout)
       if (state === 'pending') {
         pendingCheckout = true
+        pendingRecoveryUntil = invoice.reconcileUntil
         invoiceOutcome = { applied: false, reason: 'provider-pending', workspaceId: input.workspaceId }
       } else if (state === 'failed') {
         const reason = `Bachs checkout is ${input.checkout.charge?.status ?? input.checkout.status}.`.slice(0, 1000)
@@ -588,6 +550,7 @@ async function applyCanonicalBillingSnapshot(input: {
     let subscriptionUpdated = false
     let subscriptionIgnored = false
     let conflictingSubscriptionId: string | null = null
+    let conflictingInvoiceReference: string | null = null
     if (input.subscription) {
       const identity = providerSubscriptionIdentity(input.subscription)
       if (!identity || identity.workspaceId !== input.workspaceId) {
@@ -598,7 +561,9 @@ async function applyCanonicalBillingSnapshot(input: {
         eq(workspaceInvoices.reference, identity.invoiceReference),
         eq(workspaceInvoices.interval, identity.interval)
       )).limit(1).for('update')
-      if (!subscriptionInvoice?.bachsCheckoutId || !invoiceMatchesPerchPlan(subscriptionInvoice)) {
+      if (!subscriptionInvoice?.bachsCheckoutId
+        || (subscriptionInvoice.bachsProductId && subscriptionInvoice.bachsProductId !== identity.productId)
+        || !invoiceMatchesPerchPlan(subscriptionInvoice)) {
         throw createError({ statusCode: 502, statusMessage: 'Bachs subscription did not match a valid Perch invoice.' })
       }
       const [existingSubscription] = await tx.select().from(workspaceSubscriptions)
@@ -626,7 +591,14 @@ async function applyCanonicalBillingSnapshot(input: {
         const incomingIsNewer = Boolean(existingInvoice && subscriptionInvoice.createdAt > existingInvoice.createdAt)
         if (incomingWasSuperseded || existingStillPaid || !incomingIsNewer) {
           subscriptionIgnored = true
-          conflictingSubscriptionId = input.subscription.id
+          const incomingEnd = providerPaidThroughEnd(input.subscription)
+          if (input.subscription.status !== 'canceled' || (incomingEnd && incomingEnd > input.now)) {
+            conflictingSubscriptionId = input.subscription.id
+            conflictingInvoiceReference = subscriptionInvoice.reference
+          }
+        } else if (existingSubscription?.bachsSubscriptionId && existingSubscription.status !== 'canceled') {
+          conflictingSubscriptionId = existingSubscription.bachsSubscriptionId
+          conflictingInvoiceReference = existingInvoice?.reference ?? existingSubscription.lastInvoiceReference
         }
       }
       if (!subscriptionIgnored) {
@@ -651,11 +623,49 @@ async function applyCanonicalBillingSnapshot(input: {
             updatedAt: sql`now()`
           }
         })
+        // New checkouts persist their expected product before redirect. A
+        // pre-0029 invoice has no authoritative local product id to backfill;
+        // adopt it only here, after exact checkout binding and canonical
+        // recurring terms above have both been verified.
         await tx.update(workspaceInvoices).set({
+          bachsProductId: identity.productId,
           checkoutClosedAt: subscriptionInvoice.checkoutClosedAt ?? sql`now()`,
           updatedAt: sql`now()`
         }).where(eq(workspaceInvoices.id, subscriptionInvoice.id))
         subscriptionUpdated = true
+      }
+      if (conflictingSubscriptionId) {
+        const conflictInvoice = conflictingInvoiceReference === subscriptionInvoice.reference
+          ? subscriptionInvoice
+          : existingInvoice
+        const canonicalSubscriptionId = subscriptionIgnored
+          ? existingSubscription?.bachsSubscriptionId ?? null
+          : input.subscription.id
+        await tx.insert(billingFinancialConflicts).values({
+          workspaceId: input.workspaceId,
+          canonicalSubscriptionId,
+          conflictingSubscriptionId,
+          invoiceReference: conflictingInvoiceReference,
+          amountCents: conflictInvoice?.amountCents ?? null,
+          currency: conflictInvoice?.currency ?? null,
+          providerChargeId: conflictInvoice?.bachsChargeId ?? null,
+          correlationId: input.claimToken,
+          lastError: 'Duplicate subscription requires cancellation and refund review.'
+        }).onConflictDoUpdate({
+          target: billingFinancialConflicts.conflictingSubscriptionId,
+          set: {
+            status: 'open',
+            canonicalSubscriptionId,
+            invoiceReference: conflictingInvoiceReference,
+            amountCents: conflictInvoice?.amountCents ?? null,
+            currency: conflictInvoice?.currency ?? null,
+            providerChargeId: conflictInvoice?.bachsChargeId ?? null,
+            correlationId: input.claimToken,
+            lastError: 'Duplicate subscription requires cancellation and refund review.',
+            resolvedAt: null,
+            updatedAt: sql`now()`
+          }
+        })
       }
     }
 
@@ -665,7 +675,9 @@ async function applyCanonicalBillingSnapshot(input: {
       subscriptionUpdated,
       subscriptionIgnored,
       conflictingSubscriptionId,
+      conflictingInvoiceReference,
       pendingCheckout,
+      pendingRecoveryUntil,
       terminalRecoveryUntil
     }
   })
@@ -754,11 +766,17 @@ function billingReconciliationRetryAt(attempts: number, now: Date) {
 
 function nextSuccessfulBillingCheck(input: {
   pendingCheckout: boolean
+  pendingRecoveryUntil?: Date | null
   terminalRecoveryUntil?: Date | null
   subscription: BachsSubscription | null
   now: Date
 }) {
-  if (input.pendingCheckout) return new Date(input.now.getTime() + RECONCILIATION_POLL_MS)
+  if (input.pendingCheckout && input.pendingRecoveryUntil && input.pendingRecoveryUntil > input.now) {
+    return new Date(Math.min(
+      input.now.getTime() + RECONCILIATION_POLL_MS,
+      input.pendingRecoveryUntil.getTime()
+    ))
+  }
   if (input.terminalRecoveryUntil && input.terminalRecoveryUntil > input.now) {
     return new Date(Math.min(
       input.now.getTime() + 60 * 60_000,
@@ -791,6 +809,7 @@ async function finishBillingReconciliation(
     nextAttemptAt: sql`case when ${billingReconciliationJobs.requestedAt} is not null then ${nowIso}::timestamptz else ${nextAttemptIso}::timestamptz end`,
     lastCheckedAt: now,
     lastError: null,
+    correlationId: token,
     updatedAt: sql`now()`
   }).where(and(
     eq(billingReconciliationJobs.workspaceId, workspaceId),
@@ -799,7 +818,13 @@ async function finishBillingReconciliation(
   return Boolean(updated)
 }
 
-async function failBillingReconciliation(workspaceId: string, token: string, error: unknown, now: Date) {
+async function failBillingReconciliation(
+  workspaceId: string,
+  token: string,
+  error: unknown,
+  now: Date,
+  options: { terminal?: boolean } = {}
+) {
   const current = await useDb().query.billingReconciliationJobs.findFirst({
     where: and(
       eq(billingReconciliationJobs.workspaceId, workspaceId),
@@ -807,18 +832,26 @@ async function failBillingReconciliation(workspaceId: string, token: string, err
     )
   })
   if (!current) return
-  const attempts = Math.min(current.attempts + 1, RECONCILIATION_MAX_FAILURES)
-  const terminal = attempts >= RECONCILIATION_MAX_FAILURES && !current.requestedAt
+  const attempts = options.terminal
+    ? RECONCILIATION_MAX_FAILURES
+    : Math.min(current.attempts + 1, RECONCILIATION_MAX_FAILURES)
+  const terminal = options.terminal || (attempts >= RECONCILIATION_MAX_FAILURES && !current.requestedAt)
   const nowIso = now.toISOString()
   const retryIso = terminal ? null : billingReconciliationRetryAt(attempts, now).toISOString()
   const [updated] = await useDb().update(billingReconciliationJobs).set({
-    status: sql`case when ${billingReconciliationJobs.requestedAt} is not null then 'retrying'::billing_reconciliation_status else ${terminal ? 'failed' : 'retrying'}::billing_reconciliation_status end`,
+    status: options.terminal
+      ? 'failed'
+      : sql`case when ${billingReconciliationJobs.requestedAt} is not null then 'retrying'::billing_reconciliation_status else ${terminal ? 'failed' : 'retrying'}::billing_reconciliation_status end`,
     attempts,
     claimToken: null,
     claimedAt: null,
     requestedAt: null,
-    nextAttemptAt: sql`case when ${billingReconciliationJobs.requestedAt} is not null then ${nowIso}::timestamptz else ${retryIso}::timestamptz end`,
-    lastError: String((error as { statusMessage?: string })?.statusMessage ?? (error as Error)?.message ?? error).slice(0, 1000),
+    nextAttemptAt: options.terminal
+      ? null
+      : sql`case when ${billingReconciliationJobs.requestedAt} is not null then ${nowIso}::timestamptz else ${retryIso}::timestamptz end`,
+    lastCheckedAt: now,
+    lastError: safeBillingError(error),
+    correlationId: token,
     updatedAt: sql`now()`
   }).where(and(
     eq(billingReconciliationJobs.workspaceId, workspaceId),
@@ -831,6 +864,36 @@ async function failBillingReconciliation(workspaceId: string, token: string, err
       attempts
     })
   }
+}
+
+function safeBillingError(error: unknown) {
+  return String((error as { statusMessage?: string })?.statusMessage ?? (error as Error)?.message ?? error)
+    .replace(/https?:\/\/\S+/gi, '[redacted-url]')
+    .replace(/\b(?:sk|whsec)_[A-Za-z0-9_-]+\b/g, '[redacted-secret]')
+    .replace(/\bBearer\s+\S+/gi, 'Bearer [redacted]')
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, '[redacted-email]')
+    .slice(0, 1000)
+}
+
+async function containFinancialConflict(
+  workspaceId: string,
+  claimToken: string,
+  conflict: { conflictingSubscriptionId: string, conflictingInvoiceReference: string | null }
+) {
+  await useDb().update(billingFinancialConflicts).set({
+    attempts: sql`${billingFinancialConflicts.attempts} + 1`,
+    correlationId: claimToken,
+    lastError: 'Verified cancellation and duplicate charge/refund review are required.',
+    updatedAt: sql`now()`
+  }).where(and(
+    eq(billingFinancialConflicts.workspaceId, workspaceId),
+    eq(billingFinancialConflicts.conflictingSubscriptionId, conflict.conflictingSubscriptionId),
+    eq(billingFinancialConflicts.status, 'open')
+  ))
+  throw createError({
+    statusCode: 409,
+    statusMessage: 'A duplicate paid subscription needs verified cancellation and operator refund review. Billing reconciliation remains blocked.'
+  })
 }
 
 interface ReconcileWorkspaceBillingOptions {
@@ -901,10 +964,22 @@ async function reconcileWorkspaceBillingUnderClaim(
   if (canonicalCheckout && !checkoutMatchesInvoice(canonicalCheckout, invoice!)) {
     throw createError({ statusCode: 502, statusMessage: 'Bachs checkout did not match the local invoice.' })
   }
-  const subscriptionId = options.subscriptionId
-    ?? subscriptionRow?.bachsSubscriptionId
-    ?? canonicalCheckout?.subscription_id
-    ?? null
+  const canonicalCheckoutState = canonicalCheckout ? checkoutPaymentState(canonicalCheckout) : null
+  const checkoutSubscriptionId = canonicalCheckoutState === 'paid'
+    ? canonicalCheckout?.subscription_id ?? null
+    : null
+  const subscriptionId = canonicalCheckoutState && canonicalCheckoutState !== 'paid'
+    ? options.subscriptionSnapshot ? options.subscriptionId ?? null : null
+    : checkoutSubscriptionId
+      ?? options.subscriptionId
+      ?? subscriptionRow?.bachsSubscriptionId
+      ?? null
+  if (options.subscriptionSnapshot && options.subscriptionSnapshot.id !== subscriptionId) {
+    throw createError({
+      statusCode: 502,
+      statusMessage: 'The checkout is linked to a different Bachs subscription.'
+    })
+  }
   const canonicalSubscription = options.subscriptionSnapshot
     ?? (subscriptionId ? await getBachsSubscription(subscriptionId) : null)
   const subscriptionIdentity = canonicalSubscription ? providerSubscriptionIdentity(canonicalSubscription) : null
@@ -914,6 +989,19 @@ async function reconcileWorkspaceBillingUnderClaim(
   if (canonicalSubscription && (!subscriptionIdentity || subscriptionIdentity.workspaceId !== workspaceId)) {
     throw createError({ statusCode: 502, statusMessage: 'Bachs subscription did not match this workspace.' })
   }
+  if (canonicalCheckout && canonicalSubscription
+    && canonicalCheckout.subscription_id !== canonicalSubscription.id) {
+    throw createError({
+      statusCode: 502,
+      statusMessage: 'Bachs did not bind the checkout to the exact subscription.'
+    })
+  }
+  if (canonicalCheckout && canonicalSubscription && checkoutPaymentState(canonicalCheckout) !== 'paid') {
+    throw createError({
+      statusCode: 502,
+      statusMessage: 'Bachs did not confirm a paid checkout for this subscription.'
+    })
+  }
   if (subscriptionIdentity) {
     const subscriptionInvoice = invoice?.reference === subscriptionIdentity.invoiceReference
       ? invoice
@@ -922,7 +1010,9 @@ async function reconcileWorkspaceBillingUnderClaim(
           eq(workspaceInvoices.reference, subscriptionIdentity.invoiceReference),
           eq(workspaceInvoices.interval, subscriptionIdentity.interval)
         ) })
-    if (!subscriptionInvoice?.bachsCheckoutId || !invoiceMatchesPerchPlan(subscriptionInvoice)) {
+    if (!subscriptionInvoice?.bachsCheckoutId
+      || (subscriptionInvoice.bachsProductId && subscriptionInvoice.bachsProductId !== subscriptionIdentity.productId)
+      || !invoiceMatchesPerchPlan(subscriptionInvoice)) {
       throw createError({ statusCode: 502, statusMessage: 'Bachs subscription did not match a valid Perch invoice.' })
     }
   }
@@ -949,22 +1039,11 @@ async function reconcileWorkspaceBillingUnderClaim(
       statusMessage: 'A newer billing check replaced this provider response. Please check the current status.'
     })
   }
-  if (applied.conflictingSubscriptionId && canonicalSubscription) {
-    if (!await renewBillingReconciliationClaim(workspaceId, claimToken)) {
-      throw createError({ statusCode: 503, statusMessage: 'A newer billing check replaced this cancellation request.' })
-    }
-    const canceled = await cancelBachsSubscription(
-      applied.conflictingSubscriptionId,
-      `perch-conflicting-subscription-${workspaceId}-${applied.conflictingSubscriptionId}`
-    )
-    const canceledIdentity = providerSubscriptionIdentity(canceled)
-    if (canceled.id !== applied.conflictingSubscriptionId
-      || !canceledIdentity
-      || canceledIdentity.workspaceId !== workspaceId
-      || canceledIdentity.invoiceReference !== providerSubscriptionIdentity(canonicalSubscription)?.invoiceReference
-      || (!canceled.cancel_at_period_end && canceled.status !== 'canceled')) {
-      throw createError({ statusCode: 502, statusMessage: 'Bachs did not safely cancel the conflicting subscription.' })
-    }
+  if (applied.conflictingSubscriptionId) {
+    await containFinancialConflict(workspaceId, claimToken, {
+      conflictingSubscriptionId: applied.conflictingSubscriptionId,
+      conflictingInvoiceReference: applied.conflictingInvoiceReference
+    })
   }
   return {
     invoiceOutcome: applied.invoiceOutcome,
@@ -974,6 +1053,7 @@ async function reconcileWorkspaceBillingUnderClaim(
     subscriptionUpdated: applied.subscriptionUpdated,
     subscriptionIgnored: applied.subscriptionIgnored,
     pendingCheckout: applied.pendingCheckout,
+    pendingRecoveryUntil: applied.pendingRecoveryUntil,
     terminalRecoveryUntil: applied.terminalRecoveryUntil,
     canonicalSubscription,
     providerResourcesChecked
@@ -991,13 +1071,23 @@ export async function reconcileWorkspaceBilling(workspaceId: string, options: Re
   }
   try {
     const result = await reconcileWorkspaceBillingUnderClaim(workspaceId, claim.token, { ...options, now })
+    if (result.pendingCheckout
+      && (!result.pendingRecoveryUntil || result.pendingRecoveryUntil <= now)) {
+      throw createError({
+        statusCode: 409,
+        statusMessage: 'A Bachs checkout is still pending after its bounded verification window. Automatic checks stopped and operator review is required.'
+      })
+    }
     const nextAttemptAt = nextSuccessfulBillingCheck({
       pendingCheckout: result.pendingCheckout,
+      pendingRecoveryUntil: result.pendingRecoveryUntil,
       terminalRecoveryUntil: result.terminalRecoveryUntil,
       subscription: result.canonicalSubscription,
       now
     })
-    await finishBillingReconciliation(workspaceId, claim.token, nextAttemptAt, new Date())
+    if (!await finishBillingReconciliation(workspaceId, claim.token, nextAttemptAt, new Date())) {
+      throw createError({ statusCode: 503, statusMessage: 'A newer billing check replaced this completion.' })
+    }
     const overview = await billingOverview(workspaceId)
     return {
       checkedAt: now.toISOString(),
@@ -1019,7 +1109,9 @@ export async function reconcileWorkspaceBilling(workspaceId: string, options: Re
       await finishBillingReconciliation(workspaceId, claim.token, null, new Date())
       throw error
     }
-    await failBillingReconciliation(workspaceId, claim.token, error, now)
+    const agedPendingCheckout = String((error as { statusMessage?: string })?.statusMessage)
+      .startsWith('A Bachs checkout is still pending after its bounded verification window')
+    await failBillingReconciliation(workspaceId, claim.token, error, now, { terminal: agedPendingCheckout })
     throw error
   }
 }
@@ -1093,28 +1185,60 @@ export async function runBillingReconciliationSweep(options: { now?: Date, limit
 
 export async function claimBillingWebhook(providerEventId: string, eventType: string) {
   const db = useDb()
-  const [created] = await db.insert(billingWebhookDeliveries).values({ providerEventId, eventType }).onConflictDoNothing().returning()
-  if (created) return { delivery: created, shouldProcess: true }
+  const claimToken = randomUUID()
+  const [created] = await db.insert(billingWebhookDeliveries).values({ providerEventId, eventType, claimToken }).onConflictDoNothing().returning()
+  if (created) return { delivery: created, claimToken, shouldProcess: true }
   const stale = new Date(Date.now() - 5 * 60_000)
   const [reclaimed] = await db.update(billingWebhookDeliveries).set({
-    status: 'processing', attempts: sql`${billingWebhookDeliveries.attempts} + 1`, lastError: null, updatedAt: sql`now()`
+    status: 'processing',
+    attempts: sql`${billingWebhookDeliveries.attempts} + 1`,
+    claimToken,
+    lastError: null,
+    updatedAt: sql`now()`
   }).where(and(
     eq(billingWebhookDeliveries.providerEventId, providerEventId),
     or(eq(billingWebhookDeliveries.status, 'failed'), and(eq(billingWebhookDeliveries.status, 'processing'), lt(billingWebhookDeliveries.updatedAt, stale)))
   )).returning()
   const delivery = reclaimed ?? await db.query.billingWebhookDeliveries.findFirst({ where: eq(billingWebhookDeliveries.providerEventId, providerEventId) })
-  return { delivery: delivery!, shouldProcess: Boolean(reclaimed) }
+  return { delivery: delivery!, claimToken: reclaimed ? claimToken : null, shouldProcess: Boolean(reclaimed) }
 }
 
-export async function finishBillingWebhook(id: string, status: 'completed' | 'ignored', error?: string) {
-  await useDb().update(billingWebhookDeliveries).set({ status, lastError: error ?? null, updatedAt: sql`now()` })
-    .where(eq(billingWebhookDeliveries.id, id))
+export async function finishBillingWebhook(id: string, claimToken: string, status: 'completed' | 'ignored', error?: string) {
+  const [finished] = await useDb().update(billingWebhookDeliveries).set({
+    status,
+    claimToken: null,
+    lastError: error ?? null,
+    updatedAt: sql`now()`
+  }).where(and(
+    eq(billingWebhookDeliveries.id, id),
+    eq(billingWebhookDeliveries.status, 'processing'),
+    eq(billingWebhookDeliveries.claimToken, claimToken)
+  )).returning({ id: billingWebhookDeliveries.id })
+  return Boolean(finished)
 }
 
-export async function failBillingWebhook(id: string, error: unknown) {
-  await useDb().update(billingWebhookDeliveries).set({
-    status: 'failed', lastError: String((error as Error)?.message ?? error).slice(0, 1000), updatedAt: sql`now()`
-  }).where(eq(billingWebhookDeliveries.id, id))
+export async function requireBillingWebhookFinish(
+  id: string,
+  claimToken: string,
+  status: 'completed' | 'ignored'
+) {
+  if (!await finishBillingWebhook(id, claimToken, status)) {
+    throw createError({
+      statusCode: 503,
+      statusMessage: 'A newer webhook handler replaced this completion. Retry the signed event.'
+    })
+  }
+}
+
+export async function failBillingWebhook(id: string, claimToken: string, error: unknown) {
+  const [failed] = await useDb().update(billingWebhookDeliveries).set({
+    status: 'failed', claimToken: null, lastError: safeBillingError(error), updatedAt: sql`now()`
+  }).where(and(
+    eq(billingWebhookDeliveries.id, id),
+    eq(billingWebhookDeliveries.status, 'processing'),
+    eq(billingWebhookDeliveries.claimToken, claimToken)
+  )).returning({ id: billingWebhookDeliveries.id })
+  return Boolean(failed)
 }
 
 export async function workspaceBillingCustomer(workspaceId: string, userId: string) {

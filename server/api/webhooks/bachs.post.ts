@@ -67,10 +67,14 @@ export default defineEventHandler(async (event) => {
     } else {
       result = { received: true, ignored: eventType }
     }
-    await finishBillingWebhook(claim.delivery.id, 'ignored' in result ? 'ignored' : 'completed')
+    await requireBillingWebhookFinish(
+      claim.delivery.id,
+      claim.claimToken!,
+      'ignored' in result ? 'ignored' : 'completed'
+    )
     return result
   } catch (error) {
-    await failBillingWebhook(claim.delivery.id, error)
+    await failBillingWebhook(claim.delivery.id, claim.claimToken!, error)
     throw createError({ statusCode: 500, statusMessage: 'Webhook processing failed' })
   }
 })

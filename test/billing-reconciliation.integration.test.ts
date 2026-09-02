@@ -4,7 +4,7 @@ import { drizzle } from '../packages/db/node_modules/drizzle-orm/postgres-js/ind
 import { eq } from '../packages/db/node_modules/drizzle-orm/index.js'
 import postgres from '../packages/db/node_modules/postgres/src/index.js'
 import * as schema from '../packages/db/src/schema'
-import { applyWorkspaceSubscriptionState, cancelWorkspacePlan, reconcileWorkspaceBilling, reconcileWorkspaceSubscriptionEvent, runBillingReconciliationSweep, startWorkspaceCheckout, workspaceBillingCustomer, workspaceEntitlement } from '../server/utils/billing'
+import { cancelWorkspacePlan, claimBillingWebhook, failBillingWebhook, finishBillingWebhook, reconcileWorkspaceBilling, reconcileWorkspaceSubscriptionEvent, requireBillingWebhookFinish, runBillingReconciliationSweep, startWorkspaceCheckout, workspaceBillingCustomer, workspaceEntitlement } from '../server/utils/billing'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
 
@@ -20,33 +20,45 @@ describe.skipIf(!databaseUrl)('billing reconciliation database integration', () 
   let checkoutSubscriptionId: string | null = null
   let providerRequests: string[] = []
 
-  function checkoutPayload() {
+  function checkoutPayload(options: {
+    chargeStatus?: typeof checkoutStatus
+    sessionStatus?: 'open' | 'completed'
+    paymentStatus?: 'processing' | 'succeeded'
+    includeCharge?: boolean
+  } = {}) {
     return {
       checkout_id: checkoutId,
-      status: 'completed',
-      payment_status: 'succeeded',
+      status: options.sessionStatus ?? 'completed',
+      payment_status: options.paymentStatus ?? 'succeeded',
       amount: checkoutAmount,
       currency: 'USD',
       reference,
       subscription_id: checkoutSubscriptionId,
-      charge: {
-        payment_id: `payment_${checkoutId}`,
-        status: checkoutStatus,
-        amount: checkoutAmount,
-        amount_paid: checkoutAmount,
-        currency: 'USD'
-      }
+      charge: options.includeCharge === false
+        ? null
+        : {
+            payment_id: `payment_${checkoutId}`,
+            status: options.chargeStatus ?? checkoutStatus,
+            amount: checkoutAmount,
+            amount_paid: checkoutAmount,
+            currency: 'USD'
+          }
     }
   }
 
-  function subscriptionPayload() {
+  function subscriptionPayload(options: {
+    status?: 'active' | 'canceled'
+    cancelAtPeriodEnd?: boolean
+    currentPeriodEnd?: string
+    workspaceId?: string
+  } = {}) {
     return {
       id: subscriptionId,
-      status: 'active',
-      current_period_end: '2026-10-01T00:00:00.000Z',
-      cancel_at_period_end: false,
-      metadata: { workspaceId, invoiceReference: reference, perchPlan: 'workspace_pro', interval: 'monthly' },
-      product: { id: 'product_monthly', metadata: { perch_plan: 'workspace_pro_monthly' } }
+      status: options.status ?? 'active',
+      current_period_end: options.currentPeriodEnd ?? '2026-10-01T00:00:00.000Z',
+      cancel_at_period_end: options.cancelAtPeriodEnd ?? false,
+      metadata: { workspaceId: options.workspaceId ?? workspaceId, invoiceReference: reference, perchPlan: 'workspace_pro', interval: 'monthly' },
+      product: { id: 'product_monthly', price: { currency: 'USD', price_type: 'fixed' as const, amount: '9.00' }, billing_cycle: { interval: 'month' as const, frequency: 1 }, metadata: { perch_plan: 'workspace_pro_monthly' } }
     }
   }
 
@@ -71,7 +83,7 @@ describe.skipIf(!databaseUrl)('billing reconciliation database integration', () 
     reference = `invoice_${randomUUID()}`
     checkoutStatus = 'succeeded'
     checkoutAmount = '9.00'
-    checkoutSubscriptionId = null
+    checkoutSubscriptionId = subscriptionId
     providerRequests = []
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input)
@@ -79,7 +91,7 @@ describe.skipIf(!databaseUrl)('billing reconciliation database integration', () 
       const payload = url.includes('/checkout-sessions/')
         ? checkoutPayload()
         : init?.method === 'DELETE'
-          ? { ...subscriptionPayload(), cancel_at_period_end: true }
+          ? subscriptionPayload({ cancelAtPeriodEnd: true })
           : subscriptionPayload()
       return new Response(JSON.stringify(payload), { status: 200, headers: { 'Content-Type': 'application/json' } })
     }))
@@ -87,6 +99,7 @@ describe.skipIf(!databaseUrl)('billing reconciliation database integration', () 
 
   afterEach(async () => {
     vi.unstubAllGlobals()
+    await db.delete(schema.billingFinancialConflicts).where(eq(schema.billingFinancialConflicts.workspaceId, workspaceId))
     await db.delete(schema.billingReconciliationJobs).where(eq(schema.billingReconciliationJobs.workspaceId, workspaceId))
     await db.delete(schema.workspaceSubscriptions).where(eq(schema.workspaceSubscriptions.workspaceId, workspaceId))
     await db.delete(schema.workspaceInvoices).where(eq(schema.workspaceInvoices.workspaceId, workspaceId))
@@ -106,6 +119,7 @@ describe.skipIf(!databaseUrl)('billing reconciliation database integration', () 
       amountCents: 900,
       currency: 'USD',
       bachsCheckoutId: checkoutId,
+      bachsProductId: 'product_monthly',
       paidAt: status === 'paid' ? new Date('2026-09-01T00:00:00Z') : null,
       periodStart: new Date('2026-09-01T00:00:00Z'),
       periodEnd: new Date('2026-10-01T00:00:00Z')
@@ -148,7 +162,7 @@ describe.skipIf(!databaseUrl)('billing reconciliation database integration', () 
       providerRequests.push(url)
       if (url.includes('/products')) {
         return new Response(JSON.stringify({
-          items: [{ id: 'product_monthly', metadata: { perch_plan: 'workspace_pro_monthly' } }]
+          items: [{ id: 'product_monthly', price: { currency: 'USD', price_type: 'fixed' as const, amount: '9.00' }, billing_cycle: { interval: 'month' as const, frequency: 1 }, metadata: { perch_plan: 'workspace_pro_monthly' } }]
         }), { status: 200 })
       }
       if (url.endsWith('/checkout-sessions') && init?.method === 'POST') {
@@ -174,6 +188,13 @@ describe.skipIf(!databaseUrl)('billing reconciliation database integration', () 
       origin: 'https://staging.useperch.xyz'
     })
     await started
+    await expect(startWorkspaceCheckout({
+      workspaceId,
+      interval: 'yearly',
+      requestId: randomUUID(),
+      customer: { email: 'verified@example.com', name: 'Verified Admin' },
+      origin: 'https://staging.useperch.xyz'
+    })).rejects.toThrow('monthly checkout is already open')
     await expect(startWorkspaceCheckout({
       workspaceId,
       interval: 'monthly',
@@ -228,6 +249,7 @@ describe.skipIf(!databaseUrl)('billing reconciliation database integration', () 
   })
 
   it('recovers a failed checkout that later becomes paid when its webhook was missed', async () => {
+    checkoutSubscriptionId = null
     await insertInvoice('failed')
     await db.update(schema.workspaceInvoices).set({
       reconcileUntil: new Date('2026-09-03T00:00:00Z')
@@ -255,7 +277,50 @@ describe.skipIf(!databaseUrl)('billing reconciliation database integration', () 
     expect((await workspaceEntitlement(workspaceId)).isPro).toBe(true)
   })
 
+  it('uses the exact checkout-linked subscription instead of a stale canceled local ID', async () => {
+    const oldReference = `old_${randomUUID()}`
+    const oldSubscriptionId = `old_subscription_${randomUUID()}`
+    await db.insert(schema.workspaceInvoices).values({
+      workspaceId,
+      reference: oldReference,
+      status: 'paid',
+      interval: 'monthly',
+      amountCents: 900,
+      currency: 'USD',
+      bachsCheckoutId: `old_checkout_${randomUUID()}`,
+      bachsProductId: 'product_monthly',
+      checkoutClosedAt: new Date('2026-08-01T00:00:00Z'),
+      paidAt: new Date('2026-07-01T00:00:00Z'),
+      periodStart: new Date('2026-07-01T00:00:00Z'),
+      periodEnd: new Date('2026-08-01T00:00:00Z'),
+      createdAt: new Date('2026-07-01T00:00:00Z')
+    })
+    await insertInvoice('paid')
+    await db.insert(schema.workspaceSubscriptions).values({
+      workspaceId,
+      status: 'canceled',
+      interval: 'monthly',
+      currentPeriodEnd: new Date('2026-08-01T00:00:00Z'),
+      bachsSubscriptionId: oldSubscriptionId,
+      lastInvoiceReference: oldReference
+    })
+    checkoutSubscriptionId = subscriptionId
+
+    const result = await reconcileWorkspaceBilling(workspaceId)
+    expect(result).toMatchObject({ subscriptionChecked: true, subscriptionUpdated: true })
+    expect(providerRequests.some(url => url.endsWith(`/subscriptions/${oldSubscriptionId}`))).toBe(false)
+    expect(providerRequests.some(url => url.endsWith(`/subscriptions/${subscriptionId}`))).toBe(true)
+    expect(await db.query.workspaceSubscriptions.findFirst({
+      where: eq(schema.workspaceSubscriptions.workspaceId, workspaceId)
+    })).toMatchObject({
+      bachsSubscriptionId: subscriptionId,
+      lastInvoiceReference: reference,
+      status: 'active'
+    })
+  })
+
   it('stops polling a terminal checkout after its late-success window closes', async () => {
+    checkoutSubscriptionId = null
     await insertInvoice('failed')
     await db.update(schema.workspaceInvoices).set({
       reconcileUntil: new Date('2026-09-02T01:00:00Z')
@@ -276,7 +341,40 @@ describe.skipIf(!databaseUrl)('billing reconciliation database integration', () 
     expect(job?.status).toBe('idle')
   })
 
+  it('stops automatic polling and surfaces operator attention for an aged provider-pending checkout', async () => {
+    checkoutSubscriptionId = null
+    await insertInvoice()
+    await db.update(schema.workspaceInvoices).set({
+      reconcileUntil: new Date('2026-09-02T01:00:00Z')
+    }).where(eq(schema.workspaceInvoices.reference, reference))
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(checkoutPayload({
+      sessionStatus: 'open',
+      paymentStatus: 'processing',
+      includeCharge: false
+    })), { status: 200 })))
+
+    await expect(reconcileWorkspaceBilling(workspaceId, {
+      now: new Date('2026-09-02T01:00:01Z')
+    })).rejects.toThrow('bounded verification window')
+    const invoice = await db.query.workspaceInvoices.findFirst({
+      where: eq(schema.workspaceInvoices.reference, reference)
+    })
+    expect(invoice?.checkoutClosedAt).toBeNull()
+    expect(await db.query.billingReconciliationJobs.findFirst({
+      where: eq(schema.billingReconciliationJobs.workspaceId, workspaceId)
+    })).toMatchObject({
+      status: 'failed',
+      attempts: 6,
+      nextAttemptAt: null,
+      lastError: expect.stringContaining('operator review is required')
+    })
+    expect(await runBillingReconciliationSweep({
+      now: new Date('2026-09-03T01:00:00Z')
+    })).toMatchObject({ checked: 0, failed: 0 })
+  })
+
   it('confirms payment but keeps Pro off when the provider subscription identity is unavailable', async () => {
+    checkoutSubscriptionId = null
     await insertInvoice()
     await db.insert(schema.workspaceSubscriptions).values({
       workspaceId,
@@ -360,11 +458,10 @@ describe.skipIf(!databaseUrl)('billing reconciliation database integration', () 
       bachsSubscriptionId: subscriptionId,
       lastInvoiceReference: reference
     })
-    const provider = vi.fn(async () => new Response(JSON.stringify({
-      ...subscriptionPayload(),
-      cancel_at_period_end: true,
-      metadata: { ...subscriptionPayload().metadata, workspaceId: randomUUID() }
-    }), { status: 200 }))
+    const provider = vi.fn(async () => new Response(JSON.stringify(subscriptionPayload({
+      cancelAtPeriodEnd: true,
+      workspaceId: randomUUID()
+    })), { status: 200 }))
     vi.stubGlobal('fetch', provider)
 
     await expect(cancelWorkspacePlan(workspaceId)).rejects.toThrow(
@@ -410,7 +507,7 @@ describe.skipIf(!databaseUrl)('billing reconciliation database integration', () 
       lastInvoiceReference: oldReference
     })
 
-    const outcome = await applyWorkspaceSubscriptionState(subscriptionPayload())
+    const outcome = await reconcileWorkspaceSubscriptionEvent(subscriptionId)
     expect(outcome.applied).toBe(true)
     const row = await db.query.workspaceSubscriptions.findFirst({
       where: eq(schema.workspaceSubscriptions.workspaceId, workspaceId)
@@ -430,16 +527,19 @@ describe.skipIf(!databaseUrl)('billing reconciliation database integration', () 
       interval: 'monthly',
       lastInvoiceReference: `new_${randomUUID()}`
     })
-    const outcome = await applyWorkspaceSubscriptionState(subscriptionPayload())
-    expect(outcome).toMatchObject({ applied: false, reason: 'stale-invoice' })
-    expect(vi.mocked(fetch)).toHaveBeenCalledWith(
+    await expect(reconcileWorkspaceSubscriptionEvent(subscriptionId)).rejects.toThrow('operator refund review')
+    expect(await db.query.billingFinancialConflicts.findFirst({
+      where: eq(schema.billingFinancialConflicts.conflictingSubscriptionId, subscriptionId)
+    })).toMatchObject({
+      workspaceId,
+      status: 'open',
+      conflictingSubscriptionId: subscriptionId,
+      invoiceReference: reference,
+      attempts: 1
+    })
+    expect(vi.mocked(fetch)).not.toHaveBeenCalledWith(
       expect.any(URL),
-      expect.objectContaining({
-        method: 'DELETE',
-        headers: expect.objectContaining({
-          'Idempotency-Key': `perch-conflicting-subscription-${workspaceId}-${subscriptionId}`
-        })
-      })
+      expect.objectContaining({ method: 'DELETE' })
     )
   })
 
@@ -510,10 +610,9 @@ describe.skipIf(!databaseUrl)('billing reconciliation database integration', () 
       if (url.includes('/checkout-sessions/')) {
         return new Response(JSON.stringify(checkoutPayload()), { status: 200 })
       }
-      return new Response(JSON.stringify({
-        ...subscriptionPayload(),
-        current_period_end: '2026-10-01T00:00:00.000Z'
-      }), { status: 200 })
+      return new Response(JSON.stringify(subscriptionPayload({
+        currentPeriodEnd: '2026-10-01T00:00:00.000Z'
+      })), { status: 200 })
     }))
 
     await reconcileWorkspaceSubscriptionEvent(subscriptionId)
@@ -554,15 +653,13 @@ describe.skipIf(!databaseUrl)('billing reconciliation database integration', () 
       if (subscriptionReads === 1) {
         snapshotStarted()
         await snapshotRelease
-        return new Response(JSON.stringify({
-          ...subscriptionPayload(),
-          current_period_end: '2026-10-01T00:00:00.000Z'
-        }), { status: 200 })
+        return new Response(JSON.stringify(subscriptionPayload({
+          currentPeriodEnd: '2026-10-01T00:00:00.000Z'
+        })), { status: 200 })
       }
-      return new Response(JSON.stringify({
-        ...subscriptionPayload(),
-        current_period_end: '2026-12-01T00:00:00.000Z'
-      }), { status: 200 })
+      return new Response(JSON.stringify(subscriptionPayload({
+        currentPeriodEnd: '2026-12-01T00:00:00.000Z'
+      })), { status: 200 })
     }))
 
     const webhook = reconcileWorkspaceSubscriptionEvent(subscriptionId)
@@ -652,6 +749,27 @@ describe.skipIf(!databaseUrl)('billing reconciliation database integration', () 
     expect(job?.lastCheckedAt).toBeInstanceOf(Date)
   })
 
+  it('fences a reclaimed billing webhook so the expired handler cannot finish or fail it', async () => {
+    const providerEventId = `event_${randomUUID()}`
+    const first = await claimBillingWebhook(providerEventId, 'invoice.paid')
+    expect(first.shouldProcess).toBe(true)
+    await db.update(schema.billingWebhookDeliveries).set({
+      updatedAt: new Date(Date.now() - 6 * 60_000)
+    }).where(eq(schema.billingWebhookDeliveries.id, first.delivery.id))
+
+    const reclaimed = await claimBillingWebhook(providerEventId, 'invoice.paid')
+    expect(reclaimed.shouldProcess).toBe(true)
+    expect(reclaimed.claimToken).not.toBe(first.claimToken)
+    await expect(requireBillingWebhookFinish(first.delivery.id, first.claimToken!, 'completed'))
+      .rejects.toThrow('newer webhook handler replaced this completion')
+    expect(await failBillingWebhook(first.delivery.id, first.claimToken!, new Error('late failure'))).toBe(false)
+    expect(await finishBillingWebhook(first.delivery.id, reclaimed.claimToken!, 'completed')).toBe(true)
+    expect(await db.query.billingWebhookDeliveries.findFirst({
+      where: eq(schema.billingWebhookDeliveries.id, first.delivery.id)
+    })).toMatchObject({ status: 'completed', attempts: 2, claimToken: null, lastError: null })
+    await db.delete(schema.billingWebhookDeliveries).where(eq(schema.billingWebhookDeliveries.id, first.delivery.id))
+  })
+
   it('fences a lease-expired worker from regranting access after a newer refund and cancellation', async () => {
     await insertInvoice('paid')
     await db.insert(schema.workspaceSubscriptions).values({
@@ -681,14 +799,11 @@ describe.skipIf(!databaseUrl)('billing reconciliation database integration', () 
           await oldReleased
           return new Response(JSON.stringify(checkoutPayload()), { status: 200 })
         }
-        return new Response(JSON.stringify({
-          ...checkoutPayload(),
-          charge: { ...checkoutPayload().charge, status: 'refunded' }
-        }), { status: 200 })
+        return new Response(JSON.stringify(checkoutPayload({ chargeStatus: 'refunded' })), { status: 200 })
       }
       subscriptionReads++
       return new Response(JSON.stringify(subscriptionReads === 1
-        ? { ...subscriptionPayload(), status: 'canceled', cancel_at_period_end: true }
+        ? subscriptionPayload({ status: 'canceled', cancelAtPeriodEnd: true })
         : subscriptionPayload()), { status: 200 })
     }))
 
@@ -711,7 +826,7 @@ describe.skipIf(!databaseUrl)('billing reconciliation database integration', () 
       where: eq(schema.workspaceSubscriptions.workspaceId, workspaceId)
     })
     expect(invoice?.status).toBe('failed')
-    expect(subscription?.status).toBe('canceled')
+    expect(subscription?.status).toBe('active')
     expect((await workspaceEntitlement(workspaceId)).isPro).toBe(false)
   })
 

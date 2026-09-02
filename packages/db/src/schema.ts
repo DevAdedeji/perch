@@ -128,6 +128,7 @@ export const workspaceInvoices = pgTable('workspace_invoices', {
   periodStart: timestamp('period_start', { withTimezone: true }).notNull(),
   periodEnd: timestamp('period_end', { withTimezone: true }).notNull(),
   bachsCheckoutId: text('bachs_checkout_id'),
+  bachsProductId: text('bachs_product_id'),
   checkoutUrl: text('checkout_url'),
   bachsChargeId: text('bachs_charge_id'),
   checkoutClaimToken: text('checkout_claim_token'),
@@ -150,6 +151,7 @@ export const billingWebhookDeliveries = pgTable('billing_webhook_deliveries', {
   eventType: text('event_type').notNull(),
   status: billingWebhookStatusEnum('status').default('processing').notNull(),
   attempts: integer('attempts').default(1).notNull(),
+  claimToken: text('claim_token'),
   lastError: text('last_error'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
@@ -167,11 +169,37 @@ export const billingReconciliationJobs = pgTable('billing_reconciliation_jobs', 
   nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).defaultNow(),
   lastCheckedAt: timestamp('last_checked_at', { withTimezone: true }),
   lastError: text('last_error'),
+  correlationId: text('correlation_id'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
 }, t => [
   check('billing_reconciliation_jobs_attempts_ck', sql`${t.attempts} between 0 and 6`),
   index('billing_reconciliation_jobs_due_idx').on(t.status, t.nextAttemptAt)
+])
+
+export const billingFinancialConflicts = pgTable('billing_financial_conflicts', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  kind: text('kind').default('duplicate_subscription').notNull(),
+  status: text('status').default('open').notNull(),
+  canonicalSubscriptionId: text('canonical_subscription_id'),
+  conflictingSubscriptionId: text('conflicting_subscription_id').notNull(),
+  invoiceReference: text('invoice_reference'),
+  amountCents: integer('amount_cents'),
+  currency: text('currency'),
+  providerChargeId: text('provider_charge_id'),
+  attempts: integer('attempts').default(0).notNull(),
+  correlationId: text('correlation_id'),
+  lastError: text('last_error'),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
+}, t => [
+  uniqueIndex('billing_financial_conflicts_subscription_uq').on(t.conflictingSubscriptionId),
+  index('billing_financial_conflicts_status_updated_idx').on(t.status, t.updatedAt),
+  check('billing_financial_conflicts_kind_ck', sql`${t.kind} = 'duplicate_subscription'`),
+  check('billing_financial_conflicts_status_ck', sql`${t.status} in ('open', 'resolved')`),
+  check('billing_financial_conflicts_attempts_ck', sql`${t.attempts} >= 0`)
 ])
 
 export const widgetInstallationSignals = pgTable('widget_installation_signals', {
