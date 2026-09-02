@@ -75,6 +75,13 @@ describe('launch configuration', () => {
     expect(errors).toContain('RESEND_API_KEY and RESEND_FROM are required for production account recovery')
   })
 
+  it('rejects the local webhook escape hatch in production', () => {
+    expect(productionConfigErrors({
+      ...validEnvironment,
+      PERCH_WEBHOOK_ALLOW_LOCALHOST: 'true'
+    })).toContain('PERCH_WEBHOOK_ALLOW_LOCALHOST must not be enabled in production')
+  })
+
   it('allows HTTP only for an exact local development origin', () => {
     expect(normalizeLaunchOrigin('http://localhost:2222', true)).toBe('http://localhost:2222')
     expect(normalizeLaunchOrigin('http://localhost:2222/path', true)).toBeNull()

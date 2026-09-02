@@ -1,5 +1,6 @@
 import { and, eq, webhookEndpoints } from '@perch/db'
 import { z } from 'zod'
+import { isSafeWebhookUrl, webhookAuditTarget } from '../../../../utils/webhook-security'
 
 const schema = z.object({
   url: z.string().trim().url().max(500).optional(),
@@ -36,7 +37,11 @@ export default defineEventHandler(async (event) => {
   }
 
   invalidateWebhookCache(workspaceId)
-  logAudit(workspaceId, user, 'webhook.updated', { url: row.url, changed: Object.keys(d) })
+  logAudit(workspaceId, user, 'webhook.updated', {
+    url: webhookAuditTarget(row.url),
+    endpoint_id: row.id,
+    changed: Object.keys(d)
+  })
 
   return {
     id: row.id,

@@ -156,6 +156,8 @@ const WEBHOOK_EVENT_OPTIONS = [
 ]
 
 const webhooks = ref<WebhookRow[]>([])
+const webhooksLoading = ref(false)
+const webhooksError = ref<string | null>(null)
 const webhookUrl = ref('')
 const webhookEvents = ref<string[]>(['conversation.created'])
 const webhookSaving = ref(false)
@@ -164,14 +166,27 @@ const newSecret = ref<string | null>(null)
 const expandedWebhook = ref<string | null>(null)
 const deliveries = ref<DeliveryRow[]>([])
 const deliveriesLoading = ref(false)
+const deliveriesError = ref<string | null>(null)
 const testingWebhook = ref<string | null>(null)
+const pendingWebhookDelete = ref<WebhookRow | null>(null)
+const deletingWebhook = ref(false)
+const webhookDeleteOpen = computed({
+  get: () => Boolean(pendingWebhookDelete.value),
+  set: (open: boolean) => {
+    if (!open && !deletingWebhook.value) pendingWebhookDelete.value = null
+  }
+})
 
 async function loadWebhooks() {
   if (!wid.value || !isAdmin.value) return
+  webhooksLoading.value = true
+  webhooksError.value = null
   try {
     webhooks.value = await $fetch<WebhookRow[]>(`/api/workspaces/${wid.value}/webhooks`)
-  } catch {
-    // section renders empty; the rest of the page still works
+  } catch (error) {
+    webhooksError.value = getErrorMessage(error, 'Could not load webhook endpoints')
+  } finally {
+    webhooksLoading.value = false
   }
 }
 
@@ -217,14 +232,24 @@ async function toggleWebhook(w: WebhookRow, enabled: boolean) {
   }
 }
 
-async function removeWebhook(w: WebhookRow) {
+function requestWebhookDelete(webhook: WebhookRow) {
+  pendingWebhookDelete.value = webhook
+}
+
+async function removeWebhook() {
+  const webhook = pendingWebhookDelete.value
+  if (!webhook || deletingWebhook.value) return
+  deletingWebhook.value = true
   try {
-    await $fetch(`/api/workspaces/${wid.value}/webhooks/${w.id}`, { method: 'DELETE' })
-    webhooks.value = webhooks.value.filter(x => x.id !== w.id)
-    if (expandedWebhook.value === w.id) expandedWebhook.value = null
+    await $fetch(`/api/workspaces/${wid.value}/webhooks/${webhook.id}`, { method: 'DELETE' })
+    webhooks.value = webhooks.value.filter(item => item.id !== webhook.id)
+    if (expandedWebhook.value === webhook.id) expandedWebhook.value = null
+    pendingWebhookDelete.value = null
     loadAudit()
   } catch (e) {
     toast.add({ title: getErrorMessage(e, 'Could not delete'), color: 'error' })
+  } finally {
+    deletingWebhook.value = false
   }
 }
 
@@ -235,12 +260,13 @@ async function toggleDeliveries(w: WebhookRow) {
   }
   expandedWebhook.value = w.id
   deliveries.value = []
+  deliveriesError.value = null
   deliveriesLoading.value = true
   try {
     const res = await $fetch<{ deliveries: DeliveryRow[] }>(`/api/workspaces/${wid.value}/webhooks/${w.id}/deliveries`)
     deliveries.value = res.deliveries
-  } catch {
-    // list stays empty
+  } catch (error) {
+    deliveriesError.value = getErrorMessage(error, 'Could not load recent deliveries')
   } finally {
     deliveriesLoading.value = false
   }
@@ -593,7 +619,35 @@ async function deleteWorkspace() {
           </div>
 
           <ul
-            v-if="webhooks.length"
+            v-if="webhooksLoading"
+            class="mt-4 space-y-2"
+            aria-label="Loading webhook endpoints"
+          >
+            <li
+              v-for="index in 2"
+              :key="index"
+              class="h-14 rounded-xl bg-elevated animate-pulse"
+            />
+          </ul>
+          <div
+            v-else-if="webhooksError"
+            class="mt-4 flex flex-col items-start gap-2 rounded-xl ring-1 ring-red-500/30 bg-red-500/5 px-4 py-3 sm:flex-row sm:items-center"
+          >
+            <p class="min-w-0 flex-1 text-xs text-red-600 dark:text-red-400">
+              {{ webhooksError }}
+            </p>
+            <UButton
+              size="xs"
+              color="neutral"
+              variant="soft"
+              icon="i-lucide-refresh-cw"
+              @click="loadWebhooks"
+            >
+              Try again
+            </UButton>
+          </div>
+          <ul
+            v-else-if="webhooks.length"
             class="mt-4 divide-y divide-default/60 rounded-xl ring-1 ring-default overflow-hidden"
           >
             <li
@@ -602,7 +656,7 @@ async function deleteWorkspace() {
               class="bg-default"
               :class="{ 'opacity-60': !w.enabled }"
             >
-              <div class="group flex items-center gap-3 px-3.5 py-2.5">
+              <div class="group flex flex-wrap items-center gap-2 px-3.5 py-2.5 sm:flex-nowrap sm:gap-3">
                 <div class="min-w-0 flex-1">
                   <p class="text-sm font-mono text-highlighted truncate">
                     {{ w.url }}
@@ -635,13 +689,13 @@ async function deleteWorkspace() {
                   @update:model-value="(v: boolean) => toggleWebhook(w, v)"
                 />
                 <UButton
-                  class="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
+                  class="sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100 sm:transition-opacity"
                   size="xs"
                   color="error"
                   variant="ghost"
                   icon="i-lucide-trash-2"
                   aria-label="Delete webhook"
-                  @click="removeWebhook(w)"
+                  @click="requestWebhookDelete(w)"
                 />
               </div>
 
@@ -656,6 +710,23 @@ async function deleteWorkspace() {
                 >
                   Loading deliveries…
                 </p>
+                <div
+                  v-else-if="deliveriesError"
+                  class="flex items-center gap-2"
+                >
+                  <p class="min-w-0 flex-1 text-xs text-red-600 dark:text-red-400">
+                    {{ deliveriesError }}
+                  </p>
+                  <UButton
+                    size="xs"
+                    color="neutral"
+                    variant="ghost"
+                    icon="i-lucide-refresh-cw"
+                    @click="expandedWebhook = null; toggleDeliveries(w)"
+                  >
+                    Retry
+                  </UButton>
+                </div>
                 <p
                   v-else-if="!deliveries.length"
                   class="text-xs text-dimmed"
@@ -699,12 +770,12 @@ async function deleteWorkspace() {
             class="mt-4 space-y-2.5"
             @submit.prevent="addWebhook"
           >
-            <div class="flex gap-2">
+            <div class="flex flex-col gap-2 sm:flex-row">
               <UInput
                 v-model="webhookUrl"
                 placeholder="https://example.com/hooks/perch"
                 size="lg"
-                class="flex-1 font-mono"
+                class="w-full flex-1 font-mono"
                 type="url"
               />
               <UButton
@@ -799,6 +870,38 @@ async function deleteWorkspace() {
         </section>
       </template>
     </div>
+
+    <UModal
+      v-model:open="webhookDeleteOpen"
+      title="Delete this webhook?"
+      description="Perch will stop sending new events to this endpoint. Its recent delivery history will also be removed."
+    >
+      <template #body>
+        <p class="break-all rounded-xl bg-elevated px-3 py-2 font-mono text-xs text-muted">
+          {{ pendingWebhookDelete?.url }}
+        </p>
+      </template>
+      <template #footer>
+        <div class="flex w-full flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <UButton
+            color="neutral"
+            variant="ghost"
+            :disabled="deletingWebhook"
+            @click="pendingWebhookDelete = null"
+          >
+            Keep webhook
+          </UButton>
+          <UButton
+            color="error"
+            icon="i-lucide-trash-2"
+            :loading="deletingWebhook"
+            @click="removeWebhook"
+          >
+            Delete webhook
+          </UButton>
+        </div>
+      </template>
+    </UModal>
 
     <!-- delete workspace confirm -->
     <UModal

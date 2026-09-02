@@ -1,4 +1,5 @@
 import { auditLogs, desc, eq } from '@perch/db'
+import { webhookAuditTarget } from '../../../utils/webhook-security'
 
 /** The workspace audit trail, newest first (admin only). */
 export default defineEventHandler(async (event) => {
@@ -11,11 +12,17 @@ export default defineEventHandler(async (event) => {
     limit: 100
   })
 
-  return rows.map(r => ({
-    id: r.id,
-    actor_name: r.actorName,
-    action: r.action,
-    detail: r.detail,
-    created_at: r.createdAt
-  }))
+  return rows.map((row) => {
+    const detail = { ...row.detail }
+    if (row.action.startsWith('webhook.') && typeof detail.url === 'string') {
+      detail.url = webhookAuditTarget(detail.url)
+    }
+    return {
+      id: row.id,
+      actor_name: row.actorName,
+      action: row.action,
+      detail,
+      created_at: row.createdAt
+    }
+  })
 })
