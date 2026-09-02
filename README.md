@@ -59,7 +59,8 @@ visitor context panel:
     user_id: 'user_42',
     name: 'Ada Lovelace',
     email: 'ada@example.com',
-    hash: '<hmac from your server>' // required if verification is enforced
+    hash: '<hmac of user id from your server>', // required if verification is enforced
+    email_hash: '<hmac of normalized email from your server>'
   }
 
   // or, for logins that happen after page load (SPA):
@@ -215,7 +216,9 @@ Useful scripts: `pnpm build` (production Nitro bundle), `pnpm preview`, `pnpm li
 | `RESEND_API_KEY` | Transactional email for password resets and invites. Optional only during local development; every production-mode deployment, including Railway staging, requires its own key |
 | `RESEND_FROM` | Verified sender, e.g. `Perch <no-reply@yourdomain.com>`. Optional only during local development and required with `RESEND_API_KEY` in deployed environments |
 | `VISITOR_REPLY_SECRET` | Separate 32+ character secret for one-time visitor return and unsubscribe links |
-| `VISITOR_REPLY_EMAIL_DELIVERY_ENABLED` | Visitor-reply delivery safety gate. Keep `false` until the approved scheduled worker and Resend bounce/complaint webhook are configured |
+| `VISITOR_EMAIL_HASH_SECRET` | Stable, separate 32+ character HMAC key for email suppression and delivery-dedup hashes. Do not rotate it during normal return-link key rotation |
+| `VISITOR_REPLY_EMAIL_FEATURE_ENABLED` | Global feature-exposure gate. When `false`, Settings and the widget do not offer visitor reply emails and the opt-in API rejects requests |
+| `VISITOR_REPLY_EMAIL_DELIVERY_ENABLED` | Independent delivery safety gate. It requires feature exposure and must remain `false` until the approved scheduled worker and Resend bounce/complaint webhook are configured |
 | `RESEND_WEBHOOK_SECRET` | Planned signed Resend webhook secret for durable bounce/complaint suppression; visitor reply delivery must stay disabled until this external setup is complete |
 | `SENTRY_DSN` | *(optional)* server-side error tracking; the client DSN lives in `sentry.client.config.ts` |
 | `CLOUDINARY_CLOUD_NAME` / `CLOUDINARY_API_KEY` / `CLOUDINARY_API_SECRET` | *(optional)* signed image attachments; the secret never leaves the server |
@@ -225,6 +228,10 @@ Useful scripts: `pnpm build` (production Nitro bundle), `pnpm preview`, `pnpm li
 
 > Nuxt only auto-maps `NUXT_`-prefixed env at runtime. The server reads the documented plain
 > environment variable names directly as production fallbacks.
+
+The visitor reply and email-hash secrets are required only when visitor reply email exposure or
+delivery is enabled. Keep the stable hash secret available for as long as suppression or delivery
+records exist: replacing it makes existing email hashes impossible to match.
 
 For Google sign-in, create an OAuth 2.0 **Web application** client in Google Cloud and register the
 exact local and deployed callback URLs (`http://localhost:2222/auth/google` and

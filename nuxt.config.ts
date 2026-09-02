@@ -64,6 +64,8 @@ export default defineNuxtConfig({
     resendApiKey: '',
     emailFrom: '',
     visitorReplySecret: '',
+    visitorEmailHashSecret: '',
+    visitorReplyEmailFeatureEnabled: process.env.VISITOR_REPLY_EMAIL_FEATURE_ENABLED === 'true',
     visitorReplyEmailDeliveryEnabled: process.env.VISITOR_REPLY_EMAIL_DELIVERY_ENABLED === 'true',
     // workspace subscriptions via Bachs
     bachsSecretKey: '',

@@ -126,7 +126,11 @@ export async function getCustomerContext(conversation: Conversation, member: Wor
       identity_verified: visitor.identityVerified,
       messaging_blocked: messagingBlocked,
       reply_email: {
-        eligible: !!workspace?.visitorReplyEmailEnabled && !!visitor.email && visitor.replyEmailEnabled && !!visitor.replyEmailConsentAt,
+        eligible: visitorReplyEmailFeatureEnabled()
+          && !!workspace?.visitorReplyEmailEnabled
+          && !!visitor.email
+          && visitor.replyEmailEnabled
+          && !!visitor.replyEmailConsentAt,
         status: latestReplyDelivery?.status ?? null,
         cancel_reason: latestReplyDelivery?.cancelReason ?? null
       },

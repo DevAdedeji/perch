@@ -37,7 +37,7 @@ export default defineEventHandler(async (event) => {
     visitorId: visitor.visitorId,
     name,
     email,
-    replyEmailConsent: reply_email_consent === true,
+    replyEmailConsent: visitorReplyEmailFeatureEnabled(event) && reply_email_consent === true,
     content,
     attachmentUrl: attachment_url ?? null,
     attachmentType: attachment_url ? (attachment_type ?? 'image/*') : null,

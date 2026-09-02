@@ -32,6 +32,7 @@ interface WorkspaceDetail {
   unansweredReminderEnabled: boolean
   unansweredReminderDelayMinutes: number
   unansweredReminderBusinessHoursOnly: boolean
+  visitorReplyEmailAvailable: boolean
   visitorReplyEmailEnabled: boolean
   entitlement: {
     isPro: boolean
@@ -80,7 +81,7 @@ const identifySnippet = `<script>
     name: 'Ada Lovelace',
     email: 'ada@example.com',
     hash: '<HMAC of user_id>',
-    email_hash: '<HMAC of normalized email>' // lets Perch trust email delivery
+    email_hash: '<HMAC of normalized email>' // proves the address; the visitor still opts in
   }
 
   // or, after a login that happens without a page reload:
@@ -515,7 +516,10 @@ async function removeLogo() {
               />
             </div>
 
-            <div class="flex items-center justify-between gap-4">
+            <div
+              v-if="workspace?.visitorReplyEmailAvailable"
+              class="flex items-center justify-between gap-4"
+            >
               <div>
                 <p class="text-sm font-medium text-highlighted">
                   Email visitors after they leave

@@ -9,6 +9,9 @@ const schema = z.object({
 
 export default defineEventHandler(async (event) => {
   assertRateLimit('widget-email-preference:ip', requestIp(event), { max: 20, windowMs: 60_000 })
+  if (!visitorReplyEmailFeatureEnabled(event)) {
+    throw createError({ statusCode: 404, statusMessage: 'Email updates are not available' })
+  }
   const result = await readValidatedBody(event, body => schema.safeParse(body))
   if (!result.success) throw createError({ statusCode: 400, statusMessage: 'Invalid input' })
 

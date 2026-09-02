@@ -26,7 +26,7 @@ export default defineEventHandler(async (event) => {
           siteId: generateSiteId(),
           widgetPrimaryColor: widgetPrimaryColor ?? undefined,
           logoUrl: logoUrl ?? null,
-          visitorReplyEmailEnabled: true
+          visitorReplyEmailEnabled: visitorReplyEmailFeatureEnabled(event)
         }).returning()
         await tx.insert(workspaceMembers).values({
           workspaceId: created!.id,

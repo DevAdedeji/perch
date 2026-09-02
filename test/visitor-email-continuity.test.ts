@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import {
   maskVisitorEmail,
@@ -12,10 +13,16 @@ import {
 
 describe('visitor email continuity security helpers', () => {
   const secret = 'visitor-reply-test-secret-with-32-characters'
+  const hashSecret = 'visitor-email-hash-test-secret-572940'
 
   it('normalizes, hashes, and masks visitor email consistently', () => {
     expect(normalizeVisitorEmail(' Ada@Example.COM ')).toBe('ada@example.com')
-    expect(visitorEmailHash(' Ada@Example.COM ')).toBe(visitorEmailHash('ada@example.com'))
+    const hash = visitorEmailHash(' Ada@Example.COM ', hashSecret)
+    expect(hash).toBe(createHmac('sha256', hashSecret).update('ada@example.com').digest('hex'))
+    expect(hash).toBe(visitorEmailHash('ada@example.com', hashSecret))
+    expect(hash).not.toBe(
+      visitorEmailHash('ada@example.com', 'different-visitor-email-hash-secret-940275')
+    )
     expect(maskVisitorEmail('ada@example.com')).toBe('a••@example.com')
   })
 

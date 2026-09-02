@@ -21,7 +21,10 @@ describe.skipIf(!databaseUrl)('visitor email continuity database integration', (
       useDb: () => db,
       useRuntimeConfig: () => ({
         publicBaseUrl: 'https://useperch.xyz',
-        visitorReplySecret: 'integration-visitor-reply-secret-849201'
+        visitorReplySecret: 'integration-visitor-reply-secret-849201',
+        visitorEmailHashSecret: 'integration-visitor-email-hash-secret-572940',
+        visitorReplyEmailFeatureEnabled: true,
+        visitorReplyEmailDeliveryEnabled: true
       })
     })
     await db.insert(schema.workspaces).values({

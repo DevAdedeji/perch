@@ -42,6 +42,9 @@ export default defineEventHandler(async (event) => {
 
   const db = useDb()
   const patch = { ...result.data }
+  if (patch.visitorReplyEmailEnabled === true && !visitorReplyEmailFeatureEnabled(event)) {
+    throw createError({ statusCode: 409, statusMessage: 'Visitor reply emails are not available' })
+  }
   const entitlement = await workspaceEntitlement(workspaceId)
   if (!entitlement.isPro) {
     if (patch.unansweredReminderBusinessHoursOnly) {

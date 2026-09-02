@@ -1,4 +1,4 @@
-import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
+import { createHmac, timingSafeEqual } from 'node:crypto'
 import {
   and,
   asc,
@@ -50,8 +50,28 @@ export function normalizeVisitorEmail(value: string): string {
   return value.trim().toLowerCase()
 }
 
-export function visitorEmailHash(value: string): string {
-  return createHash('sha256').update(normalizeVisitorEmail(value)).digest('hex')
+function runtimeConfig(event?: H3Event) {
+  return event ? useRuntimeConfig(event) : useRuntimeConfig()
+}
+
+export function visitorReplyEmailFeatureEnabled(event?: H3Event): boolean {
+  return runtimeConfig(event).visitorReplyEmailFeatureEnabled === true
+    || process.env.VISITOR_REPLY_EMAIL_FEATURE_ENABLED === 'true'
+}
+
+export function visitorReplyEmailDeliveryEnabled(event?: H3Event): boolean {
+  return runtimeConfig(event).visitorReplyEmailDeliveryEnabled === true
+    || process.env.VISITOR_REPLY_EMAIL_DELIVERY_ENABLED === 'true'
+}
+
+function emailHashSecret(event?: H3Event): string {
+  const secret = String(runtimeConfig(event).visitorEmailHashSecret || process.env.VISITOR_EMAIL_HASH_SECRET || '')
+  if (secret.length >= 32) return secret
+  throw new Error('VISITOR_EMAIL_HASH_SECRET must be at least 32 characters')
+}
+
+export function visitorEmailHash(value: string, secret = emailHashSecret()): string {
+  return createHmac('sha256', secret).update(normalizeVisitorEmail(value)).digest('hex')
 }
 
 export function maskVisitorEmail(value: string): string {
@@ -104,7 +124,7 @@ export function replyEmailRetryAt(attempt: number, now = new Date()) {
 }
 
 function replySecret(event?: H3Event): string {
-  const configured = event ? useRuntimeConfig(event).visitorReplySecret : useRuntimeConfig().visitorReplySecret
+  const configured = runtimeConfig(event).visitorReplySecret
   const secret = String(configured || process.env.VISITOR_REPLY_SECRET || '')
   if (secret.length >= 32) return secret
   if (import.meta.dev || process.env.NODE_ENV === 'test') return requireRealtimeSecret(event)
@@ -342,7 +362,7 @@ async function deliverOne(
 }
 
 export async function runVisitorReplyEmailSweep(options: { now?: Date, sender?: VisitorReplyEmailSender } = {}) {
-  if (!options.sender && useRuntimeConfig().visitorReplyEmailDeliveryEnabled !== true) {
+  if (!options.sender && (!visitorReplyEmailFeatureEnabled() || !visitorReplyEmailDeliveryEnabled())) {
     return { processed: 0 }
   }
   const now = options.now ?? new Date()

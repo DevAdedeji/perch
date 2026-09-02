@@ -804,7 +804,7 @@ onBeforeUnmount(() => {
         :style="{ '--tw-ring-color': accent }"
       >
       <label
-        v-if="prechat.email.trim()"
+        v-if="workspace?.reply_email_enabled && prechat.email.trim()"
         class="-mt-1 flex cursor-pointer items-start gap-2 rounded-lg p-1 text-[11px] leading-4 text-muted"
       >
         <input
