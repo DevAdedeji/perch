@@ -2,6 +2,7 @@ import { and, conversations, desc, eq, memberNotifications, messages, ne, sql, s
 import type { Conversation, Message } from '@perch/db'
 import { channels } from '@perch/shared'
 import type { ConversationDTO, MessageDTO, VisitorConversationDTO, VisitorMessageDTO } from '@perch/shared'
+import { agentWorkspaceAuthorization } from './realtime'
 
 /* serialization (rows → §6 wire DTOs) */
 
@@ -55,23 +56,25 @@ export function serializeVisitorConversation(c: Conversation): VisitorConversati
 }
 
 function publishConversationMessage(
-  channel: string,
+  workspaceId: string,
+  conversationId: string,
   message: Message,
   assignedAgentId: string | null,
   collaboratorMemberIds: string[]
 ) {
   publishConversationEvent(
-    channel,
+    workspaceId,
+    conversationId,
     { type: 'message.new', payload: serializeMessage(message) },
     assignedAgentId,
     collaboratorMemberIds,
     { agentsOnly: true }
   )
   if (!message.isInternalNote) {
-    publishFiltered(channel, {
+    publishFiltered(channels.conversation(conversationId), {
       type: 'visitor.message',
       payload: serializeVisitorMessage(message)
-    }, context => context.role === 'visitor')
+    }, context => context.role === 'visitor' && context.wid === workspaceId)
   }
 }
 
@@ -212,26 +215,25 @@ export async function ingestVisitorMessage(input: IncomingVisitorMessage) {
   }
   // broadcast
   const wsChannel = channels.workspace(input.workspaceId)
-  const convChannel = channels.conversation(conversation.id)
   if (automationTagsChanged && !isNew) {
     publishFiltered(wsChannel, {
       type: 'conversation.refresh',
       payload: { conversation_id: conversation.id }
-    }, inboxScope(conversation.assignedAgentId, conversation.collaboratorMemberIds))
+    }, inboxScope(input.workspaceId, conversation.assignedAgentId, conversation.collaboratorMemberIds))
   }
   if (isNew) {
     publishFiltered(
       wsChannel,
       { type: 'conversation.new', payload: serializeConversation(conversation) },
-      inboxScope(conversation.assignedAgentId, conversation.collaboratorMemberIds)
+      inboxScope(input.workspaceId, conversation.assignedAgentId, conversation.collaboratorMemberIds)
     )
   } else {
     publishConversationUpdate(conversation, { previousAssignedAgentId: result.conversation.assignedAgentId })
   }
   const msgEvent = { type: 'message.new' as const, payload: serializeMessage(message) }
   // scope the inbox copy so agents don't receive chats assigned to someone else
-  publishFiltered(wsChannel, msgEvent, inboxScope(conversation.assignedAgentId, conversation.collaboratorMemberIds))
-  publishConversationMessage(convChannel, message, conversation.assignedAgentId, conversation.collaboratorMemberIds)
+  publishFiltered(wsChannel, msgEvent, inboxScope(input.workspaceId, conversation.assignedAgentId, conversation.collaboratorMemberIds))
+  publishConversationMessage(input.workspaceId, conversation.id, message, conversation.assignedAgentId, conversation.collaboratorMemberIds)
 
   // outbound webhooks (fire-and-forget, after the committed writes)
   if (isNew) {
@@ -249,12 +251,16 @@ export async function ingestVisitorMessage(input: IncomingVisitorMessage) {
  * Predicate for inbox broadcasts: admins see all; agents only receive the
  * unassigned pool + conversations assigned to them (§ agent visibility).
  */
-export function inboxScope(assignedAgentId: string | null, collaboratorMemberIds: string[] = []) {
-  return (ctx: Record<string, unknown>) =>
-    ctx.memberRole === 'admin'
-    || assignedAgentId == null
-    || ctx.memberId === assignedAgentId
-    || collaboratorMemberIds.includes(ctx.memberId as string)
+export function inboxScope(workspaceId: string, assignedAgentId: string | null, collaboratorMemberIds: string[] = []) {
+  return (ctx: Record<string, unknown>) => {
+    const authorization = agentWorkspaceAuthorization(ctx, workspaceId)
+    return !!authorization && (
+      authorization.memberRole === 'admin'
+      || assignedAgentId == null
+      || authorization.memberId === assignedAgentId
+      || collaboratorMemberIds.includes(authorization.memberId)
+    )
+  }
 }
 
 /* agent → visitor */
@@ -329,8 +335,12 @@ export async function addAgentMessage(input: AgentMessageInput) {
   const event = { type: 'message.new' as const, payload: serializeMessage(message) }
   if (collaboratorsChanged) publishConversationUpdate(conv)
   // inbox copy scoped to the assigned agent + admins
-  publishFiltered(channels.workspace(input.workspaceId), event, inboxScope(conv.assignedAgentId, conv.collaboratorMemberIds))
-  publishConversationMessage(channels.conversation(input.conversationId), message, conv.assignedAgentId, conv.collaboratorMemberIds)
+  publishFiltered(
+    channels.workspace(input.workspaceId),
+    event,
+    inboxScope(input.workspaceId, conv.assignedAgentId, conv.collaboratorMemberIds)
+  )
+  publishConversationMessage(input.workspaceId, input.conversationId, message, conv.assignedAgentId, conv.collaboratorMemberIds)
   notifications.forEach(publishMemberNotification)
 
   // internal notes never leave the building — not even as webhooks
@@ -414,7 +424,7 @@ export async function startAgentConversation(input: StartConversationInput) {
     publishFiltered(
       channels.workspace(input.workspaceId),
       { type: 'conversation.new', payload: serializeConversation(conversation) },
-      inboxScope(conversation.assignedAgentId, conversation.collaboratorMemberIds)
+      inboxScope(input.workspaceId, conversation.assignedAgentId, conversation.collaboratorMemberIds)
     )
     dispatchWebhooks(input.workspaceId, 'conversation.created', {
       conversation: serializeConversation(conversation),
@@ -423,8 +433,12 @@ export async function startAgentConversation(input: StartConversationInput) {
   } else {
     publishConversationUpdate(conversation, { previousAssignedAgentId })
   }
-  publishFiltered(channels.workspace(input.workspaceId), msgEvent, inboxScope(conversation.assignedAgentId, conversation.collaboratorMemberIds))
-  publishConversationMessage(channels.conversation(conversation.id), message, conversation.assignedAgentId, conversation.collaboratorMemberIds)
+  publishFiltered(
+    channels.workspace(input.workspaceId),
+    msgEvent,
+    inboxScope(input.workspaceId, conversation.assignedAgentId, conversation.collaboratorMemberIds)
+  )
+  publishConversationMessage(input.workspaceId, conversation.id, message, conversation.assignedAgentId, conversation.collaboratorMemberIds)
   dispatchWebhooks(input.workspaceId, 'message.created', { message: serializeMessage(message) })
 
   // tell the visitor's live widget to adopt the thread (no-op if they left)
@@ -561,15 +575,17 @@ export async function setConversationStatus(
 }
 
 export function inboxRemovalScope(
+  workspaceId: string,
   previousAssignedAgentId: string | null,
   assignedAgentId: string | null,
   collaboratorMemberIds: string[] = []
 ) {
   return (ctx: Record<string, unknown>) => {
-    if (ctx.role !== 'agent' || ctx.memberRole === 'admin') return false
-    const isCollaborator = collaboratorMemberIds.includes(ctx.memberId as string)
-    const wasVisible = previousAssignedAgentId === null || ctx.memberId === previousAssignedAgentId || isCollaborator
-    const isVisible = assignedAgentId === null || ctx.memberId === assignedAgentId || isCollaborator
+    const authorization = agentWorkspaceAuthorization(ctx, workspaceId)
+    if (!authorization || authorization.memberRole === 'admin') return false
+    const isCollaborator = collaboratorMemberIds.includes(authorization.memberId)
+    const wasVisible = previousAssignedAgentId === null || authorization.memberId === previousAssignedAgentId || isCollaborator
+    const isVisible = assignedAgentId === null || authorization.memberId === assignedAgentId || isCollaborator
     return wasVisible && !isVisible
   }
 }
@@ -586,15 +602,20 @@ export function publishConversationUpdate(c: Conversation, options: { previousAs
     is_spam: c.isSpam
   }
   const workspaceChannel = channels.workspace(c.workspaceId)
-  publishFiltered(workspaceChannel, { type: 'conversation.updated', payload }, inboxScope(c.assignedAgentId, c.collaboratorMemberIds))
+  publishFiltered(
+    workspaceChannel,
+    { type: 'conversation.updated', payload },
+    inboxScope(c.workspaceId, c.assignedAgentId, c.collaboratorMemberIds)
+  )
   if ('previousAssignedAgentId' in options && options.previousAssignedAgentId !== c.assignedAgentId) {
     publishFiltered(workspaceChannel, {
       type: 'conversation.removed',
       payload: { conversation_id: c.id }
-    }, inboxRemovalScope(options.previousAssignedAgentId ?? null, c.assignedAgentId, c.collaboratorMemberIds))
+    }, inboxRemovalScope(c.workspaceId, options.previousAssignedAgentId ?? null, c.assignedAgentId, c.collaboratorMemberIds))
   }
   publishConversationEvent(
-    channels.conversation(c.id),
+    c.workspaceId,
+    c.id,
     { type: 'conversation.updated', payload },
     c.assignedAgentId,
     c.collaboratorMemberIds,
@@ -603,5 +624,5 @@ export function publishConversationUpdate(c: Conversation, options: { previousAs
   publishFiltered(channels.conversation(c.id), {
     type: 'conversation.status',
     payload: { conversation_id: c.id, status: c.status }
-  }, context => context.role === 'visitor')
+  }, context => context.role === 'visitor' && context.wid === c.workspaceId)
 }

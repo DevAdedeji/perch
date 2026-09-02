@@ -9,7 +9,7 @@ import { normalizeInstallationOrigin } from './installation'
  * The ticket is fetched from a REST endpoint and passed as `?ticket=` on the WS URL.
  */
 export type TicketSubject
-  = | { role: 'agent', uid: string }
+  = | { role: 'agent', uid: string, sid: string }
     | { role: 'visitor', wid: string, vid: string, hostOrigin: string, installationPreview?: boolean }
 
 type TicketPayload = TicketSubject & { exp: number }
@@ -37,7 +37,10 @@ export function verifyTicket(token: string, secret: string): TicketSubject | nul
   try {
     const payload = JSON.parse(Buffer.from(data, 'base64url').toString()) as TicketPayload
     if (typeof payload.exp !== 'number' || payload.exp < Date.now()) return null
-    if (payload.role === 'agent' && payload.uid) return { role: 'agent', uid: payload.uid }
+    if (payload.role === 'agent' && typeof payload.uid === 'string' && typeof payload.sid === 'string'
+      && payload.uid && payload.sid) {
+      return { role: 'agent', uid: payload.uid, sid: payload.sid }
+    }
     if (payload.role === 'visitor' && payload.wid && payload.vid
       && normalizeInstallationOrigin(payload.hostOrigin) === payload.hostOrigin) {
       return {

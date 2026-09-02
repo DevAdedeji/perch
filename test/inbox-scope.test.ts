@@ -1,47 +1,60 @@
 import { describe, expect, it } from 'vitest'
 import { inboxRemovalScope, inboxScope } from '../server/utils/conversations'
+import { authorizeAgentWorkspace } from '../server/utils/realtime'
 import { canMemberAccessConversation, canMemberReassignConversation } from '../server/utils/workspace'
 
 describe('inboxScope — agent visibility on the workspace channel', () => {
-  const admin = { memberRole: 'admin', memberId: 'admin-1' }
-  const agentA = { memberRole: 'agent', memberId: 'agent-a' }
-  const agentB = { memberRole: 'agent', memberId: 'agent-b' }
+  const workspaceId = 'workspace-a'
+  const context = (memberId: string, memberRole: 'admin' | 'agent') => {
+    const value = { role: 'agent' }
+    authorizeAgentWorkspace(value, workspaceId, { memberId, memberRole })
+    return value
+  }
+  const admin = context('admin-1', 'admin')
+  const agentA = context('agent-a', 'agent')
+  const agentB = context('agent-b', 'agent')
 
   it('admins receive everything', () => {
-    expect(inboxScope(null)(admin)).toBe(true)
-    expect(inboxScope('agent-a')(admin)).toBe(true)
-    expect(inboxScope('agent-b')(admin)).toBe(true)
+    expect(inboxScope(workspaceId, null)(admin)).toBe(true)
+    expect(inboxScope(workspaceId, 'agent-a')(admin)).toBe(true)
+    expect(inboxScope(workspaceId, 'agent-b')(admin)).toBe(true)
   })
 
   it('agents receive the unassigned pool', () => {
-    expect(inboxScope(null)(agentA)).toBe(true)
-    expect(inboxScope(null)(agentB)).toBe(true)
+    expect(inboxScope(workspaceId, null)(agentA)).toBe(true)
+    expect(inboxScope(workspaceId, null)(agentB)).toBe(true)
   })
 
   it('agents receive their own conversations but not other agents\'', () => {
-    expect(inboxScope('agent-a')(agentA)).toBe(true)
-    expect(inboxScope('agent-a')(agentB)).toBe(false)
-    expect(inboxScope('agent-b')(agentA)).toBe(false)
+    expect(inboxScope(workspaceId, 'agent-a')(agentA)).toBe(true)
+    expect(inboxScope(workspaceId, 'agent-a')(agentB)).toBe(false)
+    expect(inboxScope(workspaceId, 'agent-b')(agentA)).toBe(false)
   })
 
   it('collaborators receive only the conversations where they were mentioned', () => {
-    expect(inboxScope('agent-a', ['agent-b'])(agentB)).toBe(true)
-    expect(inboxScope('agent-a', ['agent-c'])(agentB)).toBe(false)
+    expect(inboxScope(workspaceId, 'agent-a', ['agent-b'])(agentB)).toBe(true)
+    expect(inboxScope(workspaceId, 'agent-a', ['agent-c'])(agentB)).toBe(false)
   })
 
   it('a peer with no membership context receives nothing assigned', () => {
-    expect(inboxScope('agent-a')({})).toBe(false)
+    expect(inboxScope(workspaceId, 'agent-a')({})).toBe(false)
   })
 })
 
 describe('inboxRemovalScope — assignment visibility changes', () => {
-  const admin = { role: 'agent', memberRole: 'admin', memberId: 'admin-1' }
-  const agentA = { role: 'agent', memberRole: 'agent', memberId: 'agent-a' }
-  const agentB = { role: 'agent', memberRole: 'agent', memberId: 'agent-b' }
+  const workspaceId = 'workspace-a'
+  const context = (memberId: string, memberRole: 'admin' | 'agent') => {
+    const value = { role: 'agent' }
+    authorizeAgentWorkspace(value, workspaceId, { memberId, memberRole })
+    return value
+  }
+  const admin = context('admin-1', 'admin')
+  const agentA = context('agent-a', 'agent')
+  const agentB = context('agent-b', 'agent')
   const visitor = { role: 'visitor' }
 
   it('removes a newly claimed pool conversation from other agents only', () => {
-    const scope = inboxRemovalScope(null, 'agent-a')
+    const scope = inboxRemovalScope(workspaceId, null, 'agent-a')
     expect(scope(agentA)).toBe(false)
     expect(scope(agentB)).toBe(true)
     expect(scope(admin)).toBe(false)
@@ -49,13 +62,13 @@ describe('inboxRemovalScope — assignment visibility changes', () => {
   })
 
   it('removes a reassigned conversation from its previous owner', () => {
-    const scope = inboxRemovalScope('agent-a', 'agent-b')
+    const scope = inboxRemovalScope(workspaceId, 'agent-a', 'agent-b')
     expect(scope(agentA)).toBe(true)
     expect(scope(agentB)).toBe(false)
   })
 
   it('keeps a previous owner who is also a collaborator', () => {
-    const scope = inboxRemovalScope('agent-a', 'agent-b', ['agent-a'])
+    const scope = inboxRemovalScope(workspaceId, 'agent-a', 'agent-b', ['agent-a'])
     expect(scope(agentA)).toBe(false)
   })
 })
