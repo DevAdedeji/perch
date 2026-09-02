@@ -31,9 +31,7 @@ export interface InboxSavedView {
 
 export interface TeamMember {
   id: string
-  userId: string
   name: string
-  email: string
   role: 'admin' | 'agent'
   presence: 'online' | 'offline' | 'away'
 }
