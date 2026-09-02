@@ -50,6 +50,7 @@ export const billingIntervalEnum = pgEnum('billing_interval', ['monthly', 'yearl
 export const subscriptionStatusEnum = pgEnum('subscription_status', ['trialing', 'active', 'past_due', 'unpaid', 'paused', 'canceled'])
 export const invoiceStatusEnum = pgEnum('invoice_status', ['pending', 'paid', 'failed'])
 export const billingWebhookStatusEnum = pgEnum('billing_webhook_status', ['processing', 'completed', 'ignored', 'failed'])
+export const billingReconciliationStatusEnum = pgEnum('billing_reconciliation_status', ['pending', 'processing', 'retrying', 'idle', 'failed'])
 
 /* Tables */
 
@@ -149,6 +150,23 @@ export const billingWebhookDeliveries = pgTable('billing_webhook_deliveries', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
 }, t => [
   index('billing_webhook_deliveries_status_updated_idx').on(t.status, t.updatedAt)
+])
+
+export const billingReconciliationJobs = pgTable('billing_reconciliation_jobs', {
+  workspaceId: uuid('workspace_id').primaryKey().references(() => workspaces.id, { onDelete: 'cascade' }),
+  status: billingReconciliationStatusEnum('status').default('pending').notNull(),
+  attempts: integer('attempts').default(0).notNull(),
+  claimToken: text('claim_token'),
+  claimedAt: timestamp('claimed_at', { withTimezone: true }),
+  requestedAt: timestamp('requested_at', { withTimezone: true }),
+  nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).defaultNow(),
+  lastCheckedAt: timestamp('last_checked_at', { withTimezone: true }),
+  lastError: text('last_error'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
+}, t => [
+  check('billing_reconciliation_jobs_attempts_ck', sql`${t.attempts} between 0 and 6`),
+  index('billing_reconciliation_jobs_due_idx').on(t.status, t.nextAttemptAt)
 ])
 
 export const widgetInstallationSignals = pgTable('widget_installation_signals', {
@@ -813,4 +831,5 @@ export type NewWebhookDelivery = typeof webhookDeliveries.$inferInsert
 export type WorkspaceSubscription = typeof workspaceSubscriptions.$inferSelect
 export type WorkspaceInvoice = typeof workspaceInvoices.$inferSelect
 export type BillingWebhookDelivery = typeof billingWebhookDeliveries.$inferSelect
+export type BillingReconciliationJob = typeof billingReconciliationJobs.$inferSelect
 export type UnansweredReminderDelivery = typeof unansweredReminderDeliveries.$inferSelect

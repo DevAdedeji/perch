@@ -16,6 +16,7 @@ import {
 } from '@perch/db'
 import type { Conversation, WorkspaceMember } from '@perch/db'
 import { isVisitorMessagingBlocked } from './spam-control'
+import { visitorReplyEmailFeatureEnabled } from './visitor-email-continuity'
 import { z } from 'zod'
 
 const nullableText = (max: number) => z.union([

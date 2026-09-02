@@ -7,11 +7,12 @@ import {
   bachsConfigured,
   bachsSubscriptionSchema,
   bachsWebhookEventSchema,
+  getBachsCheckoutSession,
   isApprovedBachsCheckoutUrl,
   verifyBachsWebhookSignature
 } from '../server/utils/bachs'
 import { effectiveReminderSettings, reminderIsDue, reminderRetryAt } from '../server/utils/unanswered-reminders'
-import { checkoutMatchesInvoice, checkoutPaymentState, providerAmountCents, providerPaidThroughEnd, subscriptionHasPaidAccess } from '../server/utils/billing'
+import { checkoutMatchesInvoice, checkoutPaymentState, invoiceMatchesPerchPlan, providerAmountCents, providerPaidThroughEnd, providerSubscriptionIdentity, subscriptionHasPaidAccess } from '../server/utils/billing'
 
 describe('Perch plan pricing', () => {
   it('keeps the yearly plan cheaper than twelve monthly payments', () => {
@@ -43,7 +44,7 @@ describe('canonical Bachs payment data', () => {
   }
 
   it('accepts only exact invoice identity, currency, and amount matches', () => {
-    const invoice = { reference: 'invoice_123', bachsCheckoutId: 'co_123', amountCents: 900, currency: 'USD' }
+    const invoice = { reference: 'invoice_123', bachsCheckoutId: 'co_123', interval: 'monthly' as const, amountCents: 900, currency: 'USD' }
     expect(checkoutMatchesInvoice(checkout, invoice)).toBe(true)
     expect(checkoutMatchesInvoice({ ...checkout, currency: 'NGN' }, invoice)).toBe(false)
     expect(checkoutMatchesInvoice({ ...checkout, amount: '8.99' }, invoice)).toBe(false)
@@ -51,10 +52,39 @@ describe('canonical Bachs payment data', () => {
     expect(checkoutMatchesInvoice({ ...checkout, checkout_id: 'another' }, invoice)).toBe(false)
   })
 
+  it('requires the exact Perch price and currency stored for the selected interval', () => {
+    expect(invoiceMatchesPerchPlan({ interval: 'monthly', amountCents: 900, currency: 'usd' })).toBe(true)
+    expect(invoiceMatchesPerchPlan({ interval: 'monthly', amountCents: 899, currency: 'USD' })).toBe(false)
+    expect(invoiceMatchesPerchPlan({ interval: 'yearly', amountCents: 900, currency: 'USD' })).toBe(false)
+    expect(invoiceMatchesPerchPlan({ interval: 'monthly', amountCents: 900, currency: 'NGN' })).toBe(false)
+  })
+
   it('does not treat an unconfirmed completed checkout as paid', () => {
     expect(checkoutPaymentState(checkout)).toBe('paid')
     expect(checkoutPaymentState({ ...checkout, payment_status: 'processing', charge: null })).toBe('pending')
     expect(checkoutPaymentState({ ...checkout, status: 'expired', payment_status: 'failed', charge: null })).toBe('failed')
+    expect(checkoutPaymentState({ ...checkout, charge: { ...checkout.charge, status: 'refunded' } })).toBe('failed')
+    expect(checkoutPaymentState({ ...checkout, charge: { ...checkout.charge, status: 'underpaid' } })).toBe('failed')
+  })
+
+  it('binds a canonical subscription to one workspace, invoice, product, and interval', () => {
+    const subscription = {
+      id: 'sub_123',
+      status: 'active' as const,
+      metadata: { workspaceId: 'workspace_123', invoiceReference: 'invoice_123', perchPlan: 'workspace_pro', interval: 'monthly' },
+      product: { id: 'product_123', metadata: { perch_plan: 'workspace_pro_monthly' } }
+    }
+    expect(providerSubscriptionIdentity(subscription)).toEqual({
+      workspaceId: 'workspace_123', invoiceReference: 'invoice_123', interval: 'monthly'
+    })
+    expect(providerSubscriptionIdentity({
+      ...subscription,
+      metadata: { ...subscription.metadata, interval: 'yearly' }
+    })).toBeNull()
+    expect(providerSubscriptionIdentity({
+      ...subscription,
+      product: { ...subscription.product, metadata: { perch_plan: 'another_product' } }
+    })).toBeNull()
   })
 
   it('parses money without rounding provider values', () => {
@@ -131,6 +161,34 @@ describe('Bachs environment boundary', () => {
     expect(isApprovedBachsCheckoutUrl('https://checkout.bachs.io/session/123')).toBe(true)
     expect(isApprovedBachsCheckoutUrl('http://checkout.bachs.io/session/123')).toBe(false)
     expect(isApprovedBachsCheckoutUrl('https://checkout.bachs.io.evil.example/session/123')).toBe(false)
+  })
+
+  it('retries only bounded canonical reads after transient provider failures', async () => {
+    Object.assign(globalThis, {
+      useRuntimeConfig: () => ({
+        bachsEnvironment: 'sandbox',
+        bachsSecretKey: 'sk_sandbox_example',
+        bachsWebhookSecret: 'whsec_example'
+      })
+    })
+    const checkout = {
+      checkout_id: 'checkout_retry',
+      status: 'open',
+      payment_status: 'processing',
+      amount: '9.00',
+      currency: 'USD',
+      reference: 'invoice_retry',
+      charge: null
+    }
+    const provider = vi.fn()
+      .mockResolvedValueOnce(new Response('{}', { status: 503 }))
+      .mockResolvedValueOnce(new Response('{}', { status: 429 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(checkout), { status: 200 }))
+    vi.stubGlobal('fetch', provider)
+
+    await expect(getBachsCheckoutSession('checkout_retry')).resolves.toMatchObject({ checkout_id: 'checkout_retry' })
+    expect(provider).toHaveBeenCalledTimes(3)
+    vi.unstubAllGlobals()
   })
 })
 

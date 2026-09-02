@@ -7,6 +7,7 @@ const SANDBOX_API = 'https://sandbox-api.bachs.io/v1'
 const LIVE_API = 'https://api.bachs.io/v1'
 const WEBHOOK_TOLERANCE_SECONDS = 300
 const REQUEST_TIMEOUT_MS = 15_000
+export const BACHS_MAX_GET_ATTEMPTS = 3
 const productCache = new Map<BillingInterval, string>()
 
 const bachsEnvironmentSchema = z.enum(['sandbox', 'live'])
@@ -125,34 +126,48 @@ async function bachsFetch<T>(path: string, options: BachsRequest = {}): Promise<
   for (const [key, value] of Object.entries(options.query ?? {})) {
     if (value !== undefined) url.searchParams.set(key, String(value))
   }
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
-  try {
-    const response = await fetch(url, {
-      method: options.method ?? 'GET',
-      headers: {
-        'Authorization': `Bearer ${secretKey()}`,
-        'Content-Type': 'application/json',
-        ...(options.idempotencyKey ? { 'Idempotency-Key': options.idempotencyKey } : {})
-      },
-      body: options.body ? JSON.stringify(options.body) : undefined,
-      signal: controller.signal
-    })
-    const text = await response.text()
-    const payload = text ? safeJson(text) : null
-    if (response.ok) return payload as T
-    throw createError({
-      statusCode: response.status >= 500 ? 503 : 502,
-      statusMessage: 'Billing provider request failed. Please try again.'
-    })
-  } catch (error) {
-    if ((error as Error).name === 'AbortError') {
-      throw createError({ statusCode: 503, statusMessage: 'Bachs took too long to respond. Please try again.' })
+  const method = options.method ?? 'GET'
+  const maxAttempts = method === 'GET' ? BACHS_MAX_GET_ATTEMPTS : 1
+  const key = secretKey()
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+    try {
+      const response = await fetch(url, {
+        method,
+        headers: {
+          'Authorization': `Bearer ${key}`,
+          'Content-Type': 'application/json',
+          ...(options.idempotencyKey ? { 'Idempotency-Key': options.idempotencyKey } : {})
+        },
+        body: options.body ? JSON.stringify(options.body) : undefined,
+        signal: controller.signal
+      })
+      const text = await response.text()
+      const payload = text ? safeJson(text) : null
+      if (response.ok) return payload as T
+      const retryable = response.status === 429 || response.status >= 500
+      if (!retryable || attempt === maxAttempts) {
+        throw createError({
+          statusCode: retryable ? 503 : 502,
+          statusMessage: 'Billing provider request failed. Please try again.'
+        })
+      }
+    } catch (error) {
+      const timedOut = (error as Error).name === 'AbortError'
+      const networkFailure = error instanceof TypeError
+      if ((!timedOut && !networkFailure) || attempt === maxAttempts) {
+        if (timedOut) {
+          throw createError({ statusCode: 503, statusMessage: 'Bachs took too long to respond. Please try again.' })
+        }
+        throw error
+      }
+    } finally {
+      clearTimeout(timeout)
     }
-    throw error
-  } finally {
-    clearTimeout(timeout)
+    await new Promise(resolve => setTimeout(resolve, 150 * 2 ** (attempt - 1)))
   }
+  throw createError({ statusCode: 503, statusMessage: 'Billing provider request failed. Please try again.' })
 }
 
 function parseProviderResponse<T>(schema: z.ZodType<T>, payload: unknown, resource: string): T {

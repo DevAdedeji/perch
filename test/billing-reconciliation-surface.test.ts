@@ -1,0 +1,40 @@
+import { readFileSync } from 'node:fs'
+import { describe, expect, it } from 'vitest'
+
+function source(path: string) {
+  return readFileSync(new URL(path, import.meta.url), 'utf8')
+}
+
+describe('billing reconciliation surface', () => {
+  const route = source('../server/api/workspaces/[id]/billing/refresh.post.ts')
+  const page = source('../app/pages/billing.vue')
+  const checkout = source('../server/api/workspaces/[id]/billing/checkout.post.ts')
+  const billing = source('../server/utils/billing.ts')
+  const worker = source('../server/plugins/billing-reconciliation-sweep.ts')
+  const migration = source('../packages/db/migrations/0029_fair_hiroim.sql')
+
+  it('keeps reconciliation admin-only, rate-limited, and provider-backed', () => {
+    expect(route).toContain('requireMembership(event, workspaceId, { admin: true })')
+    expect(route).toContain('assertRateLimit(\'billing-refresh:member\'')
+    expect(route).toContain('reconcileWorkspaceBilling(workspaceId)')
+    expect(route).toContain('logAudit(workspaceId, user, \'billing.reconciled\'')
+  })
+
+  it('offers an honest manual recovery action without opening checkout', () => {
+    expect(page).toContain('Check Bachs status')
+    expect(page).toContain('method: \'POST\'')
+    expect(page).toContain('Pro remains off')
+    expect(page).not.toContain('setTimeout(() => pollForPaymentConfirmation')
+    expect(checkout).toContain('billingCheckoutEnabled()')
+    expect(checkout.indexOf('billingCheckoutEnabled()')).toBeLessThan(checkout.indexOf('readValidatedBody'))
+  })
+
+  it('keeps automatic recovery bounded, durable, and disabled in local tests', () => {
+    expect(billing).toContain('const RECONCILIATION_SWEEP_LIMIT = 5')
+    expect(billing).toContain('providerRequestCap: result.providerResourcesChecked * BACHS_MAX_GET_ATTEMPTS')
+    expect(worker).toContain('import.meta.dev || import.meta.test')
+    expect(worker).toContain('BILLING_RECONCILIATION_INTERVAL_MS = 60_000')
+    expect(migration).toContain('billing_reconciliation_jobs')
+    expect(migration).toContain('WHERE "status" = \'pending\' AND "bachs_checkout_id" IS NOT NULL')
+  })
+})
