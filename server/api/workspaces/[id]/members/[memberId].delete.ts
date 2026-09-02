@@ -24,6 +24,7 @@ export default defineEventHandler(async (event) => {
     await tx.delete(workspaceMembers).where(eq(workspaceMembers.id, memberId))
     return target
   })
+  disconnectWorkspaceUser(workspaceId, target.userId)
   const targetUser = await db.query.users.findFirst({ where: eq(users.id, target.userId) })
   logAudit(workspaceId, user, 'member.removed', {
     member: targetUser?.name ?? target.userId,

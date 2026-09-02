@@ -6,6 +6,7 @@
 export function usePresence() {
   const away = useState('presence:away', () => false)
   const rt = useRealtime()
+  const { currentWorkspace } = useAuth()
 
   const status = computed<'online' | 'away' | 'offline'>(() =>
     rt.status.value === 'open' ? (away.value ? 'away' : 'online') : 'offline'
@@ -13,7 +14,9 @@ export function usePresence() {
 
   function setAway(value: boolean) {
     away.value = value
-    rt.sendPresence(value ? 'away' : 'online')
+    if (currentWorkspace.value) {
+      rt.sendPresence(currentWorkspace.value.workspaceId, value ? 'away' : 'online')
+    }
   }
 
   return { away, status, setAway }

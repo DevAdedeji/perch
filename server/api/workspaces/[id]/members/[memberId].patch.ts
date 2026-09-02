@@ -34,6 +34,7 @@ export default defineEventHandler(async (event) => {
   })
 
   if (target.role !== result.data.role) {
+    disconnectWorkspaceUser(workspaceId, target.userId)
     const targetUser = await db.query.users.findFirst({ where: eq(users.id, target.userId) })
     logAudit(workspaceId, user, 'member.role_changed', {
       member: targetUser?.name ?? target.userId,

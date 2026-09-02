@@ -28,9 +28,13 @@ export default defineEventHandler(async (event) => {
     for (const conversation of result.conversations) {
       if (!result.changedConversationIds.includes(conversation.id)) continue
       const refresh = { type: 'conversation.refresh' as const, payload: { conversation_id: conversation.id } }
-      publishFiltered(channels.workspace(workspaceId), refresh, inboxScope(conversation.assignedAgentId, conversation.collaboratorMemberIds))
+      publishFiltered(channels.workspace(workspaceId),
+        refresh,
+        inboxScope(workspaceId, conversation.assignedAgentId, conversation.collaboratorMemberIds)
+      )
       publishConversationEvent(
-        channels.conversation(conversation.id),
+        workspaceId,
+        conversation.id,
         refresh,
         conversation.assignedAgentId,
         conversation.collaboratorMemberIds,

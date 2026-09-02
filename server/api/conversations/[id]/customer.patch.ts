@@ -64,7 +64,7 @@ export default defineEventHandler(async (event) => {
   publishFiltered(channels.workspace(conversation.workspaceId), {
     type: 'conversation.refresh',
     payload: { conversation_id: conversation.id }
-  }, inboxScope(conversation.assignedAgentId, conversation.collaboratorMemberIds))
+  }, inboxScope(conversation.workspaceId, conversation.assignedAgentId, conversation.collaboratorMemberIds))
 
   return getCustomerContext(conversation, member)
 })

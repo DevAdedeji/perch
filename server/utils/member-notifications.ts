@@ -1,6 +1,7 @@
 import type { MemberNotification } from '@perch/db'
 import { channels } from '@perch/shared'
 import type { MemberNotificationPayload } from '@perch/shared'
+import { agentWorkspaceAuthorization } from './realtime'
 
 export function serializeMemberNotification(notification: MemberNotification): MemberNotificationPayload {
   return {
@@ -21,5 +22,8 @@ export function publishMemberNotification(notification: MemberNotification): voi
   publishFiltered(channels.workspace(notification.workspaceId), {
     type: 'member.notification',
     payload: serializeMemberNotification(notification)
-  }, context => context.memberId === notification.recipientMemberId)
+  }, (context) => {
+    const authorization = agentWorkspaceAuthorization(context, notification.workspaceId)
+    return authorization?.memberId === notification.recipientMemberId
+  })
 }

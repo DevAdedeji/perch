@@ -20,7 +20,7 @@ This is the practical checklist for deploying and operating Perch. It separates 
 - Set the Docker build argument `PERCH_PUBLIC_URL` as well as the runtime variable so prerendered canonical links use the public domain.
 - Configure the readiness/health check path as `/api/health` with a timeout longer than the database connection timeout. Use `/api/live` only when Railway supports a separate liveness probe.
 - Keep HTTPS redirect enabled at the edge. HSTS is sent by Perch in production, but TLS termination and certificate renewal belong to Railway.
-- Run one application replica until realtime fan-out, presence, rate limits, and background-job claiming use shared infrastructure. In-memory coordination is intentionally single-instance today.
+- Run one application replica until realtime fan-out, presence, rate limits, background-job claiming, and session/member authorization invalidation use shared infrastructure. Role changes, member removal, and session revocation disconnect affected sockets immediately on the replica that handled the change, but another replica would need the same invalidation over shared pub/sub. In-memory coordination is intentionally single-instance today.
 - Set CPU and memory limits, watch restart count and memory pressure, and keep at least one previous known-good image available for rollback.
 - Send application logs to a retained log destination. Alert on repeated `5xx` responses, failed health checks, restart loops, and background sweep failures.
 - Retain structured `[data-deletion-receipt]` log records for longer than the backup window. They contain internal IDs but no email, chat text, or password. Restrict access to operators.
