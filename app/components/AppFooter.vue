@@ -1,5 +1,11 @@
 <script setup lang="ts">
-const cols = [
+interface FooterLink {
+  label: string
+  to: string
+  external?: boolean
+}
+
+const cols: Array<{ title: string, links: FooterLink[] }> = [
   {
     title: 'Product',
     links: [
