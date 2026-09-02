@@ -1,11 +1,28 @@
-import { and, conversations, eq, sql, users, workspaceMembers } from '@perch/db'
+import { conversations, eq, sql, users, workspaceMembers } from '@perch/db'
 
-/** Team roster for a workspace (owner labels, reassignment, presence, workload). */
+/** Role-aware roster used by assignment, mentions, presence, and Team management. */
 export default defineEventHandler(async (event) => {
   const workspaceId = getRouterParam(event, 'id')!
-  await requireMembership(event, workspaceId)
+  const { member: viewer } = await requireMembership(event, workspaceId)
 
   const db = useDb()
+  if (viewer.role !== 'admin') {
+    const rows = await db
+      .select({
+        id: workspaceMembers.id,
+        name: users.name,
+        role: workspaceMembers.role
+      })
+      .from(workspaceMembers)
+      .innerJoin(users, eq(users.id, workspaceMembers.userId))
+      .where(eq(workspaceMembers.workspaceId, workspaceId))
+
+    return rows.map(member => teamRosterMemberDto(
+      member,
+      memberPresence(workspaceId, member.id)
+    ))
+  }
+
   const rows = await db
     .select({
       id: workspaceMembers.id,
@@ -34,15 +51,10 @@ export default defineEventHandler(async (event) => {
     })
     .from(workspaceMembers)
     .innerJoin(users, eq(users.id, workspaceMembers.userId))
-    .where(and(eq(workspaceMembers.workspaceId, workspaceId)))
+    .where(eq(workspaceMembers.workspaceId, workspaceId))
 
-  // live presence from the in-process registry (§6.5)
-  return rows.map(m => ({
-    ...m,
-    openCount: Number(m.openCount),
-    resolvedCount: Number(m.resolvedCount),
-    csatGood: Number(m.csatGood),
-    csatBad: Number(m.csatBad),
-    presence: memberPresence(workspaceId, m.id)
-  }))
+  return rows.map(member => adminTeamRosterMemberDto(
+    member,
+    memberPresence(workspaceId, member.id)
+  ))
 })
