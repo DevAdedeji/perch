@@ -62,7 +62,10 @@ describe.skipIf(!databaseUrl)('customer context database integration', () => {
   const currentConversationId = randomUUID()
 
   beforeAll(async () => {
-    Object.assign(globalThis, { useDb: () => db })
+    Object.assign(globalThis, {
+      useDb: () => db,
+      visitorReplyEmailFeatureEnabled: () => false
+    })
     await db.insert(schema.users).values([
       { id: adminUserId, email: `${adminUserId}@example.com`, name: 'Admin' },
       { id: agentUserId, email: `${agentUserId}@example.com`, name: 'Agent' },
