@@ -3,6 +3,7 @@ import { channels, PERCH_PRO_PLAN, PERCH_PRODUCTION_ORIGIN } from '@perch/shared
 import type { SubscriptionStatus } from '@perch/shared'
 import { subscriptionHasPaidAccess, workspaceEntitlement } from './billing'
 import { agentWorkspaceAuthorization } from './realtime'
+import { safeErrorSummary } from './request-security'
 
 const MAX_ATTEMPTS = 5
 const CLAIM_LIMIT = 25
@@ -265,7 +266,7 @@ export async function runUnansweredReminderSweep(options: { now?: Date, sender?:
         status: 'failed',
         lockedAt: null,
         nextAttemptAt: reminderRetryAt(delivery.attempts, now),
-        lastError: String((error as Error)?.message ?? error).slice(0, 1000),
+        lastError: JSON.stringify(safeErrorSummary(error)),
         updatedAt: sql`now()`
       }).where(eq(unansweredReminderDeliveries.id, delivery.id))
     }

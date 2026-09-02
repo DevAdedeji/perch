@@ -20,6 +20,7 @@ import type { AutomationRuleConfig } from '@perch/shared'
 import { channels } from '@perch/shared'
 import { enqueueWebhookEvent } from './webhooks'
 import { agentWorkspaceAuthorization } from './realtime'
+import { safeErrorSummary } from './request-security'
 
 type Database = ReturnType<typeof useDb>
 class AutomationSkipped extends Error {}
@@ -175,7 +176,11 @@ export async function runEntryAutomations(conversation: Conversation, visitor: V
         if (matchesVipRule(config, visitor)) tagsChanged = await applyVipTag(rule, current) || tagsChanged
       }
     } catch (error) {
-      console.error('[automation] entry rule failed', { ruleId: rule.id, conversationId: conversation.id, error })
+      console.error('[automation] entry rule failed', {
+        ruleId: rule.id,
+        conversationId: conversation.id,
+        ...safeErrorSummary(error)
+      })
     }
   }
   current = await resolveEntryConversation(current)
@@ -299,7 +304,11 @@ export async function runAutomationSweep(now = new Date()) {
         if (rule.type === 'inactivity_reminder') await runReminder(rule, conversation, now)
         else await runAutoClose(rule, conversation, cutoff, now)
       } catch (error) {
-        console.error('[automation] inactivity rule failed', { ruleId: rule.id, conversationId: conversation.id, error })
+        console.error('[automation] inactivity rule failed', {
+          ruleId: rule.id,
+          conversationId: conversation.id,
+          ...safeErrorSummary(error)
+        })
       }
     }
   }

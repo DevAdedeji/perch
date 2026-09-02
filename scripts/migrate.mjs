@@ -19,12 +19,21 @@ if (!url) {
 
 const sql = postgres(url, { max: 1, connect_timeout: 15 })
 
+function safeErrorSummary(error) {
+  if (!error || typeof error !== 'object') return { type: typeof error }
+  const summary = {
+    type: typeof error.name === 'string' ? error.name.slice(0, 80) : 'Error'
+  }
+  if (typeof error.code === 'string') summary.code = error.code.slice(0, 80)
+  return summary
+}
+
 try {
   const started = Date.now()
   await migrate(drizzle(sql), { migrationsFolder: './migrations' })
   console.log(`[migrate] schema up to date (${Date.now() - started}ms)`)
 } catch (err) {
-  console.error('[migrate] migration failed — aborting boot:', err)
+  console.error('[migrate] migration failed — aborting boot', safeErrorSummary(err))
   process.exit(1)
 } finally {
   await sql.end()

@@ -1,3 +1,5 @@
+import { safeErrorSummary } from '../utils/request-security'
+
 const REMINDER_SWEEP_INTERVAL = 60_000
 
 export default defineNitroPlugin(() => {
@@ -9,7 +11,7 @@ export default defineNitroPlugin(() => {
     try {
       await runUnansweredReminderSweep()
     } catch (error) {
-      console.error('[reminders] sweep failed', error)
+      console.error('[reminders] sweep failed', safeErrorSummary(error))
     } finally {
       running = false
     }
