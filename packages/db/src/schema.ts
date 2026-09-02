@@ -37,6 +37,14 @@ export const supportOutcomeEventTypeEnum = pgEnum('support_outcome_event_type', 
 export const reminderDeliveryStatusEnum = pgEnum('reminder_delivery_status', ['pending', 'processing', 'sent', 'failed', 'canceled'])
 export const visitorEmailSourceEnum = pgEnum('visitor_email_source', ['prechat', 'unsigned_identify', 'host_asserted'])
 export const visitorEmailSuppressionReasonEnum = pgEnum('visitor_email_suppression_reason', ['unsubscribe', 'bounce', 'complaint'])
+export const webhookJobStatusEnum = pgEnum('webhook_job_status', [
+  'pending',
+  'processing',
+  'retrying',
+  'succeeded',
+  'dead_letter',
+  'canceled'
+])
 export const billingIntervalEnum = pgEnum('billing_interval', ['monthly', 'yearly'])
 export const subscriptionStatusEnum = pgEnum('subscription_status', ['trialing', 'active', 'past_due', 'unpaid', 'paused', 'canceled'])
 export const invoiceStatusEnum = pgEnum('invoice_status', ['pending', 'paid', 'failed'])
@@ -677,10 +685,54 @@ export const webhookEndpoints = pgTable('webhook_endpoints', {
   index('webhook_endpoints_workspace_idx').on(t.workspaceId)
 ])
 
-/** Recent delivery attempts per endpoint (capped — pruned on insert). */
+/** Immutable domain events waiting to fan out to the endpoints subscribed at commit time. */
+export const webhookEvents = pgTable('webhook_events', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  event: text('event').notNull(),
+  dedupeKey: text('dedupe_key').notNull(),
+  data: jsonb('data').$type<Record<string, unknown>>(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull()
+}, t => [
+  uniqueIndex('webhook_events_workspace_dedupe_uq').on(t.workspaceId, t.dedupeKey),
+  index('webhook_events_workspace_created_idx').on(t.workspaceId, t.createdAt),
+  check('webhook_events_name_ck', sql`${t.event} in ('conversation.created', 'message.created', 'conversation.resolved')`)
+])
+
+/** One durable job per endpoint/event pair. Endpoint secrets are never copied here. */
+export const webhookJobs = pgTable('webhook_jobs', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  endpointId: uuid('endpoint_id').notNull().references(() => webhookEndpoints.id, { onDelete: 'cascade' }),
+  eventId: uuid('event_id').notNull().references(() => webhookEvents.id, { onDelete: 'cascade' }),
+  status: webhookJobStatusEnum('status').default('pending').notNull(),
+  attempts: integer('attempts').default(0).notNull(),
+  nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).defaultNow(),
+  lockedAt: timestamp('locked_at', { withTimezone: true }),
+  lastAttemptAt: timestamp('last_attempt_at', { withTimezone: true }),
+  deliveredAt: timestamp('delivered_at', { withTimezone: true }),
+  lastHttpStatus: integer('last_http_status'),
+  lastDurationMs: integer('last_duration_ms'),
+  lastError: text('last_error'),
+  cancelReason: text('cancel_reason'),
+  replayCount: integer('replay_count').default(0).notNull(),
+  lastReplayKey: uuid('last_replay_key'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
+}, t => [
+  uniqueIndex('webhook_jobs_endpoint_event_uq').on(t.endpointId, t.eventId),
+  index('webhook_jobs_due_idx').on(t.status, t.nextAttemptAt),
+  index('webhook_jobs_endpoint_created_idx').on(t.endpointId, t.createdAt),
+  index('webhook_jobs_workspace_status_idx').on(t.workspaceId, t.status, t.updatedAt),
+  check('webhook_jobs_attempts_ck', sql`${t.attempts} between 0 and 6`),
+  check('webhook_jobs_replay_count_ck', sql`${t.replayCount} >= 0`)
+])
+
+/** Individual HTTP attempts, linked to a durable job when one exists. */
 export const webhookDeliveries = pgTable('webhook_deliveries', {
   id: uuid('id').defaultRandom().primaryKey(),
   endpointId: uuid('endpoint_id').notNull().references(() => webhookEndpoints.id, { onDelete: 'cascade' }),
+  jobId: uuid('job_id').references(() => webhookJobs.id, { onDelete: 'cascade' }),
   event: text('event').notNull(),
   ok: boolean('ok').notNull(),
   httpStatus: integer('http_status'),
@@ -689,7 +741,8 @@ export const webhookDeliveries = pgTable('webhook_deliveries', {
   error: text('error'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull()
 }, t => [
-  index('webhook_deliveries_endpoint_recency_idx').on(t.endpointId, t.createdAt)
+  index('webhook_deliveries_endpoint_recency_idx').on(t.endpointId, t.createdAt),
+  index('webhook_deliveries_job_attempt_idx').on(t.jobId, t.attempt)
 ])
 
 /* Inferred row types */
@@ -736,6 +789,8 @@ export type Trigger = typeof triggers.$inferSelect
 export type NewTrigger = typeof triggers.$inferInsert
 export type WebhookEndpoint = typeof webhookEndpoints.$inferSelect
 export type NewWebhookEndpoint = typeof webhookEndpoints.$inferInsert
+export type WebhookEvent = typeof webhookEvents.$inferSelect
+export type WebhookJob = typeof webhookJobs.$inferSelect
 export type WebhookDelivery = typeof webhookDeliveries.$inferSelect
 export type NewWebhookDelivery = typeof webhookDeliveries.$inferInsert
 export type WorkspaceSubscription = typeof workspaceSubscriptions.$inferSelect

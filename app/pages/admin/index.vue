@@ -141,12 +141,18 @@ interface WebhookRow {
 interface DeliveryRow {
   id: string
   event: string
+  status: 'pending' | 'processing' | 'retrying' | 'succeeded' | 'dead_letter' | 'canceled'
   ok: boolean
   http_status: number | null
-  duration_ms: number
-  attempt: number
+  duration_ms: number | null
+  attempts: number
+  next_attempt_at: string | null
   error: string | null
+  cancel_reason: string | null
+  replay_count: number
+  can_replay: boolean
   created_at: string
+  updated_at: string
 }
 
 const WEBHOOK_EVENT_OPTIONS = [
@@ -168,6 +174,8 @@ const deliveries = ref<DeliveryRow[]>([])
 const deliveriesLoading = ref(false)
 const deliveriesError = ref<string | null>(null)
 const testingWebhook = ref<string | null>(null)
+const webhookDeliveryEnabled = ref(false)
+const replayingDelivery = ref<string | null>(null)
 const pendingWebhookDelete = ref<WebhookRow | null>(null)
 const deletingWebhook = ref(false)
 const webhookDeleteOpen = computed({
@@ -263,12 +271,42 @@ async function toggleDeliveries(w: WebhookRow) {
   deliveriesError.value = null
   deliveriesLoading.value = true
   try {
-    const res = await $fetch<{ deliveries: DeliveryRow[] }>(`/api/workspaces/${wid.value}/webhooks/${w.id}/deliveries`)
+    const res = await $fetch<{ deliveries: DeliveryRow[], delivery_enabled: boolean }>(`/api/workspaces/${wid.value}/webhooks/${w.id}/deliveries`)
     deliveries.value = res.deliveries
+    webhookDeliveryEnabled.value = res.delivery_enabled
   } catch (error) {
     deliveriesError.value = getErrorMessage(error, 'Could not load recent deliveries')
   } finally {
     deliveriesLoading.value = false
+  }
+}
+
+function deliveryLabel(status: DeliveryRow['status']) {
+  return ({
+    pending: 'Queued',
+    processing: 'Sending',
+    retrying: 'Retry scheduled',
+    succeeded: 'Delivered',
+    dead_letter: 'Needs attention',
+    canceled: 'Canceled'
+  })[status]
+}
+
+async function replayDelivery(webhook: WebhookRow, delivery: DeliveryRow) {
+  if (replayingDelivery.value) return
+  replayingDelivery.value = delivery.id
+  try {
+    await $fetch(`/api/workspaces/${wid.value}/webhooks/${webhook.id}/deliveries/${delivery.id}/replay`, {
+      method: 'POST',
+      body: { request_id: crypto.randomUUID() }
+    })
+    toast.add({ title: 'Delivery queued again', color: 'success' })
+    expandedWebhook.value = null
+    await toggleDeliveries(webhook)
+  } catch (error) {
+    toast.add({ title: getErrorMessage(error, 'Could not retry the delivery'), color: 'error' })
+  } finally {
+    replayingDelivery.value = null
   }
 }
 
@@ -322,6 +360,7 @@ const AUDIT_LABELS: Record<string, string> = {
   'webhook.created': 'added a webhook endpoint',
   'webhook.updated': 'updated a webhook endpoint',
   'webhook.deleted': 'deleted a webhook endpoint',
+  'webhook.delivery_replayed': 'retried a failed webhook delivery',
   'customer.profile_updated': 'updated customer details'
 }
 
@@ -705,6 +744,12 @@ async function deleteWorkspace() {
                 class="border-t border-default/60 bg-elevated/30 px-3.5 py-2.5"
               >
                 <p
+                  v-if="!webhookDeliveryEnabled && !deliveriesLoading"
+                  class="mb-2 rounded-lg bg-amber-50 px-2.5 py-2 text-xs text-amber-800 dark:bg-amber-950/30 dark:text-amber-200"
+                >
+                  Automatic delivery is paused by the Perch operator. New events are not queued while it is paused.
+                </p>
+                <p
                   v-if="deliveriesLoading"
                   class="text-xs text-dimmed"
                 >
@@ -735,25 +780,59 @@ async function deleteWorkspace() {
                 </p>
                 <ul
                   v-else
-                  class="space-y-1"
+                  class="space-y-2"
                 >
                   <li
                     v-for="d in deliveries"
                     :key="d.id"
-                    class="flex items-center gap-2 text-xs"
+                    class="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-default px-2.5 py-2 text-xs sm:flex-nowrap"
                   >
                     <span
                       class="size-1.5 shrink-0 rounded-full"
-                      :class="d.ok ? 'bg-green-500' : 'bg-red-500'"
+                      :class="{
+                        'bg-green-500': d.status === 'succeeded',
+                        'bg-red-500': d.status === 'dead_letter',
+                        'bg-amber-500': d.status === 'retrying',
+                        'bg-blue-500': d.status === 'pending' || d.status === 'processing',
+                        'bg-gray-400': d.status === 'canceled'
+                      }"
                     />
                     <span class="font-mono text-muted">{{ d.event }}</span>
-                    <span class="text-dimmed">{{ d.http_status ?? '—' }} · {{ d.duration_ms }}ms<template v-if="d.attempt > 1"> · try {{ d.attempt }}</template></span>
+                    <span class="font-medium text-highlighted">{{ deliveryLabel(d.status) }}</span>
                     <span
-                      v-if="d.error"
-                      class="min-w-0 truncate text-red-500/80"
-                      :title="d.error"
-                    >{{ d.error }}</span>
-                    <span class="ml-auto shrink-0 text-dimmed">{{ auditWhen(d.created_at) }}</span>
+                      v-if="d.http_status || d.duration_ms !== null"
+                      class="text-dimmed"
+                    >{{ d.http_status ?? '—' }}<template v-if="d.duration_ms !== null"> · {{ d.duration_ms }}ms</template></span>
+                    <span
+                      v-if="d.attempts > 1"
+                      class="text-dimmed"
+                    >try {{ d.attempts }}</span>
+                    <span
+                      v-if="d.next_attempt_at"
+                      class="basis-full text-amber-600 dark:text-amber-400 sm:basis-auto"
+                    >Next try {{ auditWhen(d.next_attempt_at) }}</span>
+                    <span
+                      v-if="d.error || d.cancel_reason"
+                      class="min-w-0 basis-full truncate text-red-500/80 sm:basis-auto"
+                      :title="d.error ?? d.cancel_reason ?? undefined"
+                    >{{ d.error ?? d.cancel_reason?.replaceAll('_', ' ') }}</span>
+                    <UButton
+                      v-if="d.can_replay && webhookDeliveryEnabled"
+                      class="sm:ml-auto"
+                      size="xs"
+                      color="neutral"
+                      variant="soft"
+                      icon="i-lucide-rotate-cw"
+                      :loading="replayingDelivery === d.id"
+                      :disabled="Boolean(replayingDelivery)"
+                      @click="replayDelivery(w, d)"
+                    >
+                      Retry now
+                    </UButton>
+                    <span
+                      v-else
+                      class="ml-auto shrink-0 text-dimmed"
+                    >{{ auditWhen(d.updated_at) }}</span>
                   </li>
                 </ul>
               </div>

@@ -18,6 +18,7 @@ import {
 import type { AutomationRule, Conversation, Visitor } from '@perch/db'
 import type { AutomationRuleConfig } from '@perch/shared'
 import { channels } from '@perch/shared'
+import { enqueueWebhookEvent } from './webhooks'
 import { agentWorkspaceAuthorization } from './realtime'
 
 type Database = ReturnType<typeof useDb>
@@ -249,6 +250,9 @@ async function runAutoClose(rule: AutomationRule, candidate: Conversation, cutof
         eventType: 'resolution',
         occurredAt: now
       })
+      await enqueueWebhookEvent(tx, updated.workspaceId, 'conversation.resolved', {
+        conversation: serializeConversation(updated)
+      }, `conversation.resolved:${updated.id}:${updated.updatedAt.toISOString()}`)
     } else {
       await tx.delete(automationExecutions).where(eq(automationExecutions.id, execution.id))
     }
@@ -256,7 +260,6 @@ async function runAutoClose(rule: AutomationRule, candidate: Conversation, cutof
   })
   if (!closed) return
   publishConversationUpdate(closed)
-  dispatchWebhooks(closed.workspaceId, 'conversation.resolved', { conversation: serializeConversation(closed) })
 }
 
 export async function runAutomationSweep(now = new Date()) {

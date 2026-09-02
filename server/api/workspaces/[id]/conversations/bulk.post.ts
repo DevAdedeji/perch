@@ -43,10 +43,6 @@ export default defineEventHandler(async (event) => {
     }
   }
   for (const notification of result.notifications) publishMemberNotification(notification)
-  for (const conversation of result.newlyResolved) {
-    dispatchWebhooks(workspaceId, 'conversation.resolved', { conversation: serializeConversation(conversation) })
-  }
-
   logAudit(workspaceId, user, `conversation.bulk.${parsed.data.action}`, {
     requested_count: result.requestedCount,
     changed_count: result.changedConversationIds.length,

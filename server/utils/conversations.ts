@@ -2,6 +2,7 @@ import { and, conversations, desc, eq, memberNotifications, messages, ne, sql, s
 import type { Conversation, Message } from '@perch/db'
 import { channels } from '@perch/shared'
 import type { ConversationDTO, MessageDTO, VisitorConversationDTO, VisitorMessageDTO } from '@perch/shared'
+import { enqueueWebhookEvent } from './webhooks'
 import { agentWorkspaceAuthorization } from './realtime'
 
 /* serialization (rows → §6 wire DTOs) */
@@ -201,6 +202,15 @@ export async function ingestVisitorMessage(input: IncomingVisitorMessage) {
       attachmentUrl: input.attachmentUrl ?? null,
       attachmentType: input.attachmentType ?? null
     }).returning()
+    if (isNew) {
+      await enqueueWebhookEvent(tx, input.workspaceId, 'conversation.created', {
+        conversation: serializeConversation(conversation),
+        visitor: { id: visitor!.id, name: visitor!.name, email: visitor!.email }
+      }, `conversation.created:${conversation.id}`)
+    }
+    await enqueueWebhookEvent(tx, input.workspaceId, 'message.created', {
+      message: serializeMessage(message!)
+    }, `message.created:${message!.id}`)
     return { visitor: visitor!, conversation, message: message!, isNew }
   })
   const { visitor, message, isNew } = result
@@ -234,15 +244,6 @@ export async function ingestVisitorMessage(input: IncomingVisitorMessage) {
   // scope the inbox copy so agents don't receive chats assigned to someone else
   publishFiltered(wsChannel, msgEvent, inboxScope(input.workspaceId, conversation.assignedAgentId, conversation.collaboratorMemberIds))
   publishConversationMessage(input.workspaceId, conversation.id, message, conversation.assignedAgentId, conversation.collaboratorMemberIds)
-
-  // outbound webhooks (fire-and-forget, after the committed writes)
-  if (isNew) {
-    dispatchWebhooks(input.workspaceId, 'conversation.created', {
-      conversation: serializeConversation(conversation),
-      visitor: { id: visitor.id, name: visitor.name, email: visitor.email }
-    })
-  }
-  dispatchWebhooks(input.workspaceId, 'message.created', { message: serializeMessage(message) })
 
   return { visitor, conversation, message }
 }
@@ -324,6 +325,11 @@ export async function addAgentMessage(input: AgentMessageInput) {
           excerpt: input.content.slice(0, 160)
         }))).returning()
       : []
+    if (message && !message.isInternalNote) {
+      await enqueueWebhookEvent(tx, input.workspaceId, 'message.created', {
+        message: serializeMessage(message)
+      }, `message.created:${message.id}`)
+    }
     return {
       message: message!,
       conv,
@@ -342,11 +348,6 @@ export async function addAgentMessage(input: AgentMessageInput) {
   )
   publishConversationMessage(input.workspaceId, input.conversationId, message, conv.assignedAgentId, conv.collaboratorMemberIds)
   notifications.forEach(publishMemberNotification)
-
-  // internal notes never leave the building — not even as webhooks
-  if (!message.isInternalNote) {
-    dispatchWebhooks(input.workspaceId, 'message.created', { message: serializeMessage(message) })
-  }
 
   return message
 }
@@ -415,9 +416,18 @@ export async function startAgentConversation(input: StartConversationInput) {
       senderId: input.memberId,
       content: input.content
     }).returning()
+    if (isNew) {
+      await enqueueWebhookEvent(tx, input.workspaceId, 'conversation.created', {
+        conversation: serializeConversation(conversation),
+        visitor: { id: visitor.id, name: visitor.name, email: visitor.email }
+      }, `conversation.created:${conversation.id}`)
+    }
+    await enqueueWebhookEvent(tx, input.workspaceId, 'message.created', {
+      message: serializeMessage(message!)
+    }, `message.created:${message!.id}`)
     return { visitor, conversation, message: message!, isNew, previousAssignedAgentId: existing?.assignedAgentId ?? null }
   })
-  const { visitor, conversation, message, isNew, previousAssignedAgentId } = result
+  const { conversation, message, isNew, previousAssignedAgentId } = result
 
   const msgEvent = { type: 'message.new' as const, payload: serializeMessage(message) }
   if (isNew) {
@@ -426,10 +436,6 @@ export async function startAgentConversation(input: StartConversationInput) {
       { type: 'conversation.new', payload: serializeConversation(conversation) },
       inboxScope(input.workspaceId, conversation.assignedAgentId, conversation.collaboratorMemberIds)
     )
-    dispatchWebhooks(input.workspaceId, 'conversation.created', {
-      conversation: serializeConversation(conversation),
-      visitor: { id: visitor.id, name: visitor.name, email: visitor.email }
-    })
   } else {
     publishConversationUpdate(conversation, { previousAssignedAgentId })
   }
@@ -439,7 +445,6 @@ export async function startAgentConversation(input: StartConversationInput) {
     inboxScope(input.workspaceId, conversation.assignedAgentId, conversation.collaboratorMemberIds)
   )
   publishConversationMessage(input.workspaceId, conversation.id, message, conversation.assignedAgentId, conversation.collaboratorMemberIds)
-  dispatchWebhooks(input.workspaceId, 'message.created', { message: serializeMessage(message) })
 
   // tell the visitor's live widget to adopt the thread (no-op if they left)
   sendToVisitor(input.workspaceId, input.visitorRef, {
@@ -552,6 +557,9 @@ export async function setConversationStatus(
         actorMemberId: actorMemberId!,
         occurredAt: now
       })
+      await enqueueWebhookEvent(tx, conversation.workspaceId, 'conversation.resolved', {
+        conversation: serializeConversation(conversation)
+      }, `conversation.resolved:${conversation.id}:${conversation.updatedAt.toISOString()}`)
     }
 
     if (conversation) return { conversation, changed: true }
@@ -565,11 +573,6 @@ export async function setConversationStatus(
   const conversation = result.conversation
   if (conversation && result.changed) {
     publishConversationUpdate(conversation)
-    if (status === 'resolved') {
-      dispatchWebhooks(conversation.workspaceId, 'conversation.resolved', {
-        conversation: serializeConversation(conversation)
-      })
-    }
   }
   return conversation
 }

@@ -225,6 +225,7 @@ Useful scripts: `pnpm build` (production Nitro bundle), `pnpm preview`, `pnpm li
 | `PERCH_PUBLIC_URL` | Canonical origin used in prerendered SEO metadata, password, verification, and invite links; set it to `https://useperch.xyz` during both the production build and runtime |
 | `PERCH_ADMIN_EMAILS` | *(optional)* comma-separated operator emails allowed to access instance metrics |
 | `NUXT_PUBLIC_DEMO_SITE_ID` | *(optional)* workspace site ID used by the landing-page demo widget |
+| `PERCH_WEBHOOK_DELIVERY_ENABLED` | Safety gate for durable outbound conversation webhook processing and admin replay. Keep `false` until customer-data egress and destinations are approved |
 
 > Nuxt only auto-maps `NUXT_`-prefixed env at runtime. The server reads the documented plain
 > environment variable names directly as production fallbacks.
