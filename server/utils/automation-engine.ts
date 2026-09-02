@@ -18,6 +18,7 @@ import {
 import type { AutomationRule, Conversation, Visitor } from '@perch/db'
 import type { AutomationRuleConfig } from '@perch/shared'
 import { channels } from '@perch/shared'
+import { agentWorkspaceAuthorization } from './realtime'
 
 type Database = ReturnType<typeof useDb>
 class AutomationSkipped extends Error {}
@@ -217,7 +218,10 @@ async function runReminder(rule: AutomationRule, candidate: Conversation, now: D
       conversation_id: result.conversationId,
       created_at: result.createdAt.toISOString()
     }
-  }, context => context.role === 'agent' && context.memberId === result.memberId)
+  }, (context) => {
+    const authorization = agentWorkspaceAuthorization(context, candidate.workspaceId)
+    return authorization?.memberId === result.memberId
+  })
 }
 
 async function runAutoClose(rule: AutomationRule, candidate: Conversation, cutoff: Date, now: Date) {

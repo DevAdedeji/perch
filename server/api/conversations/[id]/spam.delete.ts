@@ -107,7 +107,11 @@ export default defineEventHandler(async (event) => {
     publishFiltered(channels.workspace(result.conversation.workspaceId), {
       type: 'conversation.refresh',
       payload: { conversation_id: result.conversation.id }
-    }, inboxScope(result.conversation.assignedAgentId, result.conversation.collaboratorMemberIds))
+    }, inboxScope(
+      result.conversation.workspaceId,
+      result.conversation.assignedAgentId,
+      result.conversation.collaboratorMemberIds
+    ))
   }
   if (!result.visitorBlocked) {
     for (const visitorId of result.visitorIds) {

@@ -126,8 +126,8 @@ export function useRealtime() {
     sendRaw({ type: isTyping ? 'typing.start' : 'typing.stop', payload: { conversation_id: conversationId } })
   }
 
-  function sendPresence(presence: 'online' | 'away') {
-    sendRaw({ type: 'presence.update', payload: { presence } })
+  function sendPresence(workspaceId: string, presence: 'online' | 'away') {
+    sendRaw({ type: 'presence.update', payload: { workspace_id: workspaceId, presence } })
   }
 
   return { status, connect, subscribe, unsubscribe, on, onReconnect, sendTyping, sendPresence }

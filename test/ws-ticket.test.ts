@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { signTicket, verifyTicket } from '../server/utils/ws-ticket'
 
@@ -6,8 +7,16 @@ const HOST_ORIGIN = 'https://customer.example'
 
 describe('WebSocket auth tickets', () => {
   it('round-trips an agent ticket', () => {
-    const token = signTicket({ role: 'agent', uid: 'user-1' }, SECRET)
-    expect(verifyTicket(token, SECRET)).toEqual({ role: 'agent', uid: 'user-1' })
+    const token = signTicket({ role: 'agent', uid: 'user-1', sid: 'session-1' }, SECRET)
+    expect(verifyTicket(token, SECRET)).toEqual({ role: 'agent', uid: 'user-1', sid: 'session-1' })
+  })
+
+  it('rejects a correctly signed legacy agent ticket without a session id', () => {
+    const data = Buffer.from(JSON.stringify({
+      role: 'agent', uid: 'user-1', exp: Date.now() + 60_000
+    })).toString('base64url')
+    const signature = createHmac('sha256', SECRET).update(data).digest('base64url')
+    expect(verifyTicket(`${data}.${signature}`, SECRET)).toBeNull()
   })
 
   it('round-trips a visitor ticket scoped to workspace + visitor', () => {
@@ -27,12 +36,15 @@ describe('WebSocket auth tickets', () => {
   })
 
   it('rejects a ticket signed with a different secret', () => {
-    const token = signTicket({ role: 'agent', uid: 'user-1' }, 'another-secret-that-is-not-the-real-one')
+    const token = signTicket(
+      { role: 'agent', uid: 'user-1', sid: 'session-1' },
+      'another-secret-that-is-not-the-real-one'
+    )
     expect(verifyTicket(token, SECRET)).toBeNull()
   })
 
   it('rejects an expired ticket', () => {
-    const token = signTicket({ role: 'agent', uid: 'user-1' }, SECRET, -1000)
+    const token = signTicket({ role: 'agent', uid: 'user-1', sid: 'session-1' }, SECRET, -1000)
     expect(verifyTicket(token, SECRET)).toBeNull()
   })
 
