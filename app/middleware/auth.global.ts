@@ -9,13 +9,15 @@ export default defineNuxtRouteMiddleware(async (to) => {
   // the embedded widget frame is a public visitor page — no session lookup
   if (to.path === '/widget' || to.path.startsWith('/help/')) return
 
-  const { ensureLoaded, loggedIn, hasWorkspace } = useAuth()
+  const { ensureLoaded, loggedIn, hasWorkspace, currentWorkspace } = useAuth()
   await ensureLoaded()
 
   const path = to.path
   const isJoin = path.startsWith('/join/')
   const isAuthPage = path === '/login' || path === '/signup'
   const isOnboarding = path === '/onboarding'
+  const isOnboardingContinuation = isOnboarding
+    && (to.query.continue === 'invites' || to.query.continue === 'install')
   // authed app routes that require a workspace
   const isApp = path === '/dashboard' || path.startsWith('/dashboard/')
     || path === '/analytics' || path === '/installation' || path === '/settings' || path === '/team' || path === '/account'
@@ -23,7 +25,7 @@ export default defineNuxtRouteMiddleware(async (to) => {
 
   if (!loggedIn.value) {
     if (isOnboarding || isApp) {
-      return navigateTo(`/login?redirect=${encodeURIComponent(path)}`)
+      return navigateTo(`/login?redirect=${encodeURIComponent(to.fullPath)}`)
     }
     return
   }
@@ -32,7 +34,8 @@ export default defineNuxtRouteMiddleware(async (to) => {
   if (isAuthPage) {
     return navigateTo(hasWorkspace.value ? '/dashboard' : '/onboarding')
   }
-  if (isOnboarding && hasWorkspace.value) {
+  if (isOnboarding && hasWorkspace.value
+    && (!isOnboardingContinuation || currentWorkspace.value?.role !== 'admin')) {
     return navigateTo('/dashboard')
   }
   if (isApp && !hasWorkspace.value) {

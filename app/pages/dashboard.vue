@@ -50,6 +50,16 @@ const activeAdvancedFilters = computed(() =>
   + cr.tagFilters.value.length
   + (cr.snoozedFilter.value !== 'exclude' ? 1 : 0)
 )
+const emptyInboxIsFiltered = computed(() =>
+  cr.filter.value !== 'all'
+  || activeAdvancedFilters.value > 0
+  || cr.responseFilter.value !== 'all'
+)
+
+function resetInboxFilters() {
+  cr.filter.value = 'all'
+  clearAdvancedFilters()
+}
 
 function togglePriorityFilter(priority: ConversationPriority) {
   cr.priorityFilters.value = cr.priorityFilters.value.includes(priority)
@@ -986,11 +996,34 @@ const statusBadge = {
               />
             </div>
             <p class="mt-3 text-sm font-medium text-highlighted">
-              No conversations yet
+              {{ emptyInboxIsFiltered ? 'No conversations match these filters' : 'Your inbox is ready' }}
             </p>
             <p class="mt-1 text-xs text-muted">
-              New chats from your widget will appear here in real time.
+              {{ emptyInboxIsFiltered
+                ? 'Clear or adjust the current filters to see other conversations.'
+                : 'Install the widget or send a test message to start your first conversation.' }}
             </p>
+            <UButton
+              v-if="emptyInboxIsFiltered"
+              class="mt-4"
+              size="sm"
+              color="neutral"
+              variant="outline"
+              icon="i-lucide-list-filter-x"
+              @click="resetInboxFilters"
+            >
+              Clear filters
+            </UButton>
+            <UButton
+              v-else-if="currentWorkspace?.role === 'admin'"
+              to="/installation"
+              class="mt-4"
+              size="sm"
+              color="primary"
+              icon="i-lucide-code-xml"
+            >
+              Install or test Perch
+            </UButton>
           </div>
 
           <ul

@@ -23,9 +23,11 @@ const rt = useRealtime()
 
 const wid = computed(() => currentWorkspace.value?.workspaceId ?? null)
 const isAdmin = computed(() => currentWorkspace.value?.role === 'admin')
-// cached across navigation — skeletons only on the first visit of a session
-const members = useState<Member[]>('team:members', () => [])
+const rosters = useState<Record<string, Member[]>>('team:membersByWorkspace', () => ({}))
+const members = computed(() => wid.value ? rosters.value[wid.value] ?? [] : [])
 const loading = ref(false)
+const loadError = ref('')
+let loadSequence = 0
 
 const onlineCount = computed(() => members.value.filter(m => m.presence === 'online').length)
 
@@ -49,13 +51,15 @@ function inviteAnother() {
 }
 async function createInvite() {
   const emailAddr = inviteEmail.value.trim()
-  if (!emailAddr || inviting.value) return
+  const workspaceId = wid.value
+  if (!workspaceId || !emailAddr || inviting.value) return
   inviting.value = true
   try {
-    const res = await $fetch<{ invites: { url: string, emailed: boolean }[] }>(`/api/workspaces/${wid.value}/invites`, {
+    const res = await $fetch<{ invites: { url: string, emailed: boolean }[] }>(`/api/workspaces/${workspaceId}/invites`, {
       method: 'POST',
       body: { invites: [{ email: emailAddr, role: inviteRole.value }] }
     })
+    if (wid.value !== workspaceId) return
     inviteLink.value = res.invites[0]!.url
     inviteEmailed.value = res.invites[0]!.emailed
     inviteEmail.value = ''
@@ -68,13 +72,18 @@ async function createInvite() {
 
 /* data + live presence */
 async function load() {
-  if (!wid.value) return
-  // stale-while-revalidate: render cached members instantly, refresh silently
+  const workspaceId = wid.value
+  if (!workspaceId) return
+  const sequence = ++loadSequence
   if (!members.value.length) loading.value = true
+  loadError.value = ''
   try {
-    members.value = await $fetch<Member[]>(`/api/workspaces/${wid.value}/members`)
+    const roster = await $fetch<Member[]>(`/api/workspaces/${workspaceId}/members`)
+    rosters.value = { ...rosters.value, [workspaceId]: roster }
+  } catch (error) {
+    if (sequence === loadSequence) loadError.value = getErrorMessage(error, 'The team roster could not load')
   } finally {
-    loading.value = false
+    if (sequence === loadSequence) loading.value = false
   }
 }
 
@@ -93,24 +102,50 @@ onMounted(() => {
   load()
 })
 onBeforeUnmount(() => off?.())
-watch(wid, load)
+watch(wid, () => {
+  pendingRemoval.value = null
+  inviteModalOpen.value = false
+  load()
+})
 
 /* actions */
 async function changeRole(m: Member, role: 'admin' | 'agent') {
+  const workspaceId = wid.value
+  if (!workspaceId) return
   try {
-    await $fetch(`/api/workspaces/${wid.value}/members/${m.id}`, { method: 'PATCH', body: { role } })
+    await $fetch(`/api/workspaces/${workspaceId}/members/${m.id}`, { method: 'PATCH', body: { role } })
     m.role = role
   } catch (e) {
     toast.add({ title: getErrorMessage(e, 'Could not change role'), color: 'error' })
   }
 }
 async function removeMember(m: Member) {
+  const workspaceId = wid.value
+  if (!workspaceId) return
   try {
-    await $fetch(`/api/workspaces/${wid.value}/members/${m.id}`, { method: 'DELETE' })
-    members.value = members.value.filter(x => x.id !== m.id)
+    await $fetch(`/api/workspaces/${workspaceId}/members/${m.id}`, { method: 'DELETE' })
+    rosters.value = {
+      ...rosters.value,
+      [workspaceId]: (rosters.value[workspaceId] ?? []).filter(x => x.id !== m.id)
+    }
+    if (wid.value === workspaceId) pendingRemoval.value = null
     toast.add({ title: `Removed ${m.name}`, color: 'neutral' })
   } catch (e) {
     toast.add({ title: getErrorMessage(e, 'Could not remove'), color: 'error' })
+  }
+}
+
+const pendingRemoval = ref<Member | null>(null)
+const removingMember = ref(false)
+
+async function confirmMemberRemoval() {
+  const member = pendingRemoval.value
+  if (!member || removingMember.value) return
+  removingMember.value = true
+  try {
+    await removeMember(member)
+  } finally {
+    removingMember.value = false
   }
 }
 function initials(n: string) {
@@ -192,7 +227,42 @@ function csatTone(m: Member): string {
         />
       </div>
 
+      <div
+        v-else-if="loadError && !members.length"
+        class="mt-6 rounded-2xl bg-elevated/30 px-6 py-10 text-center ring-1 ring-default"
+        role="alert"
+      >
+        <UIcon
+          name="i-lucide-users-round"
+          class="mx-auto size-8 text-dimmed"
+        />
+        <p class="mt-3 text-sm font-medium text-highlighted">
+          Team roster could not load
+        </p>
+        <p class="mt-1 text-sm text-muted">
+          {{ loadError }}
+        </p>
+        <UButton
+          class="mt-4"
+          color="neutral"
+          variant="outline"
+          icon="i-lucide-refresh-cw"
+          @click="load()"
+        >
+          Try again
+        </UButton>
+      </div>
+
       <template v-else>
+        <UAlert
+          v-if="loadError"
+          class="mt-6"
+          color="warning"
+          variant="subtle"
+          title="Team roster could not refresh"
+          :description="`${loadError} The last loaded roster is shown below.`"
+          icon="i-lucide-cloud-alert"
+        />
         <!-- at-a-glance -->
         <div
           class="mt-6 grid divide-x divide-default rounded-2xl border-glow bg-elevated/30 overflow-hidden"
@@ -355,8 +425,8 @@ function csatTone(m: Member): string {
                       size="sm"
                       icon="i-lucide-user-minus"
                       square
-                      aria-label="Remove"
-                      @click="removeMember(m)"
+                      :aria-label="`Remove ${m.name}`"
+                      @click="pendingRemoval = m"
                     />
                   </td>
                 </tr>
@@ -396,6 +466,14 @@ function csatTone(m: Member): string {
               size="lg"
               class="w-full"
             />
+            <p
+              class="mt-2 text-xs leading-relaxed"
+              :class="inviteRole === 'admin' ? 'text-amber-700 dark:text-amber-400' : 'text-dimmed'"
+            >
+              {{ inviteRole === 'admin'
+                ? 'Admins can manage billing, installation, teammates, security settings, and workspace deletion.'
+                : 'Agents can reply to customers and collaborate, but cannot manage billing or workspace security.' }}
+            </p>
           </UFormField>
         </div>
 
@@ -465,6 +543,34 @@ function csatTone(m: Member): string {
               Done
             </UButton>
           </template>
+        </div>
+      </template>
+    </UModal>
+
+    <UModal
+      :open="Boolean(pendingRemoval)"
+      :title="`Remove ${pendingRemoval?.name ?? 'this teammate'}?`"
+      :description="`${pendingRemoval?.name ?? 'This teammate'} will immediately lose access to this workspace. Their existing conversation history stays intact.`"
+      @update:open="(open: boolean) => { if (!open && !removingMember) pendingRemoval = null }"
+    >
+      <template #footer>
+        <div class="flex w-full flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <UButton
+            color="neutral"
+            variant="ghost"
+            :disabled="removingMember"
+            @click="pendingRemoval = null"
+          >
+            Keep teammate
+          </UButton>
+          <UButton
+            color="error"
+            icon="i-lucide-user-minus"
+            :loading="removingMember"
+            @click="confirmMemberRemoval"
+          >
+            Remove {{ pendingRemoval?.name }}
+          </UButton>
         </div>
       </template>
     </UModal>
