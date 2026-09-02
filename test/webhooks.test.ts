@@ -1,7 +1,14 @@
 import { createHmac } from 'node:crypto'
 import { createServer } from 'node:http'
 import { describe, expect, it } from 'vitest'
-import { signWebhook } from '../server/utils/webhooks'
+import {
+  isRetryableWebhookStatus,
+  MAX_WEBHOOK_ATTEMPTS,
+  signWebhook,
+  webhookDeliveryEnabled,
+  webhookEnvelope,
+  webhookRetryAt
+} from '../server/utils/webhooks'
 import {
   isPublicIp,
   isSafeWebhookUrl,
@@ -56,6 +63,41 @@ describe('signWebhook', () => {
     const t = 1000
     const body = '{}'
     expect(signWebhook('secret-a', t, body)).not.toBe(signWebhook('secret-b', t, body))
+  })
+})
+
+describe('durable webhook delivery policy', () => {
+  it('keeps one stable event identity across retries', () => {
+    const createdAt = new Date('2026-09-02T12:00:00.000Z')
+    const body = webhookEnvelope('message.created', { message: { id: 'message-1' } }, {
+      id: 'event-1',
+      createdAt
+    })
+    expect(JSON.parse(body)).toEqual({
+      id: 'event-1',
+      event: 'message.created',
+      created_at: createdAt.toISOString(),
+      data: { message: { id: 'message-1' } }
+    })
+  })
+
+  it('retries temporary failures but dead-letters permanent client errors', () => {
+    for (const status of [null, 408, 425, 429, 500, 503]) expect(isRetryableWebhookStatus(status)).toBe(true)
+    for (const status of [400, 401, 403, 404, 422]) expect(isRetryableWebhookStatus(status)).toBe(false)
+  })
+
+  it('uses bounded exponential delays and a fixed maximum attempt count', () => {
+    const now = new Date('2026-09-02T12:00:00.000Z')
+    expect(MAX_WEBHOOK_ATTEMPTS).toBe(6)
+    expect(webhookRetryAt(1, now).getTime() - now.getTime()).toBe(10_000)
+    expect(webhookRetryAt(2, now).getTime() - now.getTime()).toBe(60_000)
+    expect(webhookRetryAt(6, now).getTime() - now.getTime()).toBe(2 * 60 * 60_000)
+  })
+
+  it('fails closed unless outbound delivery is explicitly enabled', () => {
+    expect(webhookDeliveryEnabled({})).toBe(false)
+    expect(webhookDeliveryEnabled({ PERCH_WEBHOOK_DELIVERY_ENABLED: 'false' })).toBe(false)
+    expect(webhookDeliveryEnabled({ PERCH_WEBHOOK_DELIVERY_ENABLED: 'true' })).toBe(true)
   })
 })
 
