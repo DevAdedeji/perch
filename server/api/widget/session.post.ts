@@ -6,8 +6,7 @@ const schema = z.object({
   site_id: z.string().min(1),
   embed_ticket: z.string().min(1).max(2048),
   visitor_session: z.string().max(2048).optional(),
-  page_url: z.string().max(2000).optional(),
-  ua: z.string().max(500).optional()
+  page_url: z.string().max(2000).optional()
 })
 
 /**
@@ -22,7 +21,7 @@ export default defineEventHandler(async (event) => {
   if (!result.success) {
     throw createError({ statusCode: 400, statusMessage: 'Invalid input' })
   }
-  const { site_id, embed_ticket, visitor_session, page_url, ua } = result.data
+  const { site_id, embed_ticket, visitor_session, page_url } = result.data
   const embed = requireEmbedTicket(event, site_id, embed_ticket)
   const reportedPage = installationPageForOrigin(page_url, embed.hostOrigin)
 
@@ -32,9 +31,12 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 404, statusMessage: 'Unknown site' })
   }
   const now = new Date()
+  const clientContext = parseClientContext(getHeader(event, 'user-agent'))
   const metadata = {
     ...(reportedPage ? { page_url: reportedPage.url } : {}),
-    ...(ua ? { ua } : {}),
+    browser: clientContext.browser,
+    ...(clientContext.os ? { os: clientContext.os } : {}),
+    device: clientContext.device,
     installation_preview: embed.installationPreview === true
   }
   let visitor
@@ -43,7 +45,7 @@ export default defineEventHandler(async (event) => {
     visitor = resolved.visitor
     const [updated] = await db.update(visitors).set({
       lastSeenAt: now,
-      metadata: sql`coalesce(${visitors.metadata}, '{}'::jsonb) || ${JSON.stringify(metadata)}::jsonb`
+      metadata: sql`(coalesce(${visitors.metadata}, '{}'::jsonb) - 'ua') || ${JSON.stringify(metadata)}::jsonb`
     }).where(eq(visitors.id, visitor.id)).returning()
     visitor = updated ?? visitor
   } else {

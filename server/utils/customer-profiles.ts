@@ -15,6 +15,7 @@ import {
   workspaces
 } from '@perch/db'
 import type { Conversation, WorkspaceMember } from '@perch/db'
+import { parseClientContext } from './client-context'
 import { isVisitorMessagingBlocked } from './spam-control'
 import { z } from 'zod'
 
@@ -40,28 +41,6 @@ export const customerProfileUpdateSchema = z.object({
 }).strict().refine(data => Object.keys(data).some(key => key !== 'expected_version'), {
   message: 'Nothing to update'
 })
-
-/** Best-effort labels only. The raw user agent never leaves the server. */
-function parseUa(ua?: string) {
-  if (!ua) return { browser: null as string | null, os: null as string | null }
-  const browser = /edg\//i.test(ua)
-    ? 'Edge'
-    : /opr\//i.test(ua)
-      ? 'Opera'
-      : /chrome\//i.test(ua)
-        ? 'Chrome'
-        : /safari\//i.test(ua) && /version\//i.test(ua)
-          ? 'Safari'
-          : /firefox\//i.test(ua) ? 'Firefox' : null
-  const os = /iphone|ipad/i.test(ua)
-    ? 'iOS'
-    : /android/i.test(ua)
-      ? 'Android'
-      : /mac os x/i.test(ua)
-        ? 'macOS'
-        : /windows/i.test(ua) ? 'Windows' : /linux/i.test(ua) ? 'Linux' : null
-  return { browser, os }
-}
 
 function historyAccess(member: WorkspaceMember) {
   if (member.role === 'admin') return undefined
@@ -107,7 +86,9 @@ export async function getCustomerContext(conversation: Conversation, member: Wor
     })
   ])
 
-  const { browser, os } = parseUa(visitor.metadata.ua)
+  const legacyContext = parseClientContext(visitor.metadata.ua)
+  const browser = visitor.metadata.browser ?? (visitor.metadata.ua ? legacyContext.browser : null)
+  const os = visitor.metadata.os ?? (visitor.metadata.ua ? legacyContext.os : null)
   return {
     visitor: {
       name: visitor.profileName ?? visitor.name,

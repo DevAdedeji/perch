@@ -1,6 +1,7 @@
-import { eq, sessions } from '@perch/db'
+import { and, eq, gt, lt, sessions } from '@perch/db'
 import type { H3Event } from 'h3'
 import type { SessionUser } from './require-user'
+import { encodeSessionClientContext, SESSION_IDLE_TTL_MS } from './client-context'
 import { disconnectAgentSessions } from './realtime'
 
 /**
@@ -28,7 +29,7 @@ const alive = new Map<string, CacheEntry>()
 export async function createDbSession(event: H3Event, user: SessionUser) {
   const [row] = await useDb().insert(sessions).values({
     userId: user.id,
-    userAgent: (getHeader(event, 'user-agent') ?? '').slice(0, 300) || null,
+    userAgent: encodeSessionClientContext(getHeader(event, 'user-agent')),
     ip: requestIp(event)
   }).returning()
 
@@ -49,9 +50,20 @@ export async function assertSessionAlive(event: H3Event, sessionId: string | und
   const hit = alive.get(sessionId)
   if (hit && hit.until > now && hit.userId === userId) return
 
-  const row = await useDb().query.sessions.findFirst({ where: eq(sessions.id, sessionId) })
+  const idleCutoff = new Date(now - SESSION_IDLE_TTL_MS)
+  const row = await useDb().query.sessions.findFirst({
+    where: and(
+      eq(sessions.id, sessionId),
+      eq(sessions.userId, userId),
+      gt(sessions.lastSeenAt, idleCutoff)
+    )
+  })
   if (!row || row.userId !== userId) {
     alive.delete(sessionId)
+    await useDb().delete(sessions).where(and(
+      eq(sessions.id, sessionId),
+      lt(sessions.lastSeenAt, idleCutoff)
+    ))
     await clearUserSession(event)
     throw createError({ statusCode: 401, statusMessage: 'Session expired — please sign in again' })
   }

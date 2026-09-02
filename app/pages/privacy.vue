@@ -50,9 +50,9 @@ const contact = 'adedejitewogbade2@gmail.com'
           <ul>
             <li><strong class="text-highlighted">Account data</strong> — your name, email address, and a hashed password. Never the password itself.</li>
             <li><strong class="text-highlighted">Chat data</strong> — messages, image attachments, and conversation state, stored so both sides can read the history.</li>
-            <li><strong class="text-highlighted">Visitor context</strong> — what the embedding website chooses to share: a name and email typed into the pre-chat form, or a user ID, name, and email passed via <code class="font-mono text-xs">Perch.identify()</code>. We also record the page URL the chat started on. Workspace teammates may add private support context such as company, role, notes, and tags; those details are not shown in the visitor widget.</li>
+            <li><strong class="text-highlighted">Visitor context</strong> — what the embedding website chooses to share: a name and email typed into the pre-chat form, or a user ID, name, and email passed via <code class="font-mono text-xs">Perch.identify()</code>. We also record the page URL the chat started on and coarse labels such as browser, operating system, and device type. We do not retain the browser's full user-agent string. Workspace teammates may add private support context such as company, role, notes, and tags; those details are not shown in the visitor widget.</li>
             <li><strong class="text-highlighted">Visitor email preferences</strong> — whether a visitor explicitly asked for reply notifications, when they consented, whether a public reply was already read, and a secret-keyed one-way hash used to remember unsubscribe, bounce, or complaint suppression without placing the address in the suppression list.</li>
-            <li><strong class="text-highlighted">Technical basics</strong> — IP addresses for rate limiting and abuse prevention, and error reports (via Sentry) when something breaks.</li>
+            <li><strong class="text-highlighted">Technical basics</strong> — IP addresses used briefly in memory for rate limiting and abuse prevention, a sign-in IP kept temporarily so you can recognize account sessions, and privacy-filtered error reports (via Sentry) when something breaks.</li>
           </ul>
           <p>
             We don't run ads, we don't sell data, and we don't use tracking pixels or analytics
@@ -108,6 +108,11 @@ const contact = 'adedejitewogbade2@gmail.com'
             data, and are restored only when recovering the service from a serious data-loss event.
             If a backup is restored, separately retained deletion receipts are reconciled before
             normal access resumes so requests made after that archive remain effective.
+          </p>
+          <p>
+            Account sessions expire after 90 days without activity. The IP captured at sign-in is
+            removed after 30 days even when the session remains active. Browser information is
+            reduced to coarse browser, operating-system, and device labels before it is stored.
           </p>
         </section>
 

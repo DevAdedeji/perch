@@ -50,6 +50,7 @@ export interface VisitorMetadata {
   installation_preview?: boolean
   ua?: string
   browser?: string
+  os?: string
   device?: string
   referrer?: string
 }
