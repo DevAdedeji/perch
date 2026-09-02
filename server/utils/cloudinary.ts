@@ -19,6 +19,14 @@ export function cloudinaryConfig() {
   }
 }
 
+export function cloudinaryUploadAvailable(config: ReturnType<typeof cloudinaryConfig>): boolean {
+  return Boolean(config.cloudName && config.apiKey && config.apiSecret)
+}
+
+export function imageAttachmentsAvailable(): boolean {
+  return cloudinaryUploadAvailable(cloudinaryConfig())
+}
+
 /** Cloudinary's signature scheme: sha1 over the sorted `k=v&…` params + secret. */
 export function signCloudinaryParams(params: Record<string, string | number>, apiSecret: string): string {
   const toSign = Object.keys(params)

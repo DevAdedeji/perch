@@ -71,6 +71,7 @@ export default defineNuxtConfig({
     bachsEnvironment: '',
     bachsSecretKey: '',
     bachsWebhookSecret: '',
+    billingCheckoutEnabled: process.env.PERCH_BILLING_CHECKOUT_ENABLED === 'true',
     // signed image uploads (attachments) — optional; endpoint 503s without them
     cloudinaryCloudName: '',
     cloudinaryApiKey: '',

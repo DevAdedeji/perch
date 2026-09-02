@@ -8,8 +8,7 @@ widget; support agents answer from a real-time **Control Room** dashboard — wi
 indicators, unread state, and race-safe conversation claiming.
 
 > Built from scratch and run as a real product: real-time systems, presence, multi-tenancy with
-> auth scoping, secure third-party embedding, and concurrency correctness — all open source.
-> Every dependency is free or on a genuine free tier.
+> auth scoping, secure third-party embedding, and concurrency correctness.
 
 **Live:** https://useperch.xyz &nbsp;·&nbsp; **Stack:** Nuxt 4 · Nitro WebSockets · Drizzle · Neon Postgres
 
@@ -20,7 +19,8 @@ visitor context panel:
 
 ![Control Room inbox](docs/screenshots/dashboard.png)
 
-**The widget** your visitors see — presence, read receipts, image attachments:
+**The widget** your visitors see — presence, read receipts, and optional image attachments when
+Cloudinary is configured:
 
 <p align="center">
   <img src="docs/screenshots/widget.png" alt="Embedded chat widget" width="400">
@@ -80,8 +80,8 @@ const email_hash = createHmac('sha256', PERCH_IDENTITY_SECRET).update(user.email
 ```
 
 `hash` proves the user ID. When an email accompanies a user ID, `email_hash` separately proves the
-email address. A signed address is still not a subscription: the visitor explicitly chooses reply
-emails in the widget.
+email address. A signed address is still not a subscription: when visitor reply email is enabled,
+the visitor explicitly chooses reply emails in the widget.
 
 Verified visitors get a green **Verified** badge in the agent's context panel.
 
@@ -145,7 +145,7 @@ only the connection lifecycle, authorized subscription, presence, and typing rel
 enforced with a `publishFiltered(channel, event, predicate)` that checks each peer's role/member id
 against the conversation's assignee.
 
-### Tech stack (all free / free-tier)
+### Tech stack
 
 | Concern | Choice |
 |---|---|
@@ -157,7 +157,7 @@ against the conversation's assignee.
 | ORM | Drizzle (schema + migrations) |
 | Dashboard auth | nuxt-auth-utils (sealed cookie sessions) |
 | Visitor auth | short-lived HMAC-signed WS tickets scoped to `site_id` + `visitor_id` |
-| Hosting | Render (single long-lived Nitro process) |
+| Hosting | A long-lived container host such as Railway (single Nitro process) |
 
 ---
 
@@ -220,8 +220,10 @@ Useful scripts: `pnpm build` (production Nitro bundle), `pnpm preview`, `pnpm li
 | `VISITOR_REPLY_EMAIL_FEATURE_ENABLED` | Global feature-exposure gate. When `false`, Settings and the widget do not offer visitor reply emails and the opt-in API rejects requests |
 | `VISITOR_REPLY_EMAIL_DELIVERY_ENABLED` | Independent delivery safety gate. It requires feature exposure and must remain `false` until the approved scheduled worker and Resend bounce/complaint webhook are configured |
 | `RESEND_WEBHOOK_SECRET` | Planned signed Resend webhook secret for durable bounce/complaint suppression; visitor reply delivery must stay disabled until this external setup is complete |
+| `BACHS_ENV` / `BACHS_SECRET_KEY` / `BACHS_WEBHOOK_SECRET` | Bachs subscription environment, API key, and webhook signature secret. Configure all three together |
+| `PERCH_BILLING_CHECKOUT_ENABLED` | Fail-closed gate for new paid checkouts. Keep `false` until the complete Bachs configuration and checkout acceptance checks are ready; disabling it does not interrupt existing subscriptions or webhooks |
 | `SENTRY_DSN` | *(optional)* server-side error tracking; the client DSN lives in `sentry.client.config.ts` |
-| `CLOUDINARY_CLOUD_NAME` / `CLOUDINARY_API_KEY` / `CLOUDINARY_API_SECRET` | *(optional)* signed image attachments; the secret never leaves the server |
+| `CLOUDINARY_CLOUD_NAME` / `CLOUDINARY_API_KEY` / `CLOUDINARY_API_SECRET` | *(optional)* signed image attachments. Configure all three to expose uploads; existing attachment rendering remains available without upload credentials |
 | `PERCH_PUBLIC_URL` | Canonical origin used in prerendered SEO metadata, password, verification, and invite links; set it to `https://useperch.xyz` during both the production build and runtime |
 | `PERCH_ADMIN_EMAILS` | *(optional)* comma-separated operator emails allowed to access instance metrics |
 | `NUXT_PUBLIC_DEMO_SITE_ID` | *(optional)* workspace site ID used by the landing-page demo widget |
@@ -276,7 +278,7 @@ management · the embeddable widget with pre-chat, typing, and presence · notif
 canned responses · visitor context panel · `Perch.identify()` with HMAC verification · password
 reset & invite emails (Resend) · rate limiting · per-workspace domain allowlist · Sentry +
 `/api/health` · cursor pagination · workspace & account deletion · Vitest security suite ·
-image attachments (authenticated server-gated Cloudinary uploads, images only, ≤ 1 MB) · email verification ·
+optional image attachments (authenticated server-gated Cloudinary uploads, images only, ≤ 1 MB) · email verification ·
 account management (name, email change with confirm-on-new-address, password change) · security
 headers · migrations-on-deploy · privacy & terms pages · nightly backup script · revocable
 sessions (server-side registry, per-device sign-out, "sign out everywhere else").

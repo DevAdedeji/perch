@@ -29,6 +29,9 @@ export default defineEventHandler(async (event) => {
       emailVerified: !!dbUser?.emailVerifiedAt,
       hasPassword: !!dbUser?.passwordHash
     },
-    workspaces: memberships
+    workspaces: memberships.map(membership => ({
+      ...membership,
+      attachmentsAvailable: imageAttachmentsAvailable()
+    }))
   }
 })

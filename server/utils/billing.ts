@@ -2,6 +2,7 @@ import { and, billingWebhookDeliveries, desc, eq, lt, or, sql, users, workspaceI
 import type { BillingInterval, SubscriptionStatus } from '@perch/shared'
 import { PERCH_PRO_PLAN, proPriceCents } from '@perch/shared'
 import type { BachsCheckoutSession, BachsSubscription } from './bachs'
+import { explicitlyEnabled } from '../../config/launch'
 
 export interface WorkspaceEntitlement {
   plan: 'free' | 'pro'
@@ -12,6 +13,12 @@ export interface WorkspaceEntitlement {
   cancelAtPeriodEnd: boolean
   limits: { members: number | null, reminderMinutes: number }
   features: { customReminderDelay: boolean, businessHoursReminders: boolean, removeBranding: boolean }
+}
+
+export function billingCheckoutEnabled() {
+  const config = useRuntimeConfig()
+  return config.billingCheckoutEnabled === true
+    || explicitlyEnabled(process.env.PERCH_BILLING_CHECKOUT_ENABLED)
 }
 
 export function subscriptionHasPaidAccess(
@@ -240,7 +247,7 @@ export async function billingOverview(workspaceId: string) {
   ])
   return {
     entitlement,
-    configured: bachsConfigured(),
+    checkoutEnabled: billingCheckoutEnabled() && bachsConfigured(),
     invoices: invoices.map(row => ({
       ...row,
       paidAt: row.paidAt?.toISOString() ?? null,

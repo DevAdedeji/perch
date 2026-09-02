@@ -24,8 +24,7 @@ useHead(() => ({
           '@id': `${siteUrl.value}/#organization`,
           'name': 'Perch',
           'url': siteUrl.value,
-          'logo': `${siteUrl.value}/favicon.svg`,
-          'sameAs': ['https://github.com/DevAdedeji/perch']
+          'logo': `${siteUrl.value}/favicon.svg`
         },
         {
           '@type': 'SoftwareApplication',
@@ -71,10 +70,10 @@ function copySnippet() {
 
 // plain-language numbers under the demo
 const stats = [
-  { value: '<1s', label: 'Message delivery' },
-  { value: '2 min', label: 'From signup to live' },
+  { value: 'Live', label: 'Realtime updates' },
+  { value: '1', label: 'Shared team inbox' },
   { value: '1 line', label: 'Of code to install' },
-  { value: '0', label: 'Double-answered chats' }
+  { value: '1 owner', label: 'Per conversation' }
 ]
 
 // what the team actually gets — written for humans, not engineers
@@ -87,7 +86,7 @@ const benefits = [
   {
     icon: 'i-lucide-hand',
     title: 'Claim chats, don’t collide',
-    desc: 'One click makes a conversation yours. If two teammates reach for the same one, the first wins and the other is told instantly — visitors never get two competing replies.'
+    desc: 'One click makes a conversation yours. If two teammates reach for the same one, the first wins and only that teammate becomes its owner.'
   },
   {
     icon: 'i-lucide-users',
@@ -180,7 +179,7 @@ const claimSql = 'UPDATE conversations\nSET assigned_agent_id = $me, status = \'
               variant="subtle"
               icon="i-lucide-code"
             >
-              Set up in 2 minutes
+              See how it works
             </UButton>
           </div>
         </div>
@@ -222,11 +221,11 @@ const claimSql = 'UPDATE conversations\nSET assigned_agent_id = $me, status = \'
       <UContainer>
         <div class="text-center max-w-2xl mx-auto">
           <h2 class="font-display text-4xl sm:text-5xl font-bold tracking-tight text-highlighted">
-            Everything your support team needs.
+            The essentials your support team needs.
           </h2>
           <p class="mt-4 text-lg text-muted">
-            Nothing you have to configure. Sign up, add the bubble to your site, and this
-            is what your team works with.
+            Start with sensible defaults, add the bubble to your site, and shape the workspace
+            around the way your team works.
           </p>
         </div>
 
@@ -308,7 +307,7 @@ const claimSql = 'UPDATE conversations\nSET assigned_agent_id = $me, status = \'
                 under the hood
               </p>
               <h2 class="mt-3 font-display text-3xl sm:text-4xl font-bold tracking-tight text-highlighted">
-                Also an open-source engineering build.
+                Built for dependable real-time support.
               </h2>
               <p class="mt-4 text-muted leading-relaxed">
                 For the technically curious: Perch runs on real WebSockets end to end, with
@@ -317,14 +316,13 @@ const claimSql = 'UPDATE conversations\nSET assigned_agent_id = $me, status = \'
                 itself — first one wins, guaranteed, no matter the timing.
               </p>
               <UButton
-                to="https://github.com/DevAdedeji/perch"
-                target="_blank"
+                to="/pricing"
                 class="mt-6"
                 color="neutral"
                 variant="subtle"
-                icon="i-simple-icons-github"
+                icon="i-lucide-arrow-right"
               >
-                Read the source
+                View plans
               </UButton>
             </div>
             <pre class="rounded-xl bg-default ring-1 ring-default p-5 font-mono text-xs sm:text-[13px] leading-relaxed text-highlighted overflow-x-auto">{{ claimSql }}</pre>
@@ -421,14 +419,13 @@ const claimSql = 'UPDATE conversations\nSET assigned_agent_id = $me, status = \'
               Get started
             </UButton>
             <UButton
-              to="https://github.com/DevAdedeji/perch"
-              target="_blank"
+              to="#how"
               size="xl"
               color="neutral"
               variant="subtle"
-              icon="i-simple-icons-github"
+              icon="i-lucide-code"
             >
-              Star on GitHub
+              See the installation
             </UButton>
           </div>
         </div>

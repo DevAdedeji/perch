@@ -624,7 +624,7 @@ async function deleteWorkspace() {
             Webhooks
           </h2>
           <p class="text-sm text-muted mt-0.5">
-            POST signed events to your own systems. Verify each request with the
+            Perch durably queues signed events and retries temporary failures. Verify each request with the
             <span class="font-mono text-xs">X-Perch-Signature</span> header
             (HMAC-SHA256 of <span class="font-mono text-xs">t.body</span> with your endpoint secret).
           </p>

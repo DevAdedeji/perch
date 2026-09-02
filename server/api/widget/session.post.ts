@@ -121,6 +121,7 @@ export default defineEventHandler(async (event) => {
       theme: workspace.widgetTheme,
       show_branding: entitlement.isPro ? workspace.widgetShowBranding : true,
       reply_email_enabled: visitorReplyEmailAvailable && workspace.visitorReplyEmailEnabled,
+      attachments_available: imageAttachmentsAvailable(),
       has_articles: !!published
     },
     agent: agentName ? { name: agentName } : null,

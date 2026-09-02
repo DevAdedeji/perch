@@ -56,7 +56,7 @@ export default defineEventHandler(async (event) => {
   }
 
   const { cloudName, apiKey, apiSecret } = cloudinaryConfig()
-  if (!cloudName || !apiKey || !apiSecret) {
+  if (!cloudinaryUploadAvailable({ cloudName, apiKey, apiSecret })) {
     throw createError({ statusCode: 503, statusMessage: 'Attachments are not configured' })
   }
   const timestamp = Math.floor(Date.now() / 1000)

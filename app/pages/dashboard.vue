@@ -1533,6 +1533,7 @@ const statusBadge = {
               :canned-responses="cr.canned.value"
               :send-reply="cr.sendReply"
               :send-attachment="cr.sendAttachment"
+              :attachments-available="currentWorkspace?.attachmentsAvailable ?? false"
               :public-reply-disabled="cr.activeConversation.value.isSpam"
             />
           </div>
