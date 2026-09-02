@@ -4,7 +4,7 @@ useHead({ title: 'Join a workspace · Perch' })
 
 const route = useRoute()
 const token = route.params.token as string
-const { loggedIn, user, refresh } = useAuth()
+const { loggedIn, user, refresh, setWorkspace } = useAuth()
 
 interface InviteInfo {
   email: string
@@ -28,8 +28,9 @@ async function accept() {
   accepting.value = true
   acceptError.value = ''
   try {
-    await $fetch(`/api/invites/${token}/accept`, { method: 'POST' })
+    const result = await $fetch<{ workspaceId: string }>(`/api/invites/${token}/accept`, { method: 'POST' })
     await refresh()
+    setWorkspace(result.workspaceId)
     await navigateTo('/dashboard')
   } catch (e) {
     acceptError.value = getErrorMessage(e, 'Could not accept invite')

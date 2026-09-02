@@ -28,6 +28,9 @@ const { data: authMethods } = await useFetch<{ google: boolean }>('/api/auth/met
 
 // carry an invite through signup so we land back on the join page
 const redirect = computed(() => safeAuthRedirect(route.query.redirect, '/onboarding'))
+const loginLink = computed(() => route.query.redirect
+  ? `/login?redirect=${encodeURIComponent(redirect.value)}`
+  : '/login')
 const error = ref(route.query.oauth_error
   ? 'Google sign-up could not be completed. Please try again.'
   : '')
@@ -163,7 +166,7 @@ async function onSubmit(event: FormSubmitEvent<Schema>) {
     <p class="mt-8 text-sm text-muted">
       Already have an account?
       <NuxtLink
-        to="/login"
+        :to="loginLink"
         class="font-medium text-primary-600 hover:underline dark:text-primary-400"
       >Sign in</NuxtLink>
     </p>

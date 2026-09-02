@@ -1,4 +1,4 @@
-import { and, count, eq, invites, sql, workspaceMembers, workspaces } from '@perch/db'
+import { and, count, eq, gt, invites, sql, workspaceMembers, workspaces } from '@perch/db'
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 
@@ -26,9 +26,14 @@ export default defineEventHandler(async (event) => {
   const created = await db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`perch-members:${workspaceId}`}))`)
     if (!entitlement.isPro) {
+      const now = new Date()
       const [[members], [pending]] = await Promise.all([
         tx.select({ total: count() }).from(workspaceMembers).where(eq(workspaceMembers.workspaceId, workspaceId)),
-        tx.select({ total: count() }).from(invites).where(and(eq(invites.workspaceId, workspaceId), eq(invites.status, 'pending')))
+        tx.select({ total: count() }).from(invites).where(and(
+          eq(invites.workspaceId, workspaceId),
+          eq(invites.status, 'pending'),
+          gt(invites.expiresAt, now)
+        ))
       ])
       if (Number(members!.total) + Number(pending!.total) + rows.length > entitlement.limits.members!) {
         throw createError({
