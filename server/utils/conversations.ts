@@ -80,8 +80,10 @@ function publishConversationMessage(
 interface IncomingVisitorMessage {
   workspaceId: string
   visitorId: string
+  conversationId?: string
   name?: string | null
   email?: string | null
+  replyEmailConsent?: boolean
   content: string
   attachmentUrl?: string | null
   attachmentType?: string | null
@@ -106,6 +108,10 @@ export async function ingestVisitorMessage(input: IncomingVisitorMessage) {
       visitorId: input.visitorId,
       name: input.name ?? null,
       email: input.email ?? null,
+      emailSource: input.email ? 'prechat' : null,
+      emailUpdatedAt: input.email ? now : null,
+      replyEmailEnabled: !!input.email && input.replyEmailConsent === true,
+      replyEmailConsentAt: input.email && input.replyEmailConsent === true ? now : null,
       lastSeenAt: now,
       metadata: input.pageUrl ? { page_url: input.pageUrl } : {}
     }).onConflictDoUpdate({
@@ -113,7 +119,15 @@ export async function ingestVisitorMessage(input: IncomingVisitorMessage) {
       set: {
         lastSeenAt: now,
         ...(input.name ? { name: input.name } : {}),
-        ...(input.email ? { email: input.email } : {}),
+        ...(input.email
+          ? {
+              email: input.email,
+              emailSource: 'prechat' as const,
+              emailUpdatedAt: now,
+              replyEmailEnabled: input.replyEmailConsent === true,
+              replyEmailConsentAt: input.replyEmailConsent === true ? now : null
+            }
+          : {}),
         ...(input.pageUrl
           ? { metadata: sql`coalesce(${visitors.metadata}, '{}'::jsonb) || ${JSON.stringify({ page_url: input.pageUrl })}::jsonb` }
           : {})
@@ -123,7 +137,9 @@ export async function ingestVisitorMessage(input: IncomingVisitorMessage) {
     await assertVisitorCanMessage(visitor!, tx)
 
     const existing = await tx.query.conversations.findFirst({
-      where: eq(conversations.visitorRef, visitor!.id),
+      where: input.conversationId
+        ? and(eq(conversations.id, input.conversationId), eq(conversations.visitorRef, visitor!.id))
+        : eq(conversations.visitorRef, visitor!.id),
       orderBy: [
         sql`case when ${conversations.status} = 'open' then 0 when ${conversations.status} = 'unassigned' then 1 else 2 end`,
         desc(conversations.lastMessageAt)
@@ -132,6 +148,9 @@ export async function ingestVisitorMessage(input: IncomingVisitorMessage) {
 
     let conversation: Conversation
     let isNew = false
+    if (input.conversationId && !existing) {
+      throw createError({ statusCode: 404, statusMessage: 'Conversation not found' })
+    }
     if (existing) {
       const [updated] = await tx.update(conversations).set({
         lastMessageAt: now,

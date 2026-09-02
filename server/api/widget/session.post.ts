@@ -105,6 +105,7 @@ export default defineEventHandler(async (event) => {
   const withinHours = isWithinBusinessHours(workspace.businessHours, workspace.timezone)
   const entitlement = await workspaceEntitlement(workspace.id)
   const messagingAvailable = !await isVisitorMessagingBlocked(visitor!)
+  const visitorReplyEmailAvailable = visitorReplyEmailFeatureEnabled(event)
 
   return {
     workspace: {
@@ -119,10 +120,18 @@ export default defineEventHandler(async (event) => {
       size: workspace.widgetSize,
       theme: workspace.widgetTheme,
       show_branding: entitlement.isPro ? workspace.widgetShowBranding : true,
+      reply_email_enabled: visitorReplyEmailAvailable && workspace.visitorReplyEmailEnabled,
       has_articles: !!published
     },
     agent: agentName ? { name: agentName } : null,
-    visitor: { name: visitor!.name, email: visitor!.email },
+    visitor: {
+      name: visitor!.name,
+      email: visitor!.email,
+      reply_email_enabled: visitorReplyEmailAvailable
+        && workspace.visitorReplyEmailEnabled
+        && visitor!.replyEmailEnabled
+        && !!visitor!.replyEmailConsentAt
+    },
     business_online: isBusinessOnline(workspace.id) && withinHours,
     business_state: withinHours ? businessPresence(workspace.id) : 'offline' as const,
     within_hours: withinHours,

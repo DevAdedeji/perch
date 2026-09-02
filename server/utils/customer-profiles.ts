@@ -9,8 +9,10 @@ import {
   or,
   sql,
   tags,
+  visitorReplyDeliveries,
   visitorTags,
-  visitors
+  visitors,
+  workspaces
 } from '@perch/db'
 import type { Conversation, WorkspaceMember } from '@perch/db'
 import { isVisitorMessagingBlocked } from './spam-control'
@@ -85,7 +87,7 @@ export async function getCustomerContext(conversation: Conversation, member: Wor
     ne(conversations.id, conversation.id),
     historyAccess(member)
   )
-  const [pastRows, recent, profileTags, messagingBlocked] = await Promise.all([
+  const [pastRows, recent, profileTags, messagingBlocked, workspace, latestReplyDelivery] = await Promise.all([
     db.select({ total: count() }).from(conversations).where(historyWhere),
     db.select({
       id: conversations.id,
@@ -97,7 +99,12 @@ export async function getCustomerContext(conversation: Conversation, member: Wor
       .innerJoin(tags, eq(tags.id, visitorTags.tagId))
       .where(and(eq(visitorTags.visitorId, visitor.id), eq(tags.workspaceId, conversation.workspaceId)))
       .orderBy(tags.name),
-    isVisitorMessagingBlocked(visitor, db)
+    isVisitorMessagingBlocked(visitor, db),
+    db.query.workspaces.findFirst({ where: eq(workspaces.id, conversation.workspaceId) }),
+    db.query.visitorReplyDeliveries.findFirst({
+      where: eq(visitorReplyDeliveries.conversationId, conversation.id),
+      orderBy: desc(visitorReplyDeliveries.createdAt)
+    })
   ])
 
   const { browser, os } = parseUa(visitor.metadata.ua)
@@ -118,6 +125,15 @@ export async function getCustomerContext(conversation: Conversation, member: Wor
       external_id: visitor.externalId,
       identity_verified: visitor.identityVerified,
       messaging_blocked: messagingBlocked,
+      reply_email: {
+        eligible: visitorReplyEmailFeatureEnabled()
+          && !!workspace?.visitorReplyEmailEnabled
+          && !!visitor.email
+          && visitor.replyEmailEnabled
+          && !!visitor.replyEmailConsentAt,
+        status: latestReplyDelivery?.status ?? null,
+        cancel_reason: latestReplyDelivery?.cancelReason ?? null
+      },
       first_seen_at: visitor.firstSeenAt.toISOString(),
       last_seen_at: visitor.lastSeenAt.toISOString(),
       page_url: visitor.metadata.page_url ?? null,

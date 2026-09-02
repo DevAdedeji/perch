@@ -16,7 +16,9 @@ const validEnvironment: LaunchEnvironment = {
   RESEND_FROM: 'Perch <support@useperch.xyz>',
   BACHS_ENV: 'sandbox',
   BACHS_SECRET_KEY: 'sk_sandbox_example',
-  BACHS_WEBHOOK_SECRET: 'whsec_example'
+  BACHS_WEBHOOK_SECRET: 'whsec_example',
+  VISITOR_REPLY_EMAIL_FEATURE_ENABLED: 'false',
+  VISITOR_REPLY_EMAIL_DELIVERY_ENABLED: 'false'
 }
 
 describe('launch configuration', () => {
@@ -80,6 +82,42 @@ describe('launch configuration', () => {
       ...validEnvironment,
       PERCH_WEBHOOK_ALLOW_LOCALHOST: 'true'
     })).toContain('PERCH_WEBHOOK_ALLOW_LOCALHOST must not be enabled in production')
+  })
+
+  it('does not require visitor email secrets while the feature is disabled', () => {
+    expect(productionConfigErrors({
+      ...validEnvironment,
+      VISITOR_REPLY_SECRET: '',
+      VISITOR_EMAIL_HASH_SECRET: ''
+    })).toEqual([])
+  })
+
+  it('requires independent strong link and email-hash secrets when the feature is exposed', () => {
+    const errors = productionConfigErrors({
+      ...validEnvironment,
+      VISITOR_REPLY_EMAIL_FEATURE_ENABLED: 'true',
+      VISITOR_REPLY_SECRET: 'short',
+      VISITOR_EMAIL_HASH_SECRET: 'short'
+    })
+    expect(errors).toEqual(expect.arrayContaining([
+      expect.stringContaining('VISITOR_REPLY_SECRET'),
+      expect.stringContaining('VISITOR_EMAIL_HASH_SECRET')
+    ]))
+
+    expect(productionConfigErrors({
+      ...validEnvironment,
+      VISITOR_REPLY_EMAIL_FEATURE_ENABLED: 'true',
+      VISITOR_REPLY_SECRET: 'visitor-reply-secret-unique-849201',
+      VISITOR_EMAIL_HASH_SECRET: 'visitor-email-hash-secret-unique-572940'
+    })).toEqual([])
+  })
+
+  it('does not allow delivery to be enabled while feature exposure is off', () => {
+    const errors = productionConfigErrors({
+      ...validEnvironment,
+      VISITOR_REPLY_EMAIL_DELIVERY_ENABLED: 'true'
+    })
+    expect(errors).toContain('VISITOR_REPLY_EMAIL_DELIVERY_ENABLED requires VISITOR_REPLY_EMAIL_FEATURE_ENABLED=true')
   })
 
   it('allows HTTP only for an exact local development origin', () => {

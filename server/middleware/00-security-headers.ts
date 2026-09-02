@@ -14,7 +14,10 @@ export default defineEventHandler(async (event) => {
   setResponseHeader(event, 'Content-Security-Policy', contentSecurityPolicy('\'none\''))
   setResponseHeader(event, 'Cross-Origin-Opener-Policy', 'same-origin')
   setResponseHeader(event, 'X-Content-Type-Options', 'nosniff')
-  setResponseHeader(event, 'Referrer-Policy', 'strict-origin-when-cross-origin')
+  setResponseHeader(event, 'Referrer-Policy', path.startsWith('/reply') ? 'no-referrer' : 'strict-origin-when-cross-origin')
+  if (path.startsWith('/reply') || path.startsWith('/api/visitor-reply/')) {
+    setResponseHeader(event, 'Cache-Control', 'no-store')
+  }
   setResponseHeader(event, 'Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=()')
   setResponseHeader(event, 'X-Permitted-Cross-Domain-Policies', 'none')
   setResponseHeader(event, 'Origin-Agent-Cluster', '?1')

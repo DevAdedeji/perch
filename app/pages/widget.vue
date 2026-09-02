@@ -15,7 +15,7 @@ const embeddedHostOrigin = useState<string>('perch-embed-origin', () =>
 
 const widget = useWidget(siteId.value, embedTicket.value, { installationPreview: installationPreview.value })
 const {
-  workspace, agentName, businessOnline, businessState, awayLabel, conversationId, conversationStatus, csatRating, messages, status, agentTyping, visitorName, agentReadAt, messagingAvailable
+  workspace, agentName, businessOnline, businessState, awayLabel, conversationId, conversationStatus, csatRating, messages, status, agentTyping, visitorName, visitorEmail, agentReadAt, messagingAvailable, replyEmailEnabled
 } = widget
 
 /* CSAT: quick thumbs after a conversation closes */
@@ -217,13 +217,14 @@ function scheduleHelpSearch() {
 }
 
 const draft = ref('')
-const prechat = reactive({ name: '', email: '', message: '' })
+const prechat = reactive({ name: '', email: '', message: '', replyEmailConsent: false })
 const sending = ref(false)
 const isOpen = ref(false) // the loader tells us when we're revealed
 const unread = ref(0)
 const threadEl = ref<HTMLElement | null>(null)
 const composerEl = ref<HTMLTextAreaElement | null>(null)
 const composerFocused = ref(false)
+const replyPreferenceSaving = ref(false)
 
 const showPrechat = computed(() =>
   status.value === 'ready'
@@ -243,6 +244,21 @@ const onAccent = computed(() => {
 
 function initial(name: string | null | undefined) {
   return (name || 'A').charAt(0).toUpperCase()
+}
+
+function maskedEmail(email: string) {
+  const [local = '', domain = ''] = email.split('@')
+  return domain ? `${local.slice(0, 1)}•••@${domain}` : 'your email'
+}
+
+async function setReplyPreference(enabled: boolean) {
+  if (replyPreferenceSaving.value) return
+  replyPreferenceSaving.value = true
+  try {
+    await widget.setReplyEmail(enabled)
+  } finally {
+    replyPreferenceSaving.value = false
+  }
 }
 
 let hostOrigin = embeddedHostOrigin.value
@@ -384,7 +400,8 @@ async function onPrechatSubmit() {
   try {
     await widget.sendMessage(text, {
       name: prechat.name.trim() || undefined,
-      email: prechat.email.trim() || undefined
+      email: prechat.email.trim() || undefined,
+      replyEmailConsent: !!prechat.email.trim() && prechat.replyEmailConsent
     })
   } finally {
     sending.value = false
@@ -408,6 +425,7 @@ watch(() => messages.value.length, () => {
     unread.value++
     post({ perch: 'unread', count: unread.value })
   }
+  if (last?.sender_type === 'agent' && isOpen.value) void widget.markLatestAgentRead()
   // reading help while an agent replies — dot the Chat tab
   if (last && last.sender_type === 'agent' && tab.value === 'help') {
     chatDot.value = true
@@ -426,13 +444,20 @@ function onParentMessage(e: MessageEvent) {
     unread.value = 0
     post({ perch: 'unread', count: 0 })
     scrollToBottom()
+    void widget.markLatestAgentRead()
     // focus the composer on open — desktop only (mobile would pop the keyboard)
     if (window.matchMedia('(pointer: fine)').matches) nextTick(() => composerEl.value?.focus())
   } else if (data.perch === 'close') {
     isOpen.value = false
   } else if (data.perch === 'identify') {
     // the host site told us who its signed-in user is — skip pre-chat
-    widget.identify({ user_id: data.user_id, name: data.name, email: data.email, hash: data.hash })
+    widget.identify({
+      user_id: data.user_id,
+      name: data.name,
+      email: data.email,
+      hash: data.hash,
+      email_hash: data.email_hash
+    })
   } else if (data.perch === 'page') {
     // the loader reporting the host page (SPA-aware) — for the live roster
     if (typeof data.url === 'string') widget.updatePage(data.url)
@@ -778,6 +803,17 @@ onBeforeUnmount(() => {
         class="w-full rounded-xl bg-elevated ring-1 ring-default px-3.5 py-2.5 text-sm outline-none focus:ring-2 transition-shadow"
         :style="{ '--tw-ring-color': accent }"
       >
+      <label
+        v-if="workspace?.reply_email_enabled && prechat.email.trim()"
+        class="-mt-1 flex cursor-pointer items-start gap-2 rounded-lg p-1 text-[11px] leading-4 text-muted"
+      >
+        <input
+          v-model="prechat.replyEmailConsent"
+          type="checkbox"
+          class="mt-0.5 size-3.5 shrink-0 accent-current"
+        >
+        <span>Email me one private return link when a teammate replies. I can unsubscribe anytime.</span>
+      </label>
       <textarea
         v-model="prechat.message"
         rows="3"
@@ -1048,6 +1084,28 @@ onBeforeUnmount(() => {
           Messaging is unavailable for this chat.
         </div>
         <template v-else>
+          <div
+            v-if="workspace?.reply_email_enabled && visitorEmail && messages.length"
+            class="mb-2 flex items-center justify-between gap-2 rounded-xl bg-default px-3 py-2 text-[11px] ring-1 ring-default"
+          >
+            <span class="min-w-0 text-muted">
+              <template v-if="replyEmailEnabled">
+                We’ll email {{ maskedEmail(visitorEmail) }} if you leave before a reply.
+              </template>
+              <template v-else>
+                Want a private email when there’s a reply?
+              </template>
+            </span>
+            <button
+              type="button"
+              class="shrink-0 font-semibold hover:underline disabled:opacity-50"
+              :style="{ color: accent }"
+              :disabled="replyPreferenceSaving"
+              @click="setReplyPreference(!replyEmailEnabled)"
+            >
+              {{ replyEmailEnabled ? 'Turn off' : 'Email me' }}
+            </button>
+          </div>
           <p
             v-if="!businessOnline && messages.length"
             class="pb-2 text-[11px] text-dimmed text-center"
