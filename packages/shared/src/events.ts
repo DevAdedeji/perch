@@ -166,6 +166,12 @@ export interface AutomationReminderPayload {
   created_at: string
 }
 
+export interface UnansweredReminderPayload {
+  delivery_id: string
+  conversation_id: string
+  created_at: string
+}
+
 export interface ConversationRefreshPayload {
   conversation_id: string
 }
@@ -209,6 +215,7 @@ export type ServerEvent = | { type: 'message.new', payload: MessageDTO }
   | { type: 'team.message', payload: TeamMessagePayload }
   | { type: 'member.notification', payload: MemberNotificationPayload }
   | { type: 'automation.reminder', payload: AutomationReminderPayload }
+  | { type: 'unanswered.reminder', payload: UnansweredReminderPayload }
   | { type: 'conversation.refresh', payload: ConversationRefreshPayload }
   | { type: 'visitor.online', payload: LiveVisitorDTO }
   | { type: 'visitor.offline', payload: VisitorOfflinePayload }

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { PERCH_PRO_PLAN } from '@perch/shared'
+import { defaultNotificationPreferences, PERCH_PRO_PLAN } from '@perch/shared'
+import type { NotificationCategory, NotificationPreference } from '@perch/shared'
 
 definePageMeta({ layout: 'dashboard' })
 useHead({ title: 'Settings · Perch' })
@@ -42,7 +43,7 @@ interface WorkspaceDetail {
   role: 'admin' | 'agent'
 }
 
-const { currentWorkspace } = useAuth()
+const { user, currentWorkspace } = useAuth()
 const toast = useToast()
 const { copy } = useCopyToClipboard()
 const origin = useRequestURL().origin
@@ -246,6 +247,108 @@ async function saveReminder() {
     savingReminder.value = false
   }
 }
+
+/* personal notifications */
+const browserNotifications = useBrowserNotifications()
+const personalNotificationStore = usePersonalNotificationPreferences()
+const personalNotificationScope = computed(() => user.value?.id && wid.value
+  ? notificationPreferenceScope(user.value.id, wid.value)
+  : null)
+const personalNotifications = ref<NotificationPreference[]>(defaultNotificationPreferences())
+const notificationsLoading = ref(true)
+const notificationsSaving = ref(false)
+const notificationMeta: Array<{
+  category: NotificationCategory
+  title: string
+  description: string
+}> = [
+  {
+    category: 'assignment',
+    title: 'Assignments',
+    description: 'When a teammate assigns a conversation to you.'
+  },
+  {
+    category: 'mention',
+    title: 'Mentions',
+    description: 'When a teammate mentions you in Nest or an internal note.'
+  },
+  {
+    category: 'unanswered_reminder',
+    title: 'Unanswered-message reminders',
+    description: 'When a conversation passes the workspace response target.'
+  }
+]
+
+function personalPreference(category: NotificationCategory) {
+  return personalNotifications.value.find(item => item.category === category)!
+}
+
+async function loadPersonalNotifications() {
+  const workspaceId = wid.value
+  const scope = personalNotificationScope.value
+  if (!workspaceId || !scope) return
+  notificationsLoading.value = true
+  browserNotifications.refreshPermission()
+  try {
+    const preferences = await personalNotificationStore.load(scope, workspaceId)
+    if (!preferences || personalNotificationScope.value !== scope) return
+    personalNotifications.value = preferences.map(preference => ({ ...preference }))
+  } catch (error) {
+    if (personalNotificationScope.value === scope) {
+      personalNotifications.value = defaultNotificationPreferences()
+      toast.add({ title: getErrorMessage(error, 'Could not load your notification preferences'), color: 'error' })
+    }
+  } finally {
+    if (personalNotificationScope.value === scope) notificationsLoading.value = false
+  }
+}
+
+async function setBrowserPreference(preference: NotificationPreference, enabled: boolean) {
+  if (!enabled) {
+    preference.browser_enabled = false
+    return
+  }
+  const permission = await browserNotifications.requestPermission()
+  if (permission === 'granted') {
+    preference.browser_enabled = true
+    return
+  }
+  toast.add({
+    title: permission === 'denied' ? 'Browser notifications are blocked' : 'Browser notifications are unavailable',
+    description: permission === 'denied'
+      ? 'Allow notifications for this site in your browser settings, then try again.'
+      : 'Use a secure, supported browser to enable these alerts.',
+    color: 'warning'
+  })
+}
+
+async function savePersonalNotifications() {
+  const workspaceId = wid.value
+  const scope = personalNotificationScope.value
+  if (!workspaceId || !scope || notificationsSaving.value) return
+  notificationsSaving.value = true
+  try {
+    const result = await $fetch<{ preferences: NotificationPreference[] }>(
+      `/api/workspaces/${workspaceId}/notification-preferences`,
+      { method: 'PATCH', body: { preferences: personalNotifications.value } }
+    )
+    personalNotificationStore.replace(scope, result.preferences)
+    if (personalNotificationScope.value === scope) {
+      personalNotifications.value = result.preferences.map(preference => ({ ...preference }))
+    }
+    toast.add({ title: 'Your notification preferences are saved', icon: 'i-lucide-check', color: 'success' })
+  } catch (error) {
+    toast.add({ title: getErrorMessage(error, 'Could not save your notification preferences'), color: 'error' })
+  } finally {
+    notificationsSaving.value = false
+  }
+}
+
+onMounted(loadPersonalNotifications)
+watch(personalNotificationScope, () => {
+  personalNotifications.value = defaultNotificationPreferences()
+  void loadPersonalNotifications()
+})
 
 /* canned replies */
 interface Canned {
@@ -712,6 +815,113 @@ async function removeLogo() {
           >
             Save hours
           </UButton>
+        </section>
+
+        <!-- Personal notifications -->
+        <section class="rounded-2xl border-glow bg-elevated/30 p-5 sm:p-6">
+          <div class="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+            <div>
+              <h2 class="font-display font-semibold text-highlighted">
+                Your notifications
+              </h2>
+              <p class="mt-0.5 text-sm text-muted">
+                Personal choices for {{ workspace?.name }}. They do not change anyone else's alerts.
+              </p>
+            </div>
+            <UBadge
+              color="neutral"
+              variant="subtle"
+              class="mt-2 w-fit sm:mt-0"
+            >
+              Personal
+            </UBadge>
+          </div>
+
+          <div
+            v-if="notificationsLoading"
+            class="mt-5 space-y-3"
+          >
+            <USkeleton
+              v-for="n in 3"
+              :key="n"
+              class="h-24 w-full rounded-xl"
+            />
+          </div>
+
+          <div
+            v-else
+            class="mt-5 space-y-3"
+          >
+            <div
+              v-for="item in notificationMeta"
+              :key="item.category"
+              class="rounded-xl bg-default p-4 ring-1 ring-default"
+            >
+              <div class="min-w-0">
+                <p class="text-sm font-medium text-highlighted">
+                  {{ item.title }}
+                </p>
+                <p class="mt-0.5 text-xs text-muted">
+                  {{ item.description }}
+                </p>
+              </div>
+              <div class="mt-4 grid gap-3 sm:grid-cols-3">
+                <label class="flex min-h-11 items-center justify-between gap-3 rounded-lg bg-elevated/50 px-3 py-2">
+                  <span class="text-sm text-highlighted">In-app pop-up</span>
+                  <USwitch
+                    v-model="personalPreference(item.category).in_app_enabled"
+                    :aria-label="`Show ${item.title.toLowerCase()} as in-app pop-ups`"
+                  />
+                </label>
+                <label class="flex min-h-11 items-center justify-between gap-3 rounded-lg bg-elevated/50 px-3 py-2">
+                  <span class="text-sm text-highlighted">Browser</span>
+                  <USwitch
+                    :model-value="personalPreference(item.category).browser_enabled"
+                    :aria-label="`Show ${item.title.toLowerCase()} as browser notifications`"
+                    @update:model-value="setBrowserPreference(personalPreference(item.category), $event)"
+                  />
+                </label>
+                <label
+                  v-if="item.category === 'unanswered_reminder'"
+                  class="flex min-h-11 items-center justify-between gap-3 rounded-lg bg-elevated/50 px-3 py-2"
+                >
+                  <span class="text-sm text-highlighted">Email</span>
+                  <USwitch
+                    v-model="personalPreference(item.category).email_enabled"
+                    aria-label="Email me unanswered-message reminders"
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div class="rounded-xl border border-default px-4 py-3 text-xs text-muted">
+              <p>
+                Browser alerts appear while Perch is open in a background tab. Your notification bell and inbox response indicators remain available even when pop-ups are off.
+              </p>
+              <p
+                v-if="browserNotifications.permission.value === 'denied'"
+                class="mt-2 text-warning"
+                role="status"
+              >
+                Browser notifications are blocked for this site. Allow them in your browser settings to turn them on.
+              </p>
+              <p
+                v-else-if="browserNotifications.permission.value === 'unsupported' || browserNotifications.permission.value === 'insecure'"
+                class="mt-2 text-warning"
+                role="status"
+              >
+                Browser notifications are unavailable in this browser or connection.
+              </p>
+            </div>
+
+            <UButton
+              color="neutral"
+              :loading="notificationsSaving"
+              @click="savePersonalNotifications"
+            >
+              Save my notifications
+            </UButton>
+          </div>
         </section>
 
         <!-- Response target and unanswered-message reminders -->

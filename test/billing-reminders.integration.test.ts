@@ -7,7 +7,8 @@ import { eq } from '../packages/db/node_modules/drizzle-orm/index.js'
 import { emailLayout, escapeHtml } from '../server/utils/email'
 import { isWithinBusinessHours } from '../server/utils/business-hours'
 import { applyWorkspaceSubscriptionState, workspaceEntitlement } from '../server/utils/billing'
-import { runUnansweredReminderSweep } from '../server/utils/unanswered-reminders'
+import { reminderDeliveryIsActionable, runUnansweredReminderSweep } from '../server/utils/unanswered-reminders'
+import { notificationChannelEnabled } from '../server/utils/notification-preferences'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
 
@@ -27,7 +28,9 @@ describe.skipIf(!databaseUrl)('billing and reminder database integration', () =>
       useRuntimeConfig: () => ({ publicBaseUrl: 'https://useperch.xyz' }),
       emailLayout,
       escapeHtml,
-      isWithinBusinessHours
+      isWithinBusinessHours,
+      notificationChannelEnabled,
+      publishFiltered: () => {}
     })
     await db.insert(schema.users).values({ id: userId, email: `reminder-${userId}@example.com`, name: 'Reminder Agent' })
     await db.insert(schema.workspaces).values({
@@ -58,6 +61,7 @@ describe.skipIf(!databaseUrl)('billing and reminder database integration', () =>
   afterEach(async () => {
     await db.delete(schema.workspaceSubscriptions).where(eq(schema.workspaceSubscriptions.workspaceId, workspaceId))
     await db.delete(schema.workspaceInvoices).where(eq(schema.workspaceInvoices.workspaceId, workspaceId))
+    await db.delete(schema.notificationPreferences).where(eq(schema.notificationPreferences.memberId, memberId))
   })
 
   it('delivers exactly one email for the same unanswered visitor message', async () => {
@@ -116,5 +120,108 @@ describe.skipIf(!databaseUrl)('billing and reminder database integration', () =>
     expect((await workspaceEntitlement(workspaceId)).isPro).toBe(false)
     await db.update(schema.workspaceInvoices).set({ status: 'paid', paidAt: new Date() }).where(eq(schema.workspaceInvoices.reference, reference))
     expect((await workspaceEntitlement(workspaceId)).isPro).toBe(true)
+  })
+
+  it('cancels an unanswered reminder when the recipient disables personal email delivery', async () => {
+    const localVisitorId = randomUUID()
+    const localConversationId = randomUUID()
+    const localMessageId = randomUUID()
+    await db.insert(schema.notificationPreferences).values({
+      memberId,
+      category: 'unanswered_reminder',
+      emailEnabled: false
+    })
+    await db.insert(schema.visitors).values({
+      id: localVisitorId,
+      workspaceId,
+      visitorId: `visitor_${randomUUID()}`,
+      name: 'Quiet Visitor'
+    })
+    await db.insert(schema.conversations).values({
+      id: localConversationId,
+      workspaceId,
+      visitorRef: localVisitorId
+    })
+    await db.insert(schema.messages).values({
+      id: localMessageId,
+      conversationId: localConversationId,
+      senderType: 'visitor',
+      content: 'Please do not email this teammate.',
+      createdAt: new Date('2026-09-01T11:00:00Z')
+    })
+    const sent: Array<{ to: string }> = []
+    await runUnansweredReminderSweep({
+      now: new Date('2026-09-01T11:15:00Z'),
+      sender: async (message) => {
+        sent.push(message)
+        return true
+      }
+    })
+    expect(sent).toHaveLength(0)
+    const delivery = await db.query.unansweredReminderDeliveries.findFirst({
+      where: eq(schema.unansweredReminderDeliveries.visitorMessageId, localMessageId)
+    })
+    expect(delivery?.status).toBe('canceled')
+  })
+
+  it('does not publish a stale reminder after reassignment or a public reply', async () => {
+    const secondUserId = randomUUID()
+    const secondMemberId = randomUUID()
+    const localVisitorId = randomUUID()
+    const localConversationId = randomUUID()
+    const localMessageId = randomUUID()
+    await db.insert(schema.users).values({
+      id: secondUserId,
+      email: `reminder-secondary-${secondUserId}@example.com`,
+      name: 'Secondary Agent'
+    })
+    await db.insert(schema.workspaceMembers).values({
+      id: secondMemberId,
+      workspaceId,
+      userId: secondUserId,
+      role: 'agent'
+    })
+    await db.insert(schema.visitors).values({
+      id: localVisitorId,
+      workspaceId,
+      visitorId: `visitor_${randomUUID()}`
+    })
+    await db.insert(schema.conversations).values({
+      id: localConversationId,
+      workspaceId,
+      visitorRef: localVisitorId,
+      assignedAgentId: memberId,
+      status: 'open'
+    })
+    await db.insert(schema.messages).values({
+      id: localMessageId,
+      conversationId: localConversationId,
+      senderType: 'visitor',
+      content: 'Is anybody there?',
+      createdAt: new Date('2026-09-01T12:00:00Z')
+    })
+    const [delivery] = await db.insert(schema.unansweredReminderDeliveries).values({
+      workspaceId,
+      conversationId: localConversationId,
+      visitorMessageId: localMessageId,
+      recipientMemberId: memberId,
+      nextAttemptAt: new Date('2026-09-01T12:15:00Z')
+    }).returning()
+
+    await db.update(schema.conversations).set({ assignedAgentId: secondMemberId })
+      .where(eq(schema.conversations.id, localConversationId))
+    expect(await reminderDeliveryIsActionable(delivery!, new Date('2026-09-01T12:15:00Z'))).toBe(false)
+
+    await db.update(schema.conversations).set({ assignedAgentId: memberId })
+      .where(eq(schema.conversations.id, localConversationId))
+    await db.insert(schema.messages).values({
+      conversationId: localConversationId,
+      senderType: 'agent',
+      senderId: memberId,
+      content: 'I can help.',
+      createdAt: new Date('2026-09-01T12:01:00Z')
+    })
+    expect(await reminderDeliveryIsActionable(delivery!, new Date('2026-09-01T12:15:00Z'))).toBe(false)
+    await db.delete(schema.users).where(eq(schema.users.id, secondUserId))
   })
 })

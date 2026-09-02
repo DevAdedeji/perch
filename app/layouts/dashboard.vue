@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { channels } from '@perch/shared'
-import type { MemberNotificationPayload, ServerEvent } from '@perch/shared'
+import { channels, defaultNotificationPreference } from '@perch/shared'
+import type { MemberNotificationPayload, NotificationCategory, ServerEvent } from '@perch/shared'
 
 const { user, currentWorkspace } = useAuth()
 const rt = useRealtime()
 const toast = useToast()
 const { play } = useNotificationSound()
+const browserNotifications = useBrowserNotifications()
 const route = useRoute()
+const personalNotificationStore = usePersonalNotificationPreferences()
 
 const drawerOpen = ref(false)
 const wid = computed(() => currentWorkspace.value?.workspaceId ?? null)
@@ -19,6 +21,11 @@ const shownAutomationNotifications = new Set<string>()
 const automationNotifications = ref<AutomationNotification[]>([])
 const shownMemberNotifications = new Set<string>()
 const memberNotifications = ref<MemberNotificationPayload[]>([])
+const pendingUnansweredReminders = new Set<string>()
+const notificationScope = computed(() => user.value?.id && wid.value
+  ? notificationPreferenceScope(user.value.id, wid.value)
+  : null)
+const notificationPreferenceEntry = computed(() => personalNotificationStore.entry(notificationScope.value))
 
 interface AutomationNotification {
   id: string
@@ -81,7 +88,11 @@ async function loadTeam() {
  */
 function onEvent(ev: ServerEvent) {
   if (ev.type === 'member.notification') {
-    showMemberNotification(ev.payload)
+    showMemberNotification(ev.payload, true)
+    return
+  }
+  if (ev.type === 'unanswered.reminder') {
+    showUnansweredReminder(ev.payload.conversation_id)
     return
   }
   if (ev.type === 'automation.reminder') {
@@ -111,6 +122,22 @@ function onEvent(ev: ServerEvent) {
     actions: [{ label: 'View', onClick: () => { navigateTo('/dashboard') } }]
   })
   play()
+}
+
+function preferenceFor(category: NotificationCategory) {
+  return notificationPreferenceEntry.value?.preferences.find(item => item.category === category)
+    ?? defaultNotificationPreference(category)
+}
+
+async function loadNotificationPreferences() {
+  const workspaceId = wid.value
+  const scope = notificationScope.value
+  if (!workspaceId || !scope) return
+  try {
+    await personalNotificationStore.load(scope, workspaceId)
+  } catch {
+    // Fail closed for pop-ups; persisted bell items and inbox indicators remain available.
+  }
 }
 
 function memberNotificationTitle(notification: MemberNotificationPayload) {
@@ -146,20 +173,67 @@ async function openMemberNotification(notification: MemberNotificationPayload) {
   }
 }
 
-function showMemberNotification(notification: MemberNotificationPayload) {
+function showMemberNotification(notification: MemberNotificationPayload, realtime = false) {
   if (!memberNotifications.value.some(item => item.notification_id === notification.notification_id)) {
     memberNotifications.value.unshift(notification)
   }
+  if (!notificationAlertsReady(notificationPreferenceEntry.value)) return
   if (shownMemberNotifications.has(notification.notification_id)) return
   shownMemberNotifications.add(notification.notification_id)
-  toast.add({
-    title: memberNotificationTitle(notification),
-    description: notification.excerpt,
-    icon: memberNotificationIcon(notification),
-    color: notification.type === 'assignment' ? 'primary' : 'warning',
-    actions: [{ label: 'View', onClick: () => openMemberNotification(notification) }]
-  })
-  play()
+  const preference = preferenceFor(notification.type)
+  if (preference.in_app_enabled) {
+    toast.add({
+      title: memberNotificationTitle(notification),
+      description: notification.excerpt,
+      icon: memberNotificationIcon(notification),
+      color: notification.type === 'assignment' ? 'primary' : 'warning',
+      actions: [{ label: 'View', onClick: () => openMemberNotification(notification) }]
+    })
+    play()
+  }
+  if (realtime && preference.browser_enabled) {
+    browserNotifications.show({
+      title: notification.type === 'assignment' ? 'New Perch assignment' : 'New Perch mention',
+      body: 'Open Perch to view the notification.',
+      tag: `perch:${notification.type}:${notification.notification_id}`,
+      onClick: () => { void openMemberNotification(notification) }
+    })
+  }
+}
+
+function showUnansweredReminder(conversationId: string) {
+  if (!notificationAlertsReady(notificationPreferenceEntry.value)) {
+    queuePendingReminder(pendingUnansweredReminders, conversationId)
+    return
+  }
+  const preference = preferenceFor('unanswered_reminder')
+  const openConversation = () => {
+    pendingSelect.value = conversationId
+    void navigateTo('/dashboard')
+  }
+  if (preference.in_app_enabled) {
+    toast.add({
+      title: 'Conversation needs a reply',
+      description: 'A visitor has been waiting longer than your workspace response target.',
+      icon: 'i-lucide-clock-alert',
+      color: 'warning',
+      actions: [{ label: 'View', onClick: openConversation }]
+    })
+    play()
+  }
+  if (preference.browser_enabled) {
+    browserNotifications.show({
+      title: 'Conversation needs a reply',
+      body: 'Open Perch to respond to the waiting visitor.',
+      tag: `perch:unanswered:${conversationId}`,
+      onClick: openConversation
+    })
+  }
+}
+
+function flushPendingUnansweredReminders() {
+  if (!notificationAlertsReady(notificationPreferenceEntry.value)) return
+  drainPendingReminders(pendingUnansweredReminders).forEach(showUnansweredReminder)
 }
 
 async function loadMemberNotifications() {
@@ -167,7 +241,7 @@ async function loadMemberNotifications() {
   try {
     const notifications = await $fetch<MemberNotificationPayload[]>(`/api/workspaces/${wid.value}/member-notifications`)
     memberNotifications.value = notifications
-    notifications.slice().reverse().forEach(showMemberNotification)
+    notifications.slice().reverse().forEach(notification => showMemberNotification(notification))
   } catch {
     // Realtime delivery still works; polling retries persisted notifications.
   }
@@ -227,7 +301,7 @@ onMounted(() => {
     rt.subscribe(channels.workspace(wid.value))
     loadTeam()
     loadAutomationNotifications()
-    loadMemberNotifications()
+    void loadNotificationPreferences().finally(loadMemberNotifications)
   }
   automationPoll = setInterval(loadAutomationNotifications, 60_000)
   memberNotificationPoll = setInterval(loadMemberNotifications, 60_000)
@@ -244,12 +318,18 @@ watch(wid, (next, prev) => {
   automationNotifications.value = []
   shownMemberNotifications.clear()
   memberNotifications.value = []
+  pendingUnansweredReminders.clear()
   if (next) {
     rt.subscribe(channels.workspace(next))
     loadTeam()
     loadAutomationNotifications()
-    loadMemberNotifications()
+    void loadNotificationPreferences().finally(() => {
+      if (wid.value === next) void loadMemberNotifications()
+    })
   }
+})
+watch(() => notificationPreferenceEntry.value?.ready, (ready) => {
+  if (ready) flushPendingUnansweredReminders()
 })
 </script>
 

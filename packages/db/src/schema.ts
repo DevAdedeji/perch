@@ -20,7 +20,7 @@ import {
   uuid
 } from 'drizzle-orm/pg-core'
 import { sql } from 'drizzle-orm'
-import type { AutomationRuleConfig, BusinessHours, SavedInboxFilters, VisitorMetadata } from '@perch/shared'
+import type { AutomationRuleConfig, BusinessHours, NotificationCategory, SavedInboxFilters, VisitorMetadata } from '@perch/shared'
 
 /* Enums (mirror @perch/shared) */
 
@@ -35,6 +35,7 @@ export const automationRuleTypeEnum = pgEnum('automation_rule_type', [
 ])
 export const supportOutcomeEventTypeEnum = pgEnum('support_outcome_event_type', ['resolution', 'csat'])
 export const reminderDeliveryStatusEnum = pgEnum('reminder_delivery_status', ['pending', 'processing', 'sent', 'failed', 'canceled'])
+export const notificationCategoryEnum = pgEnum('notification_category', ['assignment', 'mention', 'unanswered_reminder'])
 export const visitorEmailSourceEnum = pgEnum('visitor_email_source', ['prechat', 'unsigned_identify', 'host_asserted'])
 export const visitorEmailSuppressionReasonEnum = pgEnum('visitor_email_suppression_reason', ['unsubscribe', 'bounce', 'complaint'])
 export const webhookJobStatusEnum = pgEnum('webhook_job_status', [
@@ -530,6 +531,21 @@ export const memberNotifications = pgTable('member_notifications', {
   index('member_notifications_workspace_recency_idx').on(t.workspaceId, t.createdAt)
 ])
 
+/** Personal delivery choices for one member in one workspace. */
+export const notificationPreferences = pgTable('notification_preferences', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  memberId: uuid('member_id').notNull().references(() => workspaceMembers.id, { onDelete: 'cascade' }),
+  category: notificationCategoryEnum('category').$type<NotificationCategory>().notNull(),
+  inAppEnabled: boolean('in_app_enabled').default(true).notNull(),
+  browserEnabled: boolean('browser_enabled').default(false).notNull(),
+  emailEnabled: boolean('email_enabled').default(false).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
+}, t => [
+  uniqueIndex('notification_preferences_member_category_uq').on(t.memberId, t.category),
+  index('notification_preferences_member_idx').on(t.memberId)
+])
+
 /** Per-agent read tracking; unread is derived (last_message_at > last_read_at). */
 export const conversationReads = pgTable('conversation_reads', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -775,6 +791,7 @@ export type Message = typeof messages.$inferSelect
 export type NewMessage = typeof messages.$inferInsert
 export type MemberNotification = typeof memberNotifications.$inferSelect
 export type NewMemberNotification = typeof memberNotifications.$inferInsert
+export type NotificationPreference = typeof notificationPreferences.$inferSelect
 export type ConversationRead = typeof conversationReads.$inferSelect
 export type NewConversationRead = typeof conversationReads.$inferInsert
 export type VisitorConversationRead = typeof visitorConversationReads.$inferSelect
