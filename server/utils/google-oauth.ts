@@ -1,8 +1,6 @@
-import { timingSafeEqual } from 'node:crypto'
 import type { H3Event } from 'h3'
 import { safeAuthRedirect } from '@perch/shared'
 
-const STATE_COOKIE = 'perch_google_oauth_state'
 const REDIRECT_COOKIE = 'perch_google_oauth_redirect'
 const SOURCE_COOKIE = 'perch_google_oauth_source'
 const COOKIE_PATH = '/auth/google'
@@ -40,39 +38,25 @@ function cookieOptions() {
 }
 
 export function setGoogleOAuthContext(event: H3Event, input: {
-  state: string
   redirect: string
   source: 'login' | 'signup'
 }) {
   const options = cookieOptions()
-  setCookie(event, STATE_COOKIE, input.state, options)
   setCookie(event, REDIRECT_COOKIE, input.redirect, options)
   setCookie(event, SOURCE_COOKIE, input.source, options)
 }
 
-function safeEqual(left: string, right: string) {
-  const leftBytes = Buffer.from(left)
-  const rightBytes = Buffer.from(right)
-  return leftBytes.length === rightBytes.length && timingSafeEqual(leftBytes, rightBytes)
-}
-
-export function consumeGoogleOAuthContext(event: H3Event, returnedState: unknown) {
-  const expectedState = getCookie(event, STATE_COOKIE) ?? ''
+export function consumeGoogleOAuthContext(event: H3Event) {
   const redirect = safeAuthRedirect(getCookie(event, REDIRECT_COOKIE), '/dashboard')
   const source: 'login' | 'signup' = getCookie(event, SOURCE_COOKIE) === 'signup' ? 'signup' : 'login'
 
   clearGoogleOAuthContext(event)
 
-  if (typeof returnedState !== 'string' || !expectedState || !safeEqual(expectedState, returnedState)) {
-    return null
-  }
-
   return { redirect, source }
 }
 
-export function clearGoogleOAuthContext(event: H3Event) {
+function clearGoogleOAuthContext(event: H3Event) {
   const options = { path: COOKIE_PATH }
-  deleteCookie(event, STATE_COOKIE, options)
   deleteCookie(event, REDIRECT_COOKIE, options)
   deleteCookie(event, SOURCE_COOKIE, options)
 }

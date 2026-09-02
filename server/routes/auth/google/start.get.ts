@@ -1,4 +1,3 @@
-import { randomBytes } from 'node:crypto'
 import { safeAuthRedirect } from '@perch/shared'
 
 export default defineEventHandler((event) => {
@@ -9,11 +8,10 @@ export default defineEventHandler((event) => {
   }
 
   const query = getQuery(event)
-  const state = randomBytes(32).toString('hex')
   const source = query.source === 'signup' ? 'signup' : 'login'
   const fallback = source === 'signup' ? '/onboarding' : '/dashboard'
   const redirect = safeAuthRedirect(query.redirect, fallback)
 
-  setGoogleOAuthContext(event, { state, redirect, source })
-  return sendRedirect(event, `/auth/google?state=${encodeURIComponent(state)}`)
+  setGoogleOAuthContext(event, { redirect, source })
+  return sendRedirect(event, '/auth/google')
 })
