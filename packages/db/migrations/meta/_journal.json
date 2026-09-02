@@ -197,6 +197,13 @@
       "when": 1788307834280,
       "tag": "0027_durable-webhook-delivery",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1788310931291,
+      "tag": "0028_notification-preferences",
+      "breakpoints": true
     }
   ]
 }

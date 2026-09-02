@@ -1,7 +1,8 @@
 import { and, asc, conversations, eq, gt, inArray, lt, messages, or, sql, unansweredReminderDeliveries, users, visitors, workspaceMembers, workspaces } from '@perch/db'
-import { PERCH_PRO_PLAN, PERCH_PRODUCTION_ORIGIN } from '@perch/shared'
+import { channels, PERCH_PRO_PLAN, PERCH_PRODUCTION_ORIGIN } from '@perch/shared'
 import type { SubscriptionStatus } from '@perch/shared'
 import { subscriptionHasPaidAccess, workspaceEntitlement } from './billing'
+import { agentWorkspaceAuthorization } from './realtime'
 
 const MAX_ATTEMPTS = 5
 const CLAIM_LIMIT = 25
@@ -103,13 +104,27 @@ async function enqueueDueReminders(now: Date) {
     if (settings.businessHoursOnly && !isWithinBusinessHours(candidate.business_hours, candidate.timezone, now)) continue
     const recipients = await reminderRecipients(candidate.workspace_id, candidate.assigned_agent_id)
     if (!recipients.length) continue
-    await useDb().insert(unansweredReminderDeliveries).values(recipients.map(recipient => ({
+    const inserted = await useDb().insert(unansweredReminderDeliveries).values(recipients.map(recipient => ({
       workspaceId: candidate.workspace_id,
       conversationId: candidate.conversation_id,
       visitorMessageId: candidate.visitor_message_id,
       recipientMemberId: recipient.id,
       nextAttemptAt: now
-    }))).onConflictDoNothing()
+    }))).onConflictDoNothing().returning()
+    for (const delivery of inserted) {
+      if (!await reminderDeliveryIsActionable(delivery, now)) continue
+      publishFiltered(channels.workspace(delivery.workspaceId), {
+        type: 'unanswered.reminder',
+        payload: {
+          delivery_id: delivery.id,
+          conversation_id: delivery.conversationId,
+          created_at: delivery.createdAt.toISOString()
+        }
+      }, (context) => {
+        const authorization = agentWorkspaceAuthorization(context, delivery.workspaceId)
+        return authorization?.memberId === delivery.recipientMemberId
+      })
+    }
   }
 }
 
@@ -133,26 +148,26 @@ async function claimDueReminders(now: Date) {
   })
 }
 
-async function stillNeedsReminder(delivery: typeof unansweredReminderDeliveries.$inferSelect, now: Date) {
+export async function reminderDeliveryIsActionable(
+  delivery: typeof unansweredReminderDeliveries.$inferSelect,
+  now: Date
+) {
   const [row] = await useDb().select({
     conversationStatus: conversations.status,
     assignedAgentId: conversations.assignedAgentId,
     recipientRole: workspaceMembers.role,
     snoozedUntil: conversations.snoozedUntil,
-    messageAt: messages.createdAt,
-    businessHoursOnly: workspaces.unansweredReminderBusinessHoursOnly,
-    businessHours: workspaces.businessHours,
-    timezone: workspaces.timezone
+    messageAt: messages.createdAt
   }).from(unansweredReminderDeliveries)
     .innerJoin(conversations, eq(conversations.id, unansweredReminderDeliveries.conversationId))
     .innerJoin(messages, eq(messages.id, unansweredReminderDeliveries.visitorMessageId))
     .innerJoin(workspaces, eq(workspaces.id, unansweredReminderDeliveries.workspaceId))
     .innerJoin(workspaceMembers, eq(workspaceMembers.id, unansweredReminderDeliveries.recipientMemberId))
     .where(eq(unansweredReminderDeliveries.id, delivery.id)).limit(1)
-  if (!row || !['unassigned', 'open'].includes(row.conversationStatus)) return { send: false, reschedule: false }
-  if (row.assignedAgentId && row.assignedAgentId !== delivery.recipientMemberId) return { send: false, reschedule: false }
-  if (!row.assignedAgentId && row.recipientRole !== 'admin') return { send: false, reschedule: false }
-  if (row.snoozedUntil && row.snoozedUntil.getTime() > now.getTime()) return { send: false, reschedule: false }
+  if (!row || !['unassigned', 'open'].includes(row.conversationStatus)) return false
+  if (row.assignedAgentId && row.assignedAgentId !== delivery.recipientMemberId) return false
+  if (!row.assignedAgentId && row.recipientRole !== 'admin') return false
+  if (row.snoozedUntil && row.snoozedUntil.getTime() > now.getTime()) return false
   const [newer] = await useDb().select({ id: messages.id }).from(messages).where(and(
     eq(messages.conversationId, delivery.conversationId),
     eq(messages.isInternalNote, false),
@@ -161,9 +176,22 @@ async function stillNeedsReminder(delivery: typeof unansweredReminderDeliveries.
       and(eq(messages.createdAt, row.messageAt), gt(messages.id, delivery.visitorMessageId))
     )
   )).limit(1)
-  if (newer) return { send: false, reschedule: false }
+  return !newer
+}
+
+async function stillNeedsReminder(delivery: typeof unansweredReminderDeliveries.$inferSelect, now: Date) {
+  if (!await reminderDeliveryIsActionable(delivery, now)) return { send: false, reschedule: false }
+  if (!await notificationChannelEnabled(delivery.recipientMemberId, 'unanswered_reminder', 'email')) {
+    return { send: false, reschedule: false }
+  }
+  const [workspace] = await useDb().select({
+    businessHoursOnly: workspaces.unansweredReminderBusinessHoursOnly,
+    businessHours: workspaces.businessHours,
+    timezone: workspaces.timezone
+  }).from(workspaces).where(eq(workspaces.id, delivery.workspaceId)).limit(1)
+  if (!workspace) return { send: false, reschedule: false }
   const entitlement = await workspaceEntitlement(delivery.workspaceId)
-  if (entitlement.isPro && row.businessHoursOnly && !isWithinBusinessHours(row.businessHours, row.timezone, now)) {
+  if (entitlement.isPro && workspace.businessHoursOnly && !isWithinBusinessHours(workspace.businessHours, workspace.timezone, now)) {
     return { send: false, reschedule: true }
   }
   return { send: true, reschedule: false }
