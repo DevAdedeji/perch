@@ -26,7 +26,8 @@ const schema = z.object({
   timezone: z.string().max(64).refine(isValidTimezone, 'Unknown timezone').nullable().optional(),
   unansweredReminderEnabled: z.boolean().optional(),
   unansweredReminderDelayMinutes: z.number().int().min(5).max(1440).optional(),
-  unansweredReminderBusinessHoursOnly: z.boolean().optional()
+  unansweredReminderBusinessHoursOnly: z.boolean().optional(),
+  visitorReplyEmailEnabled: z.boolean().optional()
 })
 
 /** Update workspace settings (admin only). */
@@ -41,6 +42,9 @@ export default defineEventHandler(async (event) => {
 
   const db = useDb()
   const patch = { ...result.data }
+  if (patch.visitorReplyEmailEnabled === true && !visitorReplyEmailFeatureEnabled(event)) {
+    throw createError({ statusCode: 409, statusMessage: 'Visitor reply emails are not available' })
+  }
   const entitlement = await workspaceEntitlement(workspaceId)
   if (!entitlement.isPro) {
     if (patch.unansweredReminderBusinessHoursOnly) {

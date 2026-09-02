@@ -158,6 +158,17 @@ const pageHost = computed(() => {
           />
           Messaging blocked
         </span>
+        <span
+          v-if="context?.visitor.reply_email.eligible"
+          class="inline-flex shrink-0 items-center gap-1 rounded-full bg-sky-500/10 px-1.5 py-0.5 text-[10px] font-medium text-sky-700 ring-1 ring-sky-500/25 dark:text-sky-400"
+          :title="context.visitor.reply_email.status === 'sent' ? 'A private return link was sent for the latest visitor turn.' : 'Perch can email a private return link when this visitor leaves.'"
+        >
+          <UIcon
+            name="i-lucide-mail-check"
+            class="size-3"
+          />
+          {{ context.visitor.reply_email.status === 'sent' ? 'Reply email sent' : 'Offline email ready' }}
+        </span>
       </div>
     </div>
 

@@ -12,6 +12,10 @@ export interface LaunchEnvironment {
   NUXT_OAUTH_GOOGLE_REDIRECT_URL?: string
   RESEND_API_KEY?: string
   RESEND_FROM?: string
+  VISITOR_REPLY_SECRET?: string
+  VISITOR_EMAIL_HASH_SECRET?: string
+  VISITOR_REPLY_EMAIL_FEATURE_ENABLED?: string
+  VISITOR_REPLY_EMAIL_DELIVERY_ENABLED?: string
   BACHS_SECRET_KEY?: string
   BACHS_WEBHOOK_SECRET?: string
   CLOUDINARY_CLOUD_NAME?: string
@@ -101,6 +105,19 @@ export function productionConfigErrors(environment: LaunchEnvironment): string[]
 
   if (!value(environment.RESEND_API_KEY) || !value(environment.RESEND_FROM)) {
     errors.push('RESEND_API_KEY and RESEND_FROM are required for production account recovery')
+  }
+  const visitorReplyFeatureEnabled = value(environment.VISITOR_REPLY_EMAIL_FEATURE_ENABLED) === 'true'
+  const visitorReplyDeliveryEnabled = value(environment.VISITOR_REPLY_EMAIL_DELIVERY_ENABLED) === 'true'
+  if (visitorReplyDeliveryEnabled && !visitorReplyFeatureEnabled) {
+    errors.push('VISITOR_REPLY_EMAIL_DELIVERY_ENABLED requires VISITOR_REPLY_EMAIL_FEATURE_ENABLED=true')
+  }
+  if (visitorReplyFeatureEnabled || visitorReplyDeliveryEnabled) {
+    if (!isStrongSecret(environment.VISITOR_REPLY_SECRET)) {
+      errors.push('VISITOR_REPLY_SECRET must be a non-placeholder secret of at least 32 characters when visitor reply email is enabled')
+    }
+    if (!isStrongSecret(environment.VISITOR_EMAIL_HASH_SECRET)) {
+      errors.push('VISITOR_EMAIL_HASH_SECRET must be a non-placeholder secret of at least 32 characters when visitor reply email is enabled')
+    }
   }
   requireCompleteGroup(errors, environment, ['BACHS_SECRET_KEY', 'BACHS_WEBHOOK_SECRET'])
   requireCompleteGroup(errors, environment, [

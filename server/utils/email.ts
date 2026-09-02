@@ -7,10 +7,18 @@ import { PERCH_PRODUCTION_ORIGIN } from '@perch/shared'
  * (local dev), emails are logged to the server console instead.
  */
 
-interface SendEmailOptions {
+export interface SendEmailOptions {
   to: string
   subject: string
   html: string
+  idempotencyKey?: string
+}
+
+export interface EmailDeliveryResult {
+  accepted: boolean
+  providerMessageId: string | null
+  retryable: boolean
+  error: string | null
 }
 
 const EMAIL_TIMEOUT_MS = 10_000
@@ -49,28 +57,44 @@ export function publicOrigin(event: import('h3').H3Event): string {
     : PERCH_PRODUCTION_ORIGIN
 }
 
-export async function sendEmail({ to, subject, html }: SendEmailOptions): Promise<boolean> {
+export async function sendEmailDetailed({ to, subject, html, idempotencyKey }: SendEmailOptions): Promise<EmailDeliveryResult> {
   const config = useRuntimeConfig()
   const apiKey = config.resendApiKey || process.env.RESEND_API_KEY
   const from = config.emailFrom || process.env.RESEND_FROM || `Perch <no-reply@${new URL(PERCH_PRODUCTION_ORIGIN).hostname}>`
 
   if (!apiKey) {
     console.warn(`[email] RESEND_API_KEY not set — skipped "${subject}"`)
-    return false
+    return { accepted: false, providerMessageId: null, retryable: true, error: 'email_provider_not_configured' }
   }
 
   try {
-    await $fetch('https://api.resend.com/emails', {
+    const response = await $fetch<{ id?: string }>('https://api.resend.com/emails', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}` },
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {})
+      },
       body: { from, to, subject, html },
       timeout: EMAIL_TIMEOUT_MS
     })
-    return true
+    return {
+      accepted: true,
+      providerMessageId: typeof response.id === 'string' ? response.id : null,
+      retryable: false,
+      error: null
+    }
   } catch (e) {
-    console.error(`[email] failed to send "${subject}":`, (e as Error).message)
-    return false
+    const failure = e as { status?: number, statusCode?: number, message?: string }
+    const status = failure.statusCode ?? failure.status
+    const retryable = status === undefined || status === 408 || status === 429 || (typeof status === 'number' && status >= 500)
+    const error = `email_provider_${status ?? 'network'}`
+    console.error(`[email] failed to send "${subject}":`, error)
+    return { accepted: false, providerMessageId: null, retryable, error }
   }
+}
+
+export async function sendEmail(options: SendEmailOptions): Promise<boolean> {
+  return (await sendEmailDetailed(options)).accepted
 }
 
 /** Minimal branded shell — amber accent, dark-on-light, renders everywhere. */

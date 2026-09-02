@@ -42,6 +42,10 @@ This is the practical checklist for deploying and operating Perch. It separates 
 - Rotate a session secret as an incident response action: it signs everyone out. Rotate the realtime secret at the same time only when it is separate.
 - Configure Google client ID, client secret, and the exact HTTPS redirect URL together.
 - Configure Resend API key and verified sender together. Railway staging also runs with `NODE_ENV=production`, so it needs separate staging/test Resend credentials rather than the local-development console fallback. Monitor delivery failures and domain authentication.
+- Keep `VISITOR_REPLY_EMAIL_FEATURE_ENABLED=false` until the visitor email privacy review and both dedicated secrets are complete. While this gate is false, Settings and the widget do not expose the feature and opt-in requests fail closed. Disabled deployments do not need either visitor-email secret.
+- Before enabling exposure, generate `VISITOR_REPLY_SECRET` and `VISITOR_EMAIL_HASH_SECRET` independently with at least 32 random characters each. Rotating the reply secret invalidates outstanding return and unsubscribe links. The hash secret is deliberately separate and stable: do not rotate or remove it while suppression or delivery records exist, because old keyed hashes would no longer match.
+- Keep `VISITOR_REPLY_EMAIL_DELIVERY_ENABLED=false` until visitor-email processing through Resend is explicitly approved, feature exposure is enabled, the scheduled delivery worker is registered, and the staging journey below passes. The worker utility refuses its production transport while this gate is false; injected test transports remain available for safe automated verification.
+- Configure and verify a signed Resend webhook before enabling visitor reply delivery so bounces and complaints create durable hashed-email suppressions. `RESEND_WEBHOOK_SECRET` documents the required secret, but webhook handling is not implemented in this branch because provider credentials and dashboard setup are external prerequisites. Until it exists, do not enable production visitor delivery.
 - Configure Bachs API and webhook secrets together. Keep sandbox keys on staging and verify the production webhook URL and signature secret before launch.
 - Configure all three Cloudinary values together. Keep upload presets private; uploads pass through Perch's signed, authenticated proxy.
 - Never paste secret values into tickets, screenshots, commits, or logs.
@@ -51,6 +55,7 @@ This is the practical checklist for deploying and operating Perch. It separates 
 1. Confirm CI is green, including migrations, dependency audit, widget build, and server build.
 2. Confirm required environment variables exist in the target environment without copying values into chat or logs.
 3. Deploy to staging and exercise login, widget installation, message send/reply, attachments, billing sandbox, and webhook delivery.
+   For visitor reply email, use a disposable address: leave the consent box clear and confirm no job is eligible; opt in explicitly; leave the widget; send one public agent reply; confirm one generic email; use the return link once; confirm reuse fails; reply from the exact private thread; then unsubscribe and confirm later turns stay suppressed. Also confirm internal notes, already-read replies, spam, blocks, changed email addresses, and non-consenting visitors never send.
 4. Confirm `/api/live` and `/api/health` return `200` and API responses contain `X-Request-Id`.
 5. Deploy production and watch health, errors, restart count, database connections, and provider dashboards.
 6. If health fails, stop routing traffic or roll back the application image. Preserve the database and logs for diagnosis.

@@ -35,6 +35,8 @@ export const automationRuleTypeEnum = pgEnum('automation_rule_type', [
 ])
 export const supportOutcomeEventTypeEnum = pgEnum('support_outcome_event_type', ['resolution', 'csat'])
 export const reminderDeliveryStatusEnum = pgEnum('reminder_delivery_status', ['pending', 'processing', 'sent', 'failed', 'canceled'])
+export const visitorEmailSourceEnum = pgEnum('visitor_email_source', ['prechat', 'unsigned_identify', 'host_asserted'])
+export const visitorEmailSuppressionReasonEnum = pgEnum('visitor_email_suppression_reason', ['unsubscribe', 'bounce', 'complaint'])
 export const billingIntervalEnum = pgEnum('billing_interval', ['monthly', 'yearly'])
 export const subscriptionStatusEnum = pgEnum('subscription_status', ['trialing', 'active', 'past_due', 'unpaid', 'paused', 'canceled'])
 export const invoiceStatusEnum = pgEnum('invoice_status', ['pending', 'paid', 'failed'])
@@ -87,6 +89,7 @@ export const workspaces = pgTable('workspaces', {
   unansweredReminderEnabled: boolean('unanswered_reminder_enabled').default(false).notNull(),
   unansweredReminderDelayMinutes: integer('unanswered_reminder_delay_minutes').default(15).notNull(),
   unansweredReminderBusinessHoursOnly: boolean('unanswered_reminder_business_hours_only').default(false).notNull(),
+  visitorReplyEmailEnabled: boolean('visitor_reply_email_enabled').default(false).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull()
 }, t => [
   check('workspaces_unanswered_reminder_delay_ck', sql`${t.unansweredReminderDelayMinutes} between 5 and 1440`)
@@ -182,6 +185,10 @@ export const visitors = pgTable('visitors', {
   visitorId: text('visitor_id').notNull(),
   name: text('name'),
   email: text('email'),
+  emailSource: visitorEmailSourceEnum('email_source'),
+  emailUpdatedAt: timestamp('email_updated_at', { withTimezone: true }),
+  replyEmailEnabled: boolean('reply_email_enabled').default(false).notNull(),
+  replyEmailConsentAt: timestamp('reply_email_consent_at', { withTimezone: true }),
   // Agent-maintained overrides stay separate from visitor-supplied identity.
   // This prevents an internal edit from being presented as HMAC-verified data.
   profileName: text('profile_name'),
@@ -408,6 +415,58 @@ export const messages = pgTable('messages', {
   index('messages_public_sender_time_conversation_idx')
     .on(t.senderType, t.createdAt, t.conversationId, t.senderId)
     .where(sql`${t.isInternalNote} = false`)
+])
+
+/** Last public message the visitor actually viewed in an open chat surface. */
+export const visitorConversationReads = pgTable('visitor_conversation_reads', {
+  conversationId: uuid('conversation_id').primaryKey().references(() => conversations.id, { onDelete: 'cascade' }),
+  visitorRef: uuid('visitor_ref').notNull().references(() => visitors.id, { onDelete: 'cascade' }),
+  lastMessageId: uuid('last_message_id').notNull().references(() => messages.id, { onDelete: 'cascade' }),
+  readAt: timestamp('read_at', { withTimezone: true }).defaultNow().notNull()
+}, t => [
+  index('visitor_conversation_reads_visitor_idx').on(t.visitorRef, t.readAt)
+])
+
+/** Workspace-scoped reply-email opt-outs and provider abuse suppressions. */
+export const visitorEmailSuppressions = pgTable('visitor_email_suppressions', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  emailHash: text('email_hash').notNull(),
+  reason: visitorEmailSuppressionReasonEnum('reason').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull()
+}, t => [
+  uniqueIndex('visitor_email_suppressions_workspace_email_uq').on(t.workspaceId, t.emailHash),
+  index('visitor_email_suppressions_workspace_created_idx').on(t.workspaceId, t.createdAt)
+])
+
+/** Durable visitor reply-email outbox, deduplicated to one email per visitor turn. */
+export const visitorReplyDeliveries = pgTable('visitor_reply_deliveries', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  conversationId: uuid('conversation_id').notNull().references(() => conversations.id, { onDelete: 'cascade' }),
+  visitorRef: uuid('visitor_ref').notNull().references(() => visitors.id, { onDelete: 'cascade' }),
+  visitorMessageId: uuid('visitor_message_id').notNull().references(() => messages.id, { onDelete: 'cascade' }),
+  agentMessageId: uuid('agent_message_id').notNull().references(() => messages.id, { onDelete: 'cascade' }),
+  recipientEmailHash: text('recipient_email_hash').notNull(),
+  status: reminderDeliveryStatusEnum('status').default('pending').notNull(),
+  attempts: integer('attempts').default(0).notNull(),
+  nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull(),
+  lockedAt: timestamp('locked_at', { withTimezone: true }),
+  sentAt: timestamp('sent_at', { withTimezone: true }),
+  tokenExpiresAt: timestamp('token_expires_at', { withTimezone: true }).notNull(),
+  tokenConsumedAt: timestamp('token_consumed_at', { withTimezone: true }),
+  providerMessageId: text('provider_message_id'),
+  lastError: text('last_error'),
+  cancelReason: text('cancel_reason'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
+}, t => [
+  uniqueIndex('visitor_reply_deliveries_turn_email_uq').on(t.visitorMessageId, t.recipientEmailHash),
+  uniqueIndex('visitor_reply_deliveries_agent_message_uq').on(t.agentMessageId),
+  index('visitor_reply_deliveries_due_idx').on(t.status, t.nextAttemptAt),
+  index('visitor_reply_deliveries_conversation_idx').on(t.conversationId, t.createdAt),
+  index('visitor_reply_deliveries_recipient_idx').on(t.recipientEmailHash, t.createdAt),
+  check('visitor_reply_deliveries_attempts_ck', sql`${t.attempts} between 0 and 5`)
 ])
 
 /** Durable email outbox: one reminder per unanswered visitor message and recipient. */
@@ -665,6 +724,8 @@ export type MemberNotification = typeof memberNotifications.$inferSelect
 export type NewMemberNotification = typeof memberNotifications.$inferInsert
 export type ConversationRead = typeof conversationReads.$inferSelect
 export type NewConversationRead = typeof conversationReads.$inferInsert
+export type VisitorConversationRead = typeof visitorConversationReads.$inferSelect
+export type VisitorReplyDelivery = typeof visitorReplyDeliveries.$inferSelect
 export type CannedResponse = typeof cannedResponses.$inferSelect
 export type NewCannedResponse = typeof cannedResponses.$inferInsert
 export type PasswordResetToken = typeof passwordResetTokens.$inferSelect

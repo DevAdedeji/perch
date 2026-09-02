@@ -14,12 +14,13 @@ interface WidgetWorkspace {
   theme: 'light' | 'dark' | 'system'
   show_branding: boolean
   has_articles: boolean
+  reply_email_enabled: boolean
 }
 
 interface SessionResponse {
   workspace: WidgetWorkspace
   agent: { name: string } | null
-  visitor: { name: string | null, email: string | null }
+  visitor: { name: string | null, email: string | null, reply_email_enabled: boolean }
   business_online: boolean
   business_state: 'online' | 'away' | 'offline'
   within_hours: boolean
@@ -63,6 +64,7 @@ export function useWidget(
   const agentTyping = ref(false)
   const visitorName = ref<string | null>(null)
   const visitorEmail = ref<string | null>(null)
+  const replyEmailEnabled = ref(false)
   // newest agent read — visitor messages at or before this show "Seen"
   const agentReadAt = ref<string | null>(null)
 
@@ -143,6 +145,7 @@ export function useWidget(
     messages.value = res.messages
     visitorName.value = res.visitor.name
     visitorEmail.value = res.visitor.email
+    replyEmailEnabled.value = res.visitor.reply_email_enabled
     agentReadAt.value = res.agent_last_read_at
     ticket = res.ws_ticket
     presenceChan = res.presence_channel
@@ -318,6 +321,7 @@ export function useWidget(
     name?: string
     email?: string
     hash?: string
+    email_hash?: string
   }
 
   // traits arriving before the handshake are queued; traits always win over
@@ -343,7 +347,8 @@ export function useWidget(
       user_id: str(traits.user_id, 128),
       name: str(traits.name, 100),
       email: str(traits.email, 200),
-      hash: str(traits.hash, 64)
+      hash: str(traits.hash, 64),
+      email_hash: str(traits.email_hash, 64)
     }
     if (!clean.user_id && !clean.name && !clean.email) return
     if (clean.name) visitorName.value = clean.name
@@ -402,7 +407,7 @@ export function useWidget(
     return tempId
   }
 
-  async function performSend(tempId: string, identity?: { name?: string, email?: string }) {
+  async function performSend(tempId: string, identity?: { name?: string, email?: string, replyEmailConsent?: boolean }) {
     const temp = messages.value.find(m => m.id === tempId)
     if (!temp) return
     temp.pending = true
@@ -431,6 +436,7 @@ export function useWidget(
             attachment_type: temp.attachment_type ?? undefined,
             page_url: currentPage || document.referrer,
             trigger_id: triggerId,
+            reply_email_consent: identity?.replyEmailConsent === true,
             ...identity
           }
         })
@@ -445,6 +451,7 @@ export function useWidget(
         }
         if (identity?.name) visitorName.value = identity.name
         if (identity?.email) visitorEmail.value = identity.email
+        if (identity?.email) replyEmailEnabled.value = identity.replyEmailConsent === true
         // reconcile in place — replacing (not filter + push) keeps send order
         const idx = messages.value.findIndex(m => m.id === tempId)
         if (messages.value.some(m => m.id === res.message.id)) {
@@ -478,7 +485,7 @@ export function useWidget(
 
   async function sendMessage(
     content: string,
-    identity?: { name?: string, email?: string },
+    identity?: { name?: string, email?: string, replyEmailConsent?: boolean },
     attachment?: { url: string, type: string }
   ) {
     const text = content.trim()
@@ -522,6 +529,29 @@ export function useWidget(
     pendingCsat = null
   }
 
+  async function setReplyEmail(enabled: boolean) {
+    const result = await $fetch<{ enabled: boolean }>('/api/widget/email-preference', {
+      method: 'POST',
+      body: { site_id: siteId, visitor_session: visitorSession, enabled }
+    })
+    replyEmailEnabled.value = result.enabled
+  }
+
+  async function markLatestAgentRead() {
+    if (!conversationId.value) return
+    const latest = [...messages.value].reverse().find(message => message.sender_type === 'agent' && !message.pending)
+    if (!latest) return
+    await $fetch('/api/widget/read', {
+      method: 'POST',
+      body: {
+        site_id: siteId,
+        visitor_session: visitorSession,
+        conversation_id: conversationId.value,
+        message_id: latest.id
+      }
+    }).catch(() => {})
+  }
+
   function sendTyping(isTyping: boolean, preview?: string) {
     if (!conversationId.value) return
     send(isTyping
@@ -555,6 +585,9 @@ export function useWidget(
     agentTyping,
     visitorName,
     visitorEmail,
+    replyEmailEnabled,
+    setReplyEmail,
+    markLatestAgentRead,
     start,
     stop,
     identify,

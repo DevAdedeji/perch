@@ -183,6 +183,13 @@
       "when": 1788301830135,
       "tag": "0025_spam-blocking",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1788305115461,
+      "tag": "0026_visitor-email-continuity",
+      "breakpoints": true
     }
   ]
 }

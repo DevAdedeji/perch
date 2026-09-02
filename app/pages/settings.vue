@@ -32,6 +32,8 @@ interface WorkspaceDetail {
   unansweredReminderEnabled: boolean
   unansweredReminderDelayMinutes: number
   unansweredReminderBusinessHoursOnly: boolean
+  visitorReplyEmailAvailable: boolean
+  visitorReplyEmailEnabled: boolean
   entitlement: {
     isPro: boolean
     plan: 'free' | 'pro'
@@ -78,7 +80,8 @@ const identifySnippet = `<script>
     user_id: 'user_42',              // your platform's id for them
     name: 'Ada Lovelace',
     email: 'ada@example.com',
-    hash: '<generated on your server>' // required if verification is enforced
+    hash: '<HMAC of user_id>',
+    email_hash: '<HMAC of normalized email>' // proves the address; the visitor still opts in
   }
 
   // or, after a login that happens without a page reload:
@@ -125,6 +128,13 @@ async function togglePrechat(value: boolean) {
     await patchWorkspace({ prechatFormEnabled: value })
   } catch {
     toast.add({ title: 'Could not update', color: 'error' })
+  }
+}
+async function toggleVisitorReplyEmail(value: boolean) {
+  try {
+    await patchWorkspace({ visitorReplyEmailEnabled: value })
+  } catch {
+    toast.add({ title: 'Could not update visitor reply emails', color: 'error' })
   }
 }
 watch(workspace, (w) => {
@@ -503,6 +513,26 @@ async function removeLogo() {
                 :disabled="!isAdmin"
                 aria-label="Enable pre-chat form"
                 @update:model-value="togglePrechat"
+              />
+            </div>
+
+            <div
+              v-if="workspace?.visitorReplyEmailAvailable"
+              class="flex items-center justify-between gap-4"
+            >
+              <div>
+                <p class="text-sm font-medium text-highlighted">
+                  Email visitors after they leave
+                </p>
+                <p class="text-xs text-muted">
+                  Sends one private return link after the first teammate reply to each customer message. Message text is never included.
+                </p>
+              </div>
+              <USwitch
+                :model-value="workspace?.visitorReplyEmailEnabled"
+                :disabled="!isAdmin"
+                aria-label="Email visitors after they leave"
+                @update:model-value="toggleVisitorReplyEmail"
               />
             </div>
           </div>

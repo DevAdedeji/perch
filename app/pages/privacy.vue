@@ -51,6 +51,7 @@ const contact = 'adedejitewogbade2@gmail.com'
             <li><strong class="text-highlighted">Account data</strong> — your name, email address, and a hashed password. Never the password itself.</li>
             <li><strong class="text-highlighted">Chat data</strong> — messages, image attachments, and conversation state, stored so both sides can read the history.</li>
             <li><strong class="text-highlighted">Visitor context</strong> — what the embedding website chooses to share: a name and email typed into the pre-chat form, or a user ID, name, and email passed via <code class="font-mono text-xs">Perch.identify()</code>. We also record the page URL the chat started on. Workspace teammates may add private support context such as company, role, notes, and tags; those details are not shown in the visitor widget.</li>
+            <li><strong class="text-highlighted">Visitor email preferences</strong> — whether a visitor explicitly asked for reply notifications, when they consented, whether a public reply was already read, and a secret-keyed one-way hash used to remember unsubscribe, bounce, or complaint suppression without placing the address in the suppression list.</li>
             <li><strong class="text-highlighted">Technical basics</strong> — IP addresses for rate limiting and abuse prevention, and error reports (via Sentry) when something breaks.</li>
           </ul>
           <p>
@@ -70,10 +71,26 @@ const contact = 'adedejitewogbade2@gmail.com'
             <li><strong class="text-highlighted">Neon</strong> — Postgres database (US East)</li>
             <li><strong class="text-highlighted">Railway</strong> — application hosting</li>
             <li><strong class="text-highlighted">Cloudinary</strong> — image attachment storage</li>
-            <li><strong class="text-highlighted">Resend</strong> — transactional email (password resets, verification)</li>
+            <li><strong class="text-highlighted">Resend</strong> — transactional email (password resets and verification, plus visitor chat-reply notifications only after the visitor explicitly opts in)</li>
             <li><strong class="text-highlighted">Bachs</strong> — subscription checkout and payment processing</li>
             <li><strong class="text-highlighted">Sentry</strong> — error monitoring</li>
           </ul>
+        </section>
+
+        <section>
+          <h2>Visitor reply emails</h2>
+          <p class="mt-3">
+            Entering an email for support does not by itself subscribe a visitor to reply emails.
+            A visitor must explicitly opt in from the chat. Notifications are deliberately generic:
+            they say that the workspace replied but do not include message text, page URLs, internal
+            notes, or customer-profile details. The private return link is signed, expires, can be
+            exchanged only once, and opens only the conversation that produced it.
+          </p>
+          <p>
+            A visitor can turn reply emails off in the widget or use the unsubscribe link in an
+            email. Perch keeps that suppression for the email and workspace so another pending
+            notification is not sent. Delivery also stops after a provider bounce or complaint.
+          </p>
         </section>
 
         <section>
