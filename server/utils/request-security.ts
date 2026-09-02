@@ -50,8 +50,31 @@ export function acceptsApiContentType(path: string, contentType: unknown): boole
     : mediaType === 'application/json'
 }
 
-export function contentSecurityPolicy(frameAncestors: string): string {
-  return `base-uri 'self'; object-src 'none'; form-action 'self'; frame-ancestors ${frameAncestors}`
+export function contentSecurityPolicy(frameAncestors: string, development = false): string {
+  const scriptSources = development
+    ? '\'self\' \'unsafe-inline\' \'unsafe-eval\''
+    : '\'self\' \'unsafe-inline\''
+  const connectSources = development
+    ? '\'self\' ws: wss: https://*.ingest.us.sentry.io'
+    : '\'self\' https://*.ingest.us.sentry.io'
+  return [
+    'default-src \'self\'',
+    'base-uri \'self\'',
+    'object-src \'none\'',
+    `script-src ${scriptSources}`,
+    'script-src-attr \'none\'',
+    'style-src \'self\' \'unsafe-inline\'',
+    'img-src \'self\' data: blob: https://res.cloudinary.com',
+    'font-src \'self\' data:',
+    `connect-src ${connectSources}`,
+    'media-src \'none\'',
+    'frame-src \'none\'',
+    'worker-src \'self\' blob:',
+    'manifest-src \'self\'',
+    'form-action \'self\'',
+    `frame-ancestors ${frameAncestors}`,
+    ...(development ? [] : ['upgrade-insecure-requests'])
+  ].join('; ')
 }
 
 export function isCookieFreePublicRequest(path: string, installationPreview = false): boolean {

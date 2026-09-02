@@ -10,7 +10,7 @@ export const signupSchema = z.object({
 
 export const loginSchema = z.object({
   email: z.string().trim().toLowerCase().email('Enter a valid email'),
-  password: z.string().min(1, 'Password is required')
+  password: z.string().min(1, 'Password is required').max(200)
 })
 
 export const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Enter a valid hex color')

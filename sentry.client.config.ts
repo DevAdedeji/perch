@@ -1,14 +1,18 @@
 import * as Sentry from '@sentry/nuxt'
+import { scrubSentryBreadcrumb, scrubSentryEvent } from './config/sentry-privacy'
 
-// The DSN is public by design — it ships in the client bundle.
-// From: Sentry → Settings → Projects → perch → Client Keys (DSN)
-const SENTRY_DSN = 'https://432fb2dc815bcc741bc1415a25ae2678@o4511715546890240.ingest.us.sentry.io/4511715551019008'
+// A browser DSN is public by design, but it is still opt-in per environment.
+const config = useRuntimeConfig()
+const SENTRY_DSN = String(config.public.sentryDsn || '')
 
 if (SENTRY_DSN) {
   Sentry.init({
     dsn: SENTRY_DSN,
-    environment: import.meta.dev ? 'development' : 'production',
-    // errors are the point; keep tracing light on the free quota
-    tracesSampleRate: 0.1
+    environment: String(config.public.sentryEnvironment || (import.meta.dev ? 'development' : 'production')),
+    sendDefaultPii: false,
+    tracesSampleRate: 0.1,
+    beforeBreadcrumb: scrubSentryBreadcrumb,
+    beforeSend: scrubSentryEvent,
+    beforeSendTransaction: scrubSentryEvent
   })
 }
