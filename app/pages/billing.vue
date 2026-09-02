@@ -5,7 +5,7 @@ definePageMeta({ layout: 'dashboard' })
 useHead({ title: 'Plans & billing · Perch' })
 
 interface BillingOverview {
-  configured: boolean
+  checkoutEnabled: boolean
   entitlement: {
     plan: 'free' | 'pro'
     isPro: boolean
@@ -284,16 +284,16 @@ function date(value: string) {
               block
               class="mt-6"
               :loading="checkingOut"
-              :disabled="!overview.configured"
+              :disabled="!overview.checkoutEnabled"
               @click="startCheckout"
             >
               Upgrade to Pro
             </UButton>
             <p
-              v-if="!overview.configured && !overview.entitlement.isPro"
+              v-if="!overview.checkoutEnabled && !overview.entitlement.isPro"
               class="mt-2 text-center text-xs text-muted"
             >
-              Checkout will be available when Bachs is configured.
+              Pro upgrades are not open yet. Your workspace will stay on Free until checkout launches.
             </p>
             <div
               v-if="overview.entitlement.isPro"

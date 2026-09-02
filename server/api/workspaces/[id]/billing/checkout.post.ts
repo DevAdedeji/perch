@@ -10,6 +10,9 @@ export default defineEventHandler(async (event) => {
   const workspaceId = getRouterParam(event, 'id')!
   const { user } = await requireMembership(event, workspaceId, { admin: true })
   assertRateLimit('billing-checkout:workspace', workspaceId, { max: 5, windowMs: 60 * 60_000 })
+  if (!billingCheckoutEnabled()) {
+    throw createError({ statusCode: 503, statusMessage: 'Perch Pro checkout is not open yet.' })
+  }
   if (!bachsConfigured()) {
     throw createError({ statusCode: 503, statusMessage: 'Billing is not configured on this environment yet.' })
   }

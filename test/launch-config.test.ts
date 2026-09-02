@@ -17,6 +17,7 @@ const validEnvironment: LaunchEnvironment = {
   BACHS_ENV: 'sandbox',
   BACHS_SECRET_KEY: 'sk_sandbox_example',
   BACHS_WEBHOOK_SECRET: 'whsec_example',
+  PERCH_BILLING_CHECKOUT_ENABLED: 'false',
   VISITOR_REPLY_EMAIL_FEATURE_ENABLED: 'false',
   VISITOR_REPLY_EMAIL_DELIVERY_ENABLED: 'false'
 }
@@ -66,6 +67,26 @@ describe('launch configuration', () => {
       'BACHS_ENV must match the Bachs secret-key environment'
     )
     expect(productionConfigErrors({ ...validEnvironment, BACHS_ENV: 'preview' })).toContain('BACHS_ENV must be sandbox or live')
+  })
+
+  it('keeps checkout fail-closed and validates the explicit launch gate', () => {
+    expect(productionConfigErrors({
+      ...validEnvironment,
+      PERCH_BILLING_CHECKOUT_ENABLED: 'sometimes'
+    })).toContain('PERCH_BILLING_CHECKOUT_ENABLED must be true or false')
+
+    expect(productionConfigErrors({
+      ...validEnvironment,
+      PERCH_BILLING_CHECKOUT_ENABLED: 'true'
+    })).toEqual([])
+
+    expect(productionConfigErrors({
+      ...validEnvironment,
+      PERCH_BILLING_CHECKOUT_ENABLED: 'true',
+      BACHS_ENV: '',
+      BACHS_SECRET_KEY: '',
+      BACHS_WEBHOOK_SECRET: ''
+    })).toContain('PERCH_BILLING_CHECKOUT_ENABLED=true requires complete Bachs configuration')
   })
 
   it('requires transactional email for production account recovery', () => {

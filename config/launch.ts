@@ -13,6 +13,7 @@ export interface LaunchEnvironment {
   RESEND_API_KEY?: string
   RESEND_FROM?: string
   BACHS_ENV?: string
+  PERCH_BILLING_CHECKOUT_ENABLED?: string
   VISITOR_REPLY_SECRET?: string
   VISITOR_EMAIL_HASH_SECRET?: string
   VISITOR_REPLY_EMAIL_FEATURE_ENABLED?: string
@@ -27,6 +28,10 @@ export interface LaunchEnvironment {
 
 function value(input: unknown): string {
   return typeof input === 'string' ? input.trim() : ''
+}
+
+export function explicitlyEnabled(input: unknown): boolean {
+  return value(input) === 'true'
 }
 
 export function normalizeLaunchOrigin(input: unknown, allowHttp = false): string | null {
@@ -121,6 +126,14 @@ export function productionConfigErrors(environment: LaunchEnvironment): string[]
     }
   }
   requireCompleteGroup(errors, environment, ['BACHS_ENV', 'BACHS_SECRET_KEY', 'BACHS_WEBHOOK_SECRET'])
+  const billingCheckoutFlag = value(environment.PERCH_BILLING_CHECKOUT_ENABLED)
+  if (billingCheckoutFlag && billingCheckoutFlag !== 'true' && billingCheckoutFlag !== 'false') {
+    errors.push('PERCH_BILLING_CHECKOUT_ENABLED must be true or false')
+  }
+  if (explicitlyEnabled(environment.PERCH_BILLING_CHECKOUT_ENABLED)
+    && (!value(environment.BACHS_ENV) || !value(environment.BACHS_SECRET_KEY) || !value(environment.BACHS_WEBHOOK_SECRET))) {
+    errors.push('PERCH_BILLING_CHECKOUT_ENABLED=true requires complete Bachs configuration')
+  }
   const bachsEnvironment = value(environment.BACHS_ENV)
   if (bachsEnvironment && bachsEnvironment !== 'sandbox' && bachsEnvironment !== 'live') {
     errors.push('BACHS_ENV must be sandbox or live')

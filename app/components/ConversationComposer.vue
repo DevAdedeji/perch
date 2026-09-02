@@ -8,6 +8,7 @@ const props = defineProps<{
   members: TeamMember[]
   currentMemberId: string | null
   cannedResponses: CannedResponse[]
+  attachmentsAvailable: boolean
   publicReplyDisabled?: boolean
   sendReply: (
     content: string,
@@ -219,6 +220,10 @@ async function onAttachmentPicked(event: Event) {
   const file = input.files?.[0]
   input.value = ''
   if (!file) return
+  if (!props.attachmentsAvailable) {
+    toast.add({ title: 'Image attachments are unavailable for this workspace.', color: 'neutral' })
+    return
+  }
   const validationError = validateImageAttachment(file)
   if (validationError) {
     toast.add({ title: validationError, color: 'error' })
@@ -417,6 +422,7 @@ onBeforeUnmount(() => {
         />
         <div class="flex items-center gap-2 px-2.5 pb-2">
           <input
+            v-if="attachmentsAvailable"
             ref="attachmentElement"
             type="file"
             accept="image/*"
@@ -431,9 +437,15 @@ onBeforeUnmount(() => {
             square
             icon="i-lucide-image-plus"
             :loading="uploading"
-            aria-label="Attach an image (max 1 MB)"
+            :disabled="!attachmentsAvailable"
+            :title="attachmentsAvailable ? 'Attach an image (max 1 MB)' : 'Image attachments are unavailable until storage is configured'"
+            :aria-label="attachmentsAvailable ? 'Attach an image (max 1 MB)' : 'Image attachments unavailable'"
             @click="attachmentElement?.click()"
           />
+          <span
+            v-if="!attachmentsAvailable && !internalNote"
+            class="text-[11px] text-dimmed"
+          >Image uploads unavailable</span>
           <UButton
             v-if="!internalNote"
             size="sm"

@@ -15,6 +15,7 @@ interface WidgetWorkspace {
   show_branding: boolean
   has_articles: boolean
   reply_email_enabled: boolean
+  attachments_available: boolean
 }
 
 interface SessionResponse {

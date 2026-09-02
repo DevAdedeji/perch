@@ -4,6 +4,7 @@ export interface Membership {
   workspaceId: string
   workspaceName: string
   siteId: string
+  attachmentsAvailable: boolean
 }
 
 export interface AuthUser {
