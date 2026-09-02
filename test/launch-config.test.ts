@@ -14,6 +14,9 @@ const validEnvironment: LaunchEnvironment = {
   PERCH_PUBLIC_URL: 'https://useperch.xyz',
   RESEND_API_KEY: 're_test_key',
   RESEND_FROM: 'Perch <support@useperch.xyz>',
+  BACHS_ENV: 'sandbox',
+  BACHS_SECRET_KEY: 'sk_sandbox_example',
+  BACHS_WEBHOOK_SECRET: 'whsec_example',
   VISITOR_REPLY_EMAIL_FEATURE_ENABLED: 'false',
   VISITOR_REPLY_EMAIL_DELIVERY_ENABLED: 'false'
 }
@@ -44,16 +47,25 @@ describe('launch configuration', () => {
     const privateValue = 'private-key-that-must-not-appear'
     const errors = productionConfigErrors({
       ...validEnvironment,
+      BACHS_ENV: '',
       BACHS_SECRET_KEY: privateValue,
+      BACHS_WEBHOOK_SECRET: '',
       NUXT_OAUTH_GOOGLE_CLIENT_ID: 'client-id',
       CLOUDINARY_CLOUD_NAME: 'perch'
     })
     const output = errors.join('\n')
 
-    expect(output).toContain('BACHS_SECRET_KEY, BACHS_WEBHOOK_SECRET')
+    expect(output).toContain('BACHS_ENV, BACHS_SECRET_KEY, BACHS_WEBHOOK_SECRET')
     expect(output).toContain('NUXT_OAUTH_GOOGLE_CLIENT_ID')
     expect(output).toContain('CLOUDINARY_CLOUD_NAME')
     expect(output).not.toContain(privateValue)
+  })
+
+  it('requires an explicit Bachs environment matching the key', () => {
+    expect(productionConfigErrors({ ...validEnvironment, BACHS_ENV: 'live' })).toContain(
+      'BACHS_ENV must match the Bachs secret-key environment'
+    )
+    expect(productionConfigErrors({ ...validEnvironment, BACHS_ENV: 'preview' })).toContain('BACHS_ENV must be sandbox or live')
   })
 
   it('requires transactional email for production account recovery', () => {

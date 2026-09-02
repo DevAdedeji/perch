@@ -12,6 +12,7 @@ export interface LaunchEnvironment {
   NUXT_OAUTH_GOOGLE_REDIRECT_URL?: string
   RESEND_API_KEY?: string
   RESEND_FROM?: string
+  BACHS_ENV?: string
   VISITOR_REPLY_SECRET?: string
   VISITOR_EMAIL_HASH_SECRET?: string
   VISITOR_REPLY_EMAIL_FEATURE_ENABLED?: string
@@ -119,7 +120,17 @@ export function productionConfigErrors(environment: LaunchEnvironment): string[]
       errors.push('VISITOR_EMAIL_HASH_SECRET must be a non-placeholder secret of at least 32 characters when visitor reply email is enabled')
     }
   }
-  requireCompleteGroup(errors, environment, ['BACHS_SECRET_KEY', 'BACHS_WEBHOOK_SECRET'])
+  requireCompleteGroup(errors, environment, ['BACHS_ENV', 'BACHS_SECRET_KEY', 'BACHS_WEBHOOK_SECRET'])
+  const bachsEnvironment = value(environment.BACHS_ENV)
+  if (bachsEnvironment && bachsEnvironment !== 'sandbox' && bachsEnvironment !== 'live') {
+    errors.push('BACHS_ENV must be sandbox or live')
+  }
+  if (bachsEnvironment && value(environment.BACHS_SECRET_KEY)) {
+    const sandboxKey = value(environment.BACHS_SECRET_KEY).startsWith('sk_sandbox_')
+    if ((bachsEnvironment === 'sandbox') !== sandboxKey) {
+      errors.push('BACHS_ENV must match the Bachs secret-key environment')
+    }
+  }
   requireCompleteGroup(errors, environment, [
     'CLOUDINARY_CLOUD_NAME',
     'CLOUDINARY_API_KEY',

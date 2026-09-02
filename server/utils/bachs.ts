@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import type { BillingInterval } from '@perch/shared'
 import { PERCH_PRO_PLAN, proPriceCents, toDecimalString } from '@perch/shared'
+import { z } from 'zod'
 
 const SANDBOX_API = 'https://sandbox-api.bachs.io/v1'
 const LIVE_API = 'https://api.bachs.io/v1'
@@ -8,23 +9,108 @@ const WEBHOOK_TOLERANCE_SECONDS = 300
 const REQUEST_TIMEOUT_MS = 15_000
 const productCache = new Map<BillingInterval, string>()
 
+const bachsEnvironmentSchema = z.enum(['sandbox', 'live'])
+const providerDateSchema = z.string().refine(value => !Number.isNaN(Date.parse(value)), 'Invalid provider date')
+const providerMetadataSchema = z.record(z.string(), z.string()).nullable().optional()
+const providerProductSchema = z.object({
+  id: z.string().min(1),
+  metadata: providerMetadataSchema
+}).passthrough()
+
+const checkoutCreatedSchema = z.object({
+  checkout_id: z.string().min(1),
+  checkout_url: z.string().url().optional(),
+  reference: z.string().nullable().optional()
+}).passthrough()
+
+export const bachsCheckoutSessionSchema = z.object({
+  checkout_id: z.string().min(1),
+  checkout_url: z.string().url().optional(),
+  status: z.enum(['open', 'completed', 'expired', 'cancelled']),
+  payment_status: z.enum([
+    'requires_payment_method', 'requires_confirmation', 'requires_action', 'processing',
+    'succeeded', 'failed', 'canceled'
+  ]).nullable().optional(),
+  amount: z.string().regex(/^\d+(?:\.\d+)?$/),
+  currency: z.string().min(3).max(8),
+  reference: z.string().nullable(),
+  charge: z.object({
+    payment_id: z.string().min(1),
+    status: z.enum([
+      'created', 'processing', 'succeeded', 'accepted', 'failed', 'expired',
+      'cancelled', 'refunded', 'partially_refunded', 'underpaid', 'overpaid'
+    ]),
+    amount: z.string().regex(/^\d+(?:\.\d+)?$/),
+    amount_paid: z.string().regex(/^\d+(?:\.\d+)?$/).nullable().optional(),
+    currency: z.string().min(3).max(8)
+  }).nullable().optional()
+}).passthrough()
+
+export const bachsSubscriptionSchema = z.object({
+  id: z.string().min(1),
+  status: z.enum(['trialing', 'active', 'past_due', 'unpaid', 'paused', 'canceled']),
+  current_period_end: providerDateSchema.nullable().optional(),
+  next_billed_at: providerDateSchema.nullable().optional(),
+  trial_end: providerDateSchema.nullable().optional(),
+  cancel_at_period_end: z.boolean().optional(),
+  metadata: providerMetadataSchema,
+  product: providerProductSchema.nullable().optional()
+}).passthrough()
+
+export const bachsWebhookEventSchema = z.object({
+  id: z.string().min(1).max(500),
+  type: z.string().min(1).max(200),
+  data: z.object({
+    id: z.string().min(1).optional(),
+    reference: z.string().min(1).max(500).optional(),
+    checkout_id: z.string().min(1).max(500).nullable().optional(),
+    charge_id: z.string().min(1).max(500).nullable().optional()
+  }).passthrough().optional()
+}).passthrough()
+
+export type BachsCheckoutSession = z.infer<typeof bachsCheckoutSessionSchema>
+export type BachsSubscription = z.infer<typeof bachsSubscriptionSchema>
+export type BachsWebhookEvent = z.infer<typeof bachsWebhookEventSchema>
+
 function configuredSecretKey() {
   const config = useRuntimeConfig()
   return String(config.bachsSecretKey || process.env.BACHS_SECRET_KEY || '')
 }
 
+function configuredWebhookSecret() {
+  const config = useRuntimeConfig()
+  return String(config.bachsWebhookSecret || process.env.BACHS_WEBHOOK_SECRET || '')
+}
+
+function configuredEnvironment() {
+  const config = useRuntimeConfig()
+  return String(config.bachsEnvironment || process.env.BACHS_ENV || '')
+}
+
+export function bachsConfigurationError(): string | null {
+  const key = configuredSecretKey()
+  const webhookSecret = configuredWebhookSecret()
+  const parsedEnvironment = bachsEnvironmentSchema.safeParse(configuredEnvironment())
+  if (!key && !webhookSecret && !configuredEnvironment()) return 'Billing is not configured on this environment yet.'
+  if (!key || !webhookSecret || !parsedEnvironment.success) return 'Billing configuration is incomplete.'
+  const sandboxKey = key.startsWith('sk_sandbox_')
+  if ((parsedEnvironment.data === 'sandbox') !== sandboxKey) return 'Billing credentials do not match the configured environment.'
+  return null
+}
+
 export function bachsConfigured() {
-  return Boolean(configuredSecretKey())
+  return bachsConfigurationError() === null
 }
 
 function secretKey() {
+  const configurationError = bachsConfigurationError()
+  if (configurationError) throw createError({ statusCode: 503, statusMessage: configurationError })
   const key = configuredSecretKey()
-  if (!key) throw createError({ statusCode: 503, statusMessage: 'Billing is not configured on this environment yet.' })
   return key
 }
 
 function apiBase() {
-  return secretKey().startsWith('sk_sandbox_') ? SANDBOX_API : LIVE_API
+  return configuredEnvironment() === 'sandbox' ? SANDBOX_API : LIVE_API
 }
 
 interface BachsRequest {
@@ -34,7 +120,7 @@ interface BachsRequest {
   idempotencyKey?: string
 }
 
-export async function bachsFetch<T>(path: string, options: BachsRequest = {}): Promise<T> {
+async function bachsFetch<T>(path: string, options: BachsRequest = {}): Promise<T> {
   const url = new URL(`${apiBase()}${path}`)
   for (const [key, value] of Object.entries(options.query ?? {})) {
     if (value !== undefined) url.searchParams.set(key, String(value))
@@ -55,10 +141,9 @@ export async function bachsFetch<T>(path: string, options: BachsRequest = {}): P
     const text = await response.text()
     const payload = text ? safeJson(text) : null
     if (response.ok) return payload as T
-    const detail = payload?.detail ?? payload?.message ?? `Bachs request failed (${response.status})`
     throw createError({
-      statusCode: response.status === 422 ? 502 : response.status,
-      statusMessage: String(detail)
+      statusCode: response.status >= 500 ? 503 : 502,
+      statusMessage: 'Billing provider request failed. Please try again.'
     })
   } catch (error) {
     if ((error as Error).name === 'AbortError') {
@@ -68,6 +153,14 @@ export async function bachsFetch<T>(path: string, options: BachsRequest = {}): P
   } finally {
     clearTimeout(timeout)
   }
+}
+
+function parseProviderResponse<T>(schema: z.ZodType<T>, payload: unknown, resource: string): T {
+  const parsed = schema.safeParse(payload)
+  if (!parsed.success) {
+    throw createError({ statusCode: 502, statusMessage: `Bachs returned an invalid ${resource}.` })
+  }
+  return parsed.data
 }
 
 function safeJson(text: string): Record<string, unknown> | null {
@@ -84,7 +177,8 @@ export function verifyBachsWebhookSignature(
   signatureHeader?: string,
   secretOverride?: string
 ) {
-  const secret = secretOverride || String(useRuntimeConfig().bachsWebhookSecret || process.env.BACHS_WEBHOOK_SECRET || '')
+  if (!secretOverride && !bachsConfigured()) return false
+  const secret = secretOverride || configuredWebhookSecret()
   if (!secret || !timestampHeader || !signatureHeader) return false
   const timestamp = Number.parseInt(timestampHeader, 10)
   if (!Number.isFinite(timestamp) || Math.abs(Date.now() / 1000 - timestamp) > WEBHOOK_TOLERANCE_SECONDS) return false
@@ -94,20 +188,37 @@ export function verifyBachsWebhookSignature(
   return expectedBytes.length === suppliedBytes.length && timingSafeEqual(expectedBytes, suppliedBytes)
 }
 
-interface BachsProduct {
-  id: string
-  metadata?: Record<string, string> | null
+export function isApprovedBachsCheckoutUrl(value: string | undefined): value is string {
+  if (!value) return false
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' && url.hostname === 'checkout.bachs.io' && !url.username && !url.password
+  } catch {
+    return false
+  }
 }
 
 interface ProductPage {
-  items?: BachsProduct[]
+  items?: Array<z.infer<typeof providerProductSchema>>
   pagination?: { has_more?: boolean, next_cursor?: string | null }
 }
+
+const productPageSchema = z.object({
+  items: z.array(providerProductSchema).optional(),
+  pagination: z.object({
+    has_more: z.boolean().optional(),
+    next_cursor: z.string().nullable().optional()
+  }).optional()
+}).passthrough()
 
 async function findProduct(planKey: string) {
   let cursor: string | undefined
   do {
-    const page = await bachsFetch<ProductPage>('/products', { query: { limit: 100, cursor } })
+    const page = parseProviderResponse(
+      productPageSchema,
+      await bachsFetch<unknown>('/products', { query: { limit: 100, cursor } }),
+      'product list'
+    ) as ProductPage
     const match = (page.items ?? []).find(product => product.metadata?.perch_plan === planKey)
     if (match) return match
     cursor = page.pagination?.has_more ? page.pagination.next_cursor ?? undefined : undefined
@@ -124,7 +235,7 @@ export async function ensurePerchProProduct(interval: BillingInterval) {
     productCache.set(interval, existing.id)
     return existing.id
   }
-  const product = await bachsFetch<BachsProduct>('/products', {
+  const product = parseProviderResponse(providerProductSchema, await bachsFetch<unknown>('/products', {
     method: 'POST',
     idempotencyKey: `perch-${planKey}`,
     body: {
@@ -138,28 +249,12 @@ export async function ensurePerchProProduct(interval: BillingInterval) {
       billing_cycle: { interval: interval === 'yearly' ? 'year' : 'month', frequency: 1 },
       metadata: { perch_plan: planKey }
     }
-  })
+  }), 'product')
   productCache.set(interval, product.id)
   return product.id
 }
 
-export interface BachsCheckoutSession {
-  checkout_id: string
-  checkout_url?: string
-  reference?: string | null
-}
-
-export interface BachsSubscription {
-  id: string
-  status: 'trialing' | 'active' | 'past_due' | 'unpaid' | 'paused' | 'canceled'
-  current_period_end?: string | null
-  next_billed_at?: string | null
-  cancel_at_period_end?: boolean
-  metadata?: Record<string, string> | null
-  product?: BachsProduct | null
-}
-
-export function createSubscriptionCheckout(input: {
+export async function createSubscriptionCheckout(input: {
   productId: string
   reference: string
   customer: { email: string, name: string }
@@ -167,7 +262,7 @@ export function createSubscriptionCheckout(input: {
   cancelUrl: string
   metadata: Record<string, string>
 }) {
-  return bachsFetch<BachsCheckoutSession>('/checkout-sessions', {
+  return parseProviderResponse(checkoutCreatedSchema, await bachsFetch<unknown>('/checkout-sessions', {
     method: 'POST',
     idempotencyKey: input.reference,
     body: {
@@ -179,12 +274,28 @@ export function createSubscriptionCheckout(input: {
       cancel_url: input.cancelUrl,
       metadata: input.metadata
     }
-  })
+  }), 'checkout session')
 }
 
-export function cancelBachsSubscription(subscriptionId: string) {
-  return bachsFetch<BachsSubscription>(`/subscriptions/${encodeURIComponent(subscriptionId)}`, {
+export async function getBachsCheckoutSession(checkoutId: string) {
+  return parseProviderResponse(
+    bachsCheckoutSessionSchema,
+    await bachsFetch<unknown>(`/checkout-sessions/${encodeURIComponent(checkoutId)}`),
+    'checkout session'
+  )
+}
+
+export async function getBachsSubscription(subscriptionId: string) {
+  return parseProviderResponse(
+    bachsSubscriptionSchema,
+    await bachsFetch<unknown>(`/subscriptions/${encodeURIComponent(subscriptionId)}`),
+    'subscription'
+  )
+}
+
+export async function cancelBachsSubscription(subscriptionId: string) {
+  return parseProviderResponse(bachsSubscriptionSchema, await bachsFetch<unknown>(`/subscriptions/${encodeURIComponent(subscriptionId)}`, {
     method: 'DELETE',
     body: { cancel_at_period_end: true }
-  })
+  }), 'subscription')
 }
