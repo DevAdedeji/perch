@@ -16,6 +16,9 @@ export default defineEventHandler(async (event) => {
   if (!endpoint) {
     throw createError({ statusCode: 404, statusMessage: 'Webhook not found' })
   }
+  if (!endpoint.enabled) {
+    throw createError({ statusCode: 409, statusMessage: 'Enable this webhook before sending a test' })
+  }
 
   const now = new Date().toISOString()
   const body = webhookEnvelope('conversation.created', {

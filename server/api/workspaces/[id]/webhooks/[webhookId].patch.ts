@@ -24,19 +24,22 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'That URL can\'t be used as a webhook endpoint' })
   }
 
-  const [row] = await useDb().update(webhookEndpoints)
-    .set({
-      ...(d.url !== undefined ? { url: d.url } : {}),
-      ...(d.events !== undefined ? { events: [...d.events] } : {}),
-      ...(d.enabled !== undefined ? { enabled: d.enabled } : {})
-    })
-    .where(and(eq(webhookEndpoints.id, webhookId), eq(webhookEndpoints.workspaceId, workspaceId)))
-    .returning()
+  const row = await useDb().transaction(async (tx) => {
+    const [updated] = await tx.update(webhookEndpoints)
+      .set({
+        ...(d.url !== undefined ? { url: d.url } : {}),
+        ...(d.events !== undefined ? { events: [...d.events] } : {}),
+        ...(d.enabled !== undefined ? { enabled: d.enabled } : {})
+      })
+      .where(and(eq(webhookEndpoints.id, webhookId), eq(webhookEndpoints.workspaceId, workspaceId)))
+      .returning()
+    if (updated) await cancelWebhookJobsForEndpoint(tx, updated.id, updated.enabled, updated.events)
+    return updated
+  })
   if (!row) {
     throw createError({ statusCode: 404, statusMessage: 'Webhook not found' })
   }
 
-  invalidateWebhookCache(workspaceId)
   logAudit(workspaceId, user, 'webhook.updated', {
     url: webhookAuditTarget(row.url),
     endpoint_id: row.id,

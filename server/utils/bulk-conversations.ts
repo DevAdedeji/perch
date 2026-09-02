@@ -13,6 +13,8 @@ import {
 import type { Conversation, Database, MemberNotification, WorkspaceMember } from '@perch/db'
 import { MAX_BULK_CONVERSATIONS } from '@perch/shared'
 import { z } from 'zod'
+import { serializeConversation } from './conversations'
+import { enqueueWebhookEvent } from './webhooks'
 
 const conversationIds = z.array(z.string().uuid())
   .min(1)
@@ -180,6 +182,9 @@ export async function mutateConversationsInBulk(
         changedConversationIds.push(conversation.id)
         updatedConversations.push(conversation)
         newlyResolved.push(conversation)
+        await enqueueWebhookEvent(tx, workspaceId, 'conversation.resolved', {
+          conversation: serializeConversation(conversation)
+        }, `conversation.resolved:${conversation.id}:${conversation.updatedAt.toISOString()}`)
       }
     } else if (input.action === 'reopen') {
       for (const previous of selected) {

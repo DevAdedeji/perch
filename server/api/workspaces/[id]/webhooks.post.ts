@@ -41,7 +41,6 @@ export default defineEventHandler(async (event) => {
     throw error
   }
 
-  invalidateWebhookCache(workspaceId)
   logAudit(workspaceId, user, 'webhook.created', { url: webhookAuditTarget(url), endpoint_id: row.id })
 
   setResponseStatus(event, 201)

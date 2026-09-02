@@ -13,5 +13,8 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 404, statusMessage: 'Webhook not found' })
   }
 
-  return { deliveries: await recentDeliveries(endpoint.id) }
+  return {
+    deliveries: await recentDeliveries(endpoint.id),
+    delivery_enabled: webhookDeliveryEnabled()
+  }
 })
