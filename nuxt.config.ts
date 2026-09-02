@@ -68,6 +68,7 @@ export default defineNuxtConfig({
     visitorReplyEmailFeatureEnabled: process.env.VISITOR_REPLY_EMAIL_FEATURE_ENABLED === 'true',
     visitorReplyEmailDeliveryEnabled: process.env.VISITOR_REPLY_EMAIL_DELIVERY_ENABLED === 'true',
     // workspace subscriptions via Bachs
+    bachsEnvironment: '',
     bachsSecretKey: '',
     bachsWebhookSecret: '',
     // signed image uploads (attachments) — optional; endpoint 503s without them

@@ -6,18 +6,17 @@ useHead({ title: 'Team · Perch' })
 
 interface Member {
   id: string
-  userId: string
   name: string
-  email: string
+  email?: string
   role: 'admin' | 'agent'
   presence: 'online' | 'away' | 'offline'
-  openCount: number
-  resolvedCount: number
-  csatGood: number
-  csatBad: number
+  openCount?: number
+  resolvedCount?: number
+  csatGood?: number
+  csatBad?: number
 }
 
-const { currentWorkspace, user } = useAuth()
+const { currentWorkspace } = useAuth()
 const toast = useToast()
 const { copy } = useCopyToClipboard()
 const rt = useRealtime()
@@ -127,24 +126,30 @@ function presenceText(p: string) {
     : p === 'away' ? 'text-amber-600 dark:text-amber-400' : 'text-dimmed'
 }
 
+function isSelf(member: Member) {
+  return member.id === currentWorkspace.value?.memberId
+}
+
 // online first, then away, then offline — alphabetical within each group
 const presenceRank = (p: string) => (p === 'online' ? 0 : p === 'away' ? 1 : 2)
 const sortedMembers = computed(() =>
   [...members.value].sort((a, b) => presenceRank(a.presence) - presenceRank(b.presence) || a.name.localeCompare(b.name))
 )
 
-// §3.3 workload view: totals for the at-a-glance strip
-const totalOpen = computed(() => members.value.reduce((n, m) => n + m.openCount, 0))
+// Admin-only workload total for the at-a-glance strip.
+const totalOpen = computed(() => members.value.reduce((total, member) => total + (member.openCount ?? 0), 0))
 
 // §13.0.1 CSAT: percentage of thumbs-up among rated conversations
 function csatLabel(m: Member): string {
-  const total = m.csatGood + m.csatBad
-  return total ? `${Math.round((m.csatGood / total) * 100)}%` : '—'
+  const good = m.csatGood ?? 0
+  const total = good + (m.csatBad ?? 0)
+  return total ? `${Math.round((good / total) * 100)}%` : '—'
 }
 function csatTone(m: Member): string {
-  const total = m.csatGood + m.csatBad
+  const good = m.csatGood ?? 0
+  const total = good + (m.csatBad ?? 0)
   if (!total) return 'text-dimmed'
-  const pct = m.csatGood / total
+  const pct = good / total
   return pct >= 0.8
     ? 'font-semibold text-green-600 dark:text-green-500'
     : pct >= 0.5 ? 'font-semibold text-amber-600 dark:text-amber-400' : 'font-semibold text-red-500'
@@ -160,7 +165,9 @@ function csatTone(m: Member): string {
             Team
           </h1>
           <p class="text-sm text-muted mt-0.5">
-            Who's on support, who's online, and who's carrying the load.
+            {{ isAdmin
+              ? "Who's on support, who's online, and who's carrying the load."
+              : "See who's on support and who's available right now." }}
           </p>
         </div>
         <UButton
@@ -187,7 +194,10 @@ function csatTone(m: Member): string {
 
       <template v-else>
         <!-- at-a-glance -->
-        <div class="mt-6 grid grid-cols-3 divide-x divide-default rounded-2xl border-glow bg-elevated/30 overflow-hidden">
+        <div
+          class="mt-6 grid divide-x divide-default rounded-2xl border-glow bg-elevated/30 overflow-hidden"
+          :class="isAdmin ? 'grid-cols-3' : 'grid-cols-2'"
+        >
           <div class="px-5 py-4">
             <p class="font-display text-2xl font-bold text-highlighted tabular-nums">
               {{ members.length }}
@@ -204,7 +214,10 @@ function csatTone(m: Member): string {
               Online now
             </p>
           </div>
-          <div class="px-5 py-4">
+          <div
+            v-if="isAdmin"
+            class="px-5 py-4"
+          >
             <p class="font-display text-2xl font-bold text-highlighted tabular-nums">
               {{ totalOpen }}
             </p>
@@ -226,13 +239,20 @@ function csatTone(m: Member): string {
                   <th class="px-3 py-2.5 text-left font-medium">
                     Status
                   </th>
-                  <th class="px-3 py-2.5 text-center font-medium">
+                  <th
+                    v-if="isAdmin"
+                    class="px-3 py-2.5 text-center font-medium"
+                  >
                     Handling now
                   </th>
-                  <th class="px-3 py-2.5 text-center font-medium">
+                  <th
+                    v-if="isAdmin"
+                    class="px-3 py-2.5 text-center font-medium"
+                  >
                     Resolved
                   </th>
                   <th
+                    v-if="isAdmin"
                     class="px-3 py-2.5 text-center font-medium"
                     title="Thumbs-up share of rated conversations"
                   >
@@ -262,11 +282,14 @@ function csatTone(m: Member): string {
                         <p class="flex items-center gap-1.5 text-sm font-semibold text-highlighted">
                           <span class="truncate">{{ m.name }}</span>
                           <span
-                            v-if="m.userId === user?.id"
+                            v-if="isSelf(m)"
                             class="shrink-0 text-[10px] font-normal text-dimmed"
                           >(you)</span>
                         </p>
-                        <p class="truncate text-xs text-muted">
+                        <p
+                          v-if="isAdmin && m.email"
+                          class="truncate text-xs text-muted"
+                        >
                           {{ m.email }}
                         </p>
                       </div>
@@ -282,24 +305,29 @@ function csatTone(m: Member): string {
                     </span>
                   </td>
                   <td
+                    v-if="isAdmin"
                     class="px-3 py-3 text-center tabular-nums"
-                    :class="m.openCount > 0 ? 'font-semibold text-primary-600 dark:text-primary-400' : 'text-dimmed'"
+                    :class="(m.openCount ?? 0) > 0 ? 'font-semibold text-primary-600 dark:text-primary-400' : 'text-dimmed'"
                   >
                     {{ m.openCount }}
                   </td>
-                  <td class="px-3 py-3 text-center tabular-nums text-muted">
+                  <td
+                    v-if="isAdmin"
+                    class="px-3 py-3 text-center tabular-nums text-muted"
+                  >
                     {{ m.resolvedCount }}
                   </td>
                   <td
+                    v-if="isAdmin"
                     class="px-3 py-3 text-center tabular-nums"
                     :class="csatTone(m)"
-                    :title="`${m.csatGood} 👍 · ${m.csatBad} 👎`"
+                    :title="`${m.csatGood ?? 0} 👍 · ${m.csatBad ?? 0} 👎`"
                   >
                     {{ csatLabel(m) }}
                   </td>
                   <td class="px-3 py-3 whitespace-nowrap">
                     <USelect
-                      v-if="isAdmin && m.userId !== user?.id"
+                      v-if="isAdmin && !isSelf(m)"
                       :model-value="m.role"
                       :items="['agent', 'admin']"
                       size="sm"
@@ -321,7 +349,7 @@ function csatTone(m: Member): string {
                     class="px-3 py-3 text-right"
                   >
                     <UButton
-                      v-if="m.userId !== user?.id"
+                      v-if="!isSelf(m)"
                       color="error"
                       variant="ghost"
                       size="sm"

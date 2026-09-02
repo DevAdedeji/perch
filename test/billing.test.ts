@@ -1,9 +1,17 @@
 import { createHmac } from 'node:crypto'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { PERCH_PRO_PLAN, proPriceCents, toDecimalString } from '../packages/shared/src/billing'
-import { verifyBachsWebhookSignature } from '../server/utils/bachs'
+import {
+  bachsCheckoutSessionSchema,
+  bachsConfigurationError,
+  bachsConfigured,
+  bachsSubscriptionSchema,
+  bachsWebhookEventSchema,
+  isApprovedBachsCheckoutUrl,
+  verifyBachsWebhookSignature
+} from '../server/utils/bachs'
 import { effectiveReminderSettings, reminderIsDue, reminderRetryAt } from '../server/utils/unanswered-reminders'
-import { subscriptionHasPaidAccess } from '../server/utils/billing'
+import { checkoutMatchesInvoice, checkoutPaymentState, providerAmountCents, providerPaidThroughEnd, subscriptionHasPaidAccess } from '../server/utils/billing'
 
 describe('Perch plan pricing', () => {
   it('keeps the yearly plan cheaper than twelve monthly payments', () => {
@@ -15,9 +23,69 @@ describe('Perch plan pricing', () => {
 
   it('keeps paid access only through a confirmed current period', () => {
     const now = new Date('2026-09-01T12:00:00.000Z')
-    expect(subscriptionHasPaidAccess({ status: 'active', currentPeriodEnd: null }, now)).toBe(true)
-    expect(subscriptionHasPaidAccess({ status: 'canceled', currentPeriodEnd: new Date('2026-09-02T12:00:00.000Z') }, now)).toBe(true)
-    expect(subscriptionHasPaidAccess({ status: 'canceled', currentPeriodEnd: new Date('2026-08-31T12:00:00.000Z') }, now)).toBe(false)
+    expect(subscriptionHasPaidAccess({ status: 'active', currentPeriodEnd: null }, true, now)).toBe(false)
+    expect(subscriptionHasPaidAccess({ status: 'active', currentPeriodEnd: new Date('2026-09-02T12:00:00.000Z') }, false, now)).toBe(false)
+    expect(subscriptionHasPaidAccess({ status: 'canceled', currentPeriodEnd: new Date('2026-09-02T12:00:00.000Z') }, true, now)).toBe(true)
+    expect(subscriptionHasPaidAccess({ status: 'past_due', currentPeriodEnd: new Date('2026-09-02T12:00:00.000Z') }, true, now)).toBe(true)
+    expect(subscriptionHasPaidAccess({ status: 'canceled', currentPeriodEnd: new Date('2026-08-31T12:00:00.000Z') }, true, now)).toBe(false)
+  })
+})
+
+describe('canonical Bachs payment data', () => {
+  const checkout = {
+    checkout_id: 'co_123',
+    status: 'completed' as const,
+    payment_status: 'succeeded' as const,
+    amount: '9.00',
+    currency: 'USD',
+    reference: 'invoice_123',
+    charge: { payment_id: 'pay_123', status: 'succeeded' as const, amount: '9.00', amount_paid: '9.00', currency: 'USD' }
+  }
+
+  it('accepts only exact invoice identity, currency, and amount matches', () => {
+    const invoice = { reference: 'invoice_123', bachsCheckoutId: 'co_123', amountCents: 900, currency: 'USD' }
+    expect(checkoutMatchesInvoice(checkout, invoice)).toBe(true)
+    expect(checkoutMatchesInvoice({ ...checkout, currency: 'NGN' }, invoice)).toBe(false)
+    expect(checkoutMatchesInvoice({ ...checkout, amount: '8.99' }, invoice)).toBe(false)
+    expect(checkoutMatchesInvoice({ ...checkout, reference: 'another' }, invoice)).toBe(false)
+    expect(checkoutMatchesInvoice({ ...checkout, checkout_id: 'another' }, invoice)).toBe(false)
+  })
+
+  it('does not treat an unconfirmed completed checkout as paid', () => {
+    expect(checkoutPaymentState(checkout)).toBe('paid')
+    expect(checkoutPaymentState({ ...checkout, payment_status: 'processing', charge: null })).toBe('pending')
+    expect(checkoutPaymentState({ ...checkout, status: 'expired', payment_status: 'failed', charge: null })).toBe('failed')
+  })
+
+  it('parses money without rounding provider values', () => {
+    expect(providerAmountCents('9')).toBe(900)
+    expect(providerAmountCents('9.00')).toBe(900)
+    expect(providerAmountCents('9.001')).toBeNull()
+    expect(providerAmountCents('nine')).toBeNull()
+  })
+
+  it('uses only a paid-through or trial-end boundary for access', () => {
+    expect(providerPaidThroughEnd({
+      id: 'sub_active', status: 'active', next_billed_at: '2026-10-01T00:00:00.000Z'
+    })).toBeNull()
+    expect(providerPaidThroughEnd({
+      id: 'sub_trial', status: 'trialing', current_period_end: '2026-10-01T00:00:00.000Z'
+    })).toBeNull()
+    expect(providerPaidThroughEnd({
+      id: 'sub_active', status: 'active', current_period_end: '2026-10-01T00:00:00.000Z'
+    })?.toISOString()).toBe('2026-10-01T00:00:00.000Z')
+  })
+
+  it('rejects malformed checkout, subscription, and webhook payloads', () => {
+    expect(bachsCheckoutSessionSchema.safeParse(checkout).success).toBe(true)
+    expect(bachsCheckoutSessionSchema.safeParse({ ...checkout, amount: 9 }).success).toBe(false)
+    expect(bachsSubscriptionSchema.safeParse({
+      id: 'sub_123', status: 'active', current_period_end: '2026-10-01T00:00:00.000Z',
+      metadata: { workspaceId: 'workspace', interval: 'monthly', perchPlan: 'workspace_pro', invoiceReference: 'invoice_123' },
+      product: { id: 'product_123', metadata: { perch_plan: 'workspace_pro_monthly' } }
+    }).success).toBe(true)
+    expect(bachsSubscriptionSchema.safeParse({ id: 'sub_123', status: 'unexpected' }).success).toBe(false)
+    expect(bachsWebhookEventSchema.safeParse({ id: '', type: 'invoice.paid' }).success).toBe(false)
   })
 })
 
@@ -35,6 +103,34 @@ describe('Bachs webhook verification', () => {
     const stale = String(Math.floor(Date.now() / 1000) - 301)
     expect(verifyBachsWebhookSignature('{}', stale, 'invalid', 'whsec_test')).toBe(false)
     expect(verifyBachsWebhookSignature('{}', 'nope', 'invalid', 'whsec_test')).toBe(false)
+  })
+})
+
+describe('Bachs environment boundary', () => {
+  it('fails closed for incomplete or mismatched credentials', () => {
+    vi.stubEnv('BACHS_ENV', '')
+    vi.stubEnv('BACHS_SECRET_KEY', '')
+    vi.stubEnv('BACHS_WEBHOOK_SECRET', '')
+    Object.assign(globalThis, { useRuntimeConfig: () => ({ bachsEnvironment: '', bachsSecretKey: '', bachsWebhookSecret: '' }) })
+    expect(bachsConfigured()).toBe(false)
+    expect(bachsConfigurationError()).toContain('not configured')
+
+    Object.assign(globalThis, {
+      useRuntimeConfig: () => ({ bachsEnvironment: 'live', bachsSecretKey: 'sk_sandbox_example', bachsWebhookSecret: 'whsec_example' })
+    })
+    expect(bachsConfigured()).toBe(false)
+    expect(bachsConfigurationError()).toContain('do not match')
+
+    Object.assign(globalThis, {
+      useRuntimeConfig: () => ({ bachsEnvironment: 'sandbox', bachsSecretKey: 'sk_sandbox_example', bachsWebhookSecret: 'whsec_example' })
+    })
+    expect(bachsConfigured()).toBe(true)
+  })
+
+  it('only permits Bachs HTTPS checkout URLs', () => {
+    expect(isApprovedBachsCheckoutUrl('https://checkout.bachs.io/session/123')).toBe(true)
+    expect(isApprovedBachsCheckoutUrl('http://checkout.bachs.io/session/123')).toBe(false)
+    expect(isApprovedBachsCheckoutUrl('https://checkout.bachs.io.evil.example/session/123')).toBe(false)
   })
 })
 

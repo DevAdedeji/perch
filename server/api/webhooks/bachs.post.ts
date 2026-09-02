@@ -1,21 +1,3 @@
-import type { BachsSubscription } from '../../utils/bachs'
-
-interface BachsEvent {
-  id?: string
-  type?: string
-  data?: {
-    id?: string
-    reference?: string
-    charge_id?: string | null
-    metadata?: Record<string, string>
-    status?: string
-    current_period_end?: string | null
-    next_billed_at?: string | null
-    cancel_at_period_end?: boolean
-    product?: { id: string, metadata?: Record<string, string> | null } | null
-  }
-}
-
 const PAID_EVENTS = new Set(['collection.succeeded', 'checkout.completed', 'invoice.paid'])
 const FAILED_EVENTS = new Set(['collection.failed', 'checkout.expired', 'invoice.payment_failed'])
 const SUBSCRIPTION_EVENTS = new Set([
@@ -35,14 +17,25 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 401, statusMessage: 'Invalid webhook signature' })
   }
 
-  let payload: BachsEvent
+  let rawPayload: unknown
   try {
-    payload = JSON.parse(rawBody) as BachsEvent
+    rawPayload = JSON.parse(rawBody)
   } catch {
     throw createError({ statusCode: 400, statusMessage: 'Malformed webhook body' })
   }
-  if (!payload.id) throw createError({ statusCode: 400, statusMessage: 'Webhook is missing an event id' })
-  const eventType = payload.type ?? 'unknown'
+  const parsedPayload = bachsWebhookEventSchema.safeParse(rawPayload)
+  if (!parsedPayload.success) throw createError({ statusCode: 400, statusMessage: 'Invalid webhook payload' })
+  const payload = parsedPayload.data
+  const eventType = payload.type
+  if (SUBSCRIPTION_EVENTS.has(eventType) && !payload.data?.id) {
+    throw createError({ statusCode: 400, statusMessage: 'Subscription webhook is missing its resource ID' })
+  }
+  if (PAID_EVENTS.has(eventType) && !payload.data?.checkout_id && !payload.data?.reference) {
+    throw createError({ statusCode: 400, statusMessage: 'Payment webhook is missing its checkout identity' })
+  }
+  if (FAILED_EVENTS.has(eventType) && !payload.data?.reference) {
+    throw createError({ statusCode: 400, statusMessage: 'Failed-payment webhook is missing its invoice reference' })
+  }
   const claim = await claimBillingWebhook(payload.id, eventType)
   if (!claim.shouldProcess) {
     if (claim.delivery.status === 'processing') {
@@ -54,10 +47,20 @@ export default defineEventHandler(async (event) => {
   try {
     let result: Record<string, unknown>
     if (SUBSCRIPTION_EVENTS.has(eventType) && payload.data?.id) {
-      const applied = await applyWorkspaceSubscriptionState(payload.data as BachsSubscription)
+      const subscription = await getBachsSubscription(payload.data.id)
+      if (subscription.id !== payload.data.id) {
+        throw createError({ statusCode: 502, statusMessage: 'Bachs returned a different subscription.' })
+      }
+      const applied = await applyWorkspaceSubscriptionState(subscription)
       result = { received: true, ...applied }
-    } else if (payload.data?.reference && PAID_EVENTS.has(eventType)) {
-      const applied = await markWorkspaceInvoicePaid(payload.data.reference, payload.data.charge_id)
+    } else if (PAID_EVENTS.has(eventType)) {
+      const applied = await confirmWorkspaceInvoiceFromCheckout({
+        checkoutId: payload.data?.checkout_id,
+        reference: payload.data?.reference
+      })
+      if (!applied.applied && applied.reason === 'provider-pending') {
+        throw createError({ statusCode: 503, statusMessage: 'Payment confirmation is still pending.' })
+      }
       result = { received: true, ...applied }
     } else if (payload.data?.reference && FAILED_EVENTS.has(eventType)) {
       const applied = await markWorkspaceInvoiceFailed(payload.data.reference, eventType)

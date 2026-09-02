@@ -29,6 +29,7 @@ interface LatestVisitorCandidate {
   timezone: string | null
   subscription_status: SubscriptionStatus | null
   subscription_period_end: Date | string | null
+  subscription_invoice_status: 'pending' | 'paid' | 'failed' | null
 }
 
 export function effectiveReminderSettings(input: {
@@ -56,11 +57,15 @@ async function latestVisitorCandidates(now: Date) {
       w.unanswered_reminder_business_hours_only as business_hours_only,
       w.business_hours, w.timezone,
       s.status as subscription_status,
-      s.current_period_end as subscription_period_end
+      s.current_period_end as subscription_period_end,
+      billing_invoice.status as subscription_invoice_status
     from latest_public
     join conversations c on c.id = latest_public.conversation_id
     join workspaces w on w.id = c.workspace_id
     left join workspace_subscriptions s on s.workspace_id = c.workspace_id
+    left join workspace_invoices billing_invoice
+      on billing_invoice.workspace_id = c.workspace_id
+      and billing_invoice.reference = s.last_invoice_reference
     where latest_public.row_number = 1
       and latest_public.sender_type = 'visitor'
       and w.unanswered_reminder_enabled = true
@@ -87,7 +92,7 @@ async function enqueueDueReminders(now: Date) {
       ? subscriptionHasPaidAccess({
           status: candidate.subscription_status,
           currentPeriodEnd: candidate.subscription_period_end ? new Date(candidate.subscription_period_end) : null
-        }, now)
+        }, candidate.subscription_invoice_status === 'paid', now)
       : false
     const settings = effectiveReminderSettings({
       delayMinutes: candidate.reminder_delay,

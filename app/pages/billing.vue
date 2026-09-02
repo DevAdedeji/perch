@@ -42,9 +42,10 @@ const displayedInterval = computed<BillingInterval>(() => {
 })
 const checkingOut = ref(false)
 const canceling = ref(false)
+let paymentPoll: ReturnType<typeof setTimeout> | undefined
 
 async function load() {
-  if (!workspaceId.value) return
+  if (!workspaceId.value || !isAdmin.value) return
   loading.value = true
   try {
     overview.value = await $fetch<BillingOverview>(`/api/workspaces/${workspaceId.value}/billing`)
@@ -54,17 +55,49 @@ async function load() {
 }
 
 onMounted(() => {
-  load()
+  if (!isAdmin.value) {
+    navigateTo('/dashboard')
+    return
+  }
   if (route.query.paid === '1') {
     toast.add({
-      title: 'Payment received',
-      description: 'Your Pro access will appear as soon as Bachs confirms the subscription.',
+      title: 'Checkout completed',
+      description: 'We are securely confirming the payment with Bachs. This can take a moment.',
+      color: 'info',
+      icon: 'i-lucide-loader-circle'
+    })
+    pollForPaymentConfirmation()
+  } else {
+    load()
+  }
+})
+watch(workspaceId, () => {
+  if (isAdmin.value) load()
+})
+onBeforeUnmount(() => clearTimeout(paymentPoll))
+
+async function pollForPaymentConfirmation(attempt = 0) {
+  await load()
+  if (overview.value?.entitlement.isPro) {
+    toast.add({
+      title: 'Pro is active',
+      description: 'Bachs confirmed the payment and subscription period.',
       color: 'success',
       icon: 'i-lucide-circle-check'
     })
+    return
   }
-})
-watch(workspaceId, load)
+  if (attempt >= 5) {
+    toast.add({
+      title: 'Payment is still being verified',
+      description: 'You can safely leave this page and return later. Pro activates only after Bachs confirms it.',
+      color: 'neutral',
+      icon: 'i-lucide-clock'
+    })
+    return
+  }
+  paymentPoll = setTimeout(() => pollForPaymentConfirmation(attempt + 1), 2000)
+}
 
 async function startCheckout() {
   if (!workspaceId.value || checkingOut.value || !isAdmin.value) return
@@ -84,6 +117,7 @@ async function startCheckout() {
 
 async function cancelPlan() {
   if (!workspaceId.value || canceling.value || !isAdmin.value) return
+  if (!window.confirm('Cancel renewal? Pro will remain active until the confirmed paid period ends.')) return
   canceling.value = true
   try {
     await $fetch(`/api/workspaces/${workspaceId.value}/billing/cancel`, { method: 'POST' })
@@ -266,13 +300,19 @@ function date(value: string) {
               class="mt-6 rounded-xl bg-default p-4 ring-1 ring-default"
             >
               <p class="text-sm font-medium text-highlighted">
-                {{ overview.entitlement.cancelAtPeriodEnd ? 'Ends at the close of this period' : 'Renews automatically' }}
+                {{ overview.entitlement.cancelAtPeriodEnd || overview.entitlement.status === 'canceled'
+                  ? 'Ends at the close of this paid period'
+                  : overview.entitlement.status === 'past_due'
+                    ? 'Payment needs attention'
+                    : 'Subscription active' }}
               </p>
               <p
                 v-if="overview.entitlement.currentPeriodEnd"
                 class="mt-1 text-xs text-muted"
               >
-                {{ overview.entitlement.cancelAtPeriodEnd ? 'Access until' : 'Next renewal' }} {{ date(overview.entitlement.currentPeriodEnd) }}
+                {{ overview.entitlement.cancelAtPeriodEnd || overview.entitlement.status === 'canceled' || overview.entitlement.status === 'past_due'
+                  ? 'Access until'
+                  : 'Current paid period ends' }} {{ date(overview.entitlement.currentPeriodEnd) }}
               </p>
               <UButton
                 v-if="isAdmin && !overview.entitlement.cancelAtPeriodEnd"
@@ -291,13 +331,13 @@ function date(value: string) {
 
         <section class="rounded-2xl bg-elevated/30 p-5 ring-1 ring-default sm:p-6">
           <h2 class="font-display font-semibold text-highlighted">
-            Payment history
+            Checkout history
           </h2>
           <p
             v-if="!overview.invoices.length"
             class="mt-4 rounded-xl bg-default px-4 py-6 text-center text-sm text-muted ring-1 ring-default"
           >
-            No payments yet.
+            No checkout attempts yet.
           </p>
           <div
             v-else
