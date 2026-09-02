@@ -33,6 +33,7 @@ const workspaceId = computed(() => currentWorkspace.value?.workspaceId ?? null)
 const isAdmin = computed(() => currentWorkspace.value?.role === 'admin')
 const overview = ref<BillingOverview | null>(null)
 const loading = ref(true)
+const loadError = ref('')
 const checkoutInterval = ref<BillingInterval>('yearly')
 const displayedInterval = computed<BillingInterval>(() => {
   if (overview.value?.entitlement.isPro && overview.value.entitlement.interval) {
@@ -43,14 +44,25 @@ const displayedInterval = computed<BillingInterval>(() => {
 const checkingOut = ref(false)
 const canceling = ref(false)
 let paymentPoll: ReturnType<typeof setTimeout> | undefined
+let paymentPollSequence = 0
+let loadSequence = 0
 
-async function load() {
-  if (!workspaceId.value || !isAdmin.value) return
-  loading.value = true
+async function load(options: { silent?: boolean } = {}) {
+  const requestedWorkspaceId = workspaceId.value
+  if (!requestedWorkspaceId || !isAdmin.value) return false
+  const sequence = ++loadSequence
+  if (!options.silent) loading.value = true
   try {
-    overview.value = await $fetch<BillingOverview>(`/api/workspaces/${workspaceId.value}/billing`)
+    const result = await $fetch<BillingOverview>(`/api/workspaces/${requestedWorkspaceId}/billing`)
+    if (sequence !== loadSequence || workspaceId.value !== requestedWorkspaceId) return false
+    overview.value = result
+    loadError.value = ''
+    return true
+  } catch (error) {
+    if (sequence === loadSequence) loadError.value = getErrorMessage(error, 'Plans and billing could not load')
+    return false
   } finally {
-    loading.value = false
+    if (!options.silent && sequence === loadSequence) loading.value = false
   }
 }
 
@@ -61,24 +73,29 @@ onMounted(() => {
   }
   if (route.query.paid === '1') {
     toast.add({
-      title: 'Checkout completed',
-      description: 'We are securely confirming the payment with Bachs. This can take a moment.',
+      title: 'Checking your payment',
+      description: 'You returned from checkout. Pro activates only after the payment is confirmed.',
       color: 'info',
       icon: 'i-lucide-loader-circle'
     })
-    pollForPaymentConfirmation()
+    pollForPaymentConfirmation(0, ++paymentPollSequence)
   } else {
     load()
   }
 })
 watch(workspaceId, () => {
+  clearTimeout(paymentPoll)
+  paymentPollSequence++
+  overview.value = null
+  loadError.value = ''
   if (isAdmin.value) load()
 })
 onBeforeUnmount(() => clearTimeout(paymentPoll))
 
-async function pollForPaymentConfirmation(attempt = 0) {
-  await load()
-  if (overview.value?.entitlement.isPro) {
+async function pollForPaymentConfirmation(attempt: number, pollSequence: number) {
+  const loaded = await load({ silent: attempt > 0 })
+  if (pollSequence !== paymentPollSequence) return
+  if (loaded && overview.value?.entitlement.isPro) {
     toast.add({
       title: 'Pro is active',
       description: 'Bachs confirmed the payment and subscription period.',
@@ -89,14 +106,16 @@ async function pollForPaymentConfirmation(attempt = 0) {
   }
   if (attempt >= 5) {
     toast.add({
-      title: 'Payment is still being verified',
-      description: 'You can safely leave this page and return later. Pro activates only after Bachs confirms it.',
+      title: loaded ? 'Payment is still being verified' : 'Payment status could not be refreshed',
+      description: loaded
+        ? 'You can safely leave this page and return later. Pro activates only after payment confirmation.'
+        : 'Your payment was not marked as failed. Retry the billing page to check again.',
       color: 'neutral',
       icon: 'i-lucide-clock'
     })
     return
   }
-  paymentPoll = setTimeout(() => pollForPaymentConfirmation(attempt + 1), 2000)
+  paymentPoll = setTimeout(() => pollForPaymentConfirmation(attempt + 1, pollSequence), 2000)
 }
 
 async function startCheckout() {
@@ -160,7 +179,52 @@ function date(value: string) {
         class="h-96 w-full rounded-2xl"
       />
 
+      <div
+        v-else-if="loadError && !overview"
+        class="rounded-2xl bg-elevated/30 px-6 py-12 text-center ring-1 ring-default"
+        role="alert"
+      >
+        <UIcon
+          name="i-lucide-cloud-alert"
+          class="mx-auto size-8 text-dimmed"
+        />
+        <h2 class="mt-3 font-display text-lg font-semibold text-highlighted">
+          Plans and billing could not load
+        </h2>
+        <p class="mx-auto mt-1 max-w-md text-sm text-muted">
+          {{ loadError }} Nothing was changed.
+        </p>
+        <UButton
+          class="mt-4"
+          color="neutral"
+          variant="outline"
+          icon="i-lucide-refresh-cw"
+          @click="load()"
+        >
+          Try again
+        </UButton>
+      </div>
+
       <template v-else-if="overview">
+        <UAlert
+          v-if="loadError"
+          color="warning"
+          variant="subtle"
+          title="Payment status could not be refreshed"
+          :description="`${loadError} The last confirmed billing details are shown below.`"
+          icon="i-lucide-cloud-alert"
+        >
+          <template #actions>
+            <UButton
+              size="xs"
+              color="neutral"
+              variant="outline"
+              @click="load()"
+            >
+              Retry
+            </UButton>
+          </template>
+        </UAlert>
         <div class="grid gap-5 lg:grid-cols-2">
           <section
             class="rounded-2xl bg-elevated/30 p-6 ring-1"
@@ -244,8 +308,10 @@ function date(value: string) {
               <button
                 v-for="option in ([{ value: 'monthly', label: 'Monthly' }, { value: 'yearly', label: 'Yearly · save $18' }] as const)"
                 :key="option.value"
+                type="button"
                 class="rounded-lg px-3 py-2 text-xs font-medium transition-colors"
                 :class="checkoutInterval === option.value ? 'bg-default text-highlighted shadow-sm' : 'text-muted hover:text-highlighted'"
+                :aria-pressed="checkoutInterval === option.value"
                 @click="checkoutInterval = option.value"
               >
                 {{ option.label }}

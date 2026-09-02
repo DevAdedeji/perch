@@ -21,6 +21,9 @@ const { data: authMethods } = await useFetch<{ google: boolean }>('/api/auth/met
   default: () => ({ google: false })
 })
 const redirect = computed(() => safeAuthRedirect(route.query.redirect, '/dashboard'))
+const signupLink = computed(() => route.query.redirect
+  ? `/signup?redirect=${encodeURIComponent(redirect.value)}`
+  : '/signup')
 const error = ref(route.query.oauth_error
   ? 'Google sign-in could not be completed. Please try again.'
   : '')
@@ -125,7 +128,7 @@ async function onSubmit(event: FormSubmitEvent<Schema>) {
     <p class="mt-8 text-sm text-muted">
       New to Perch?
       <NuxtLink
-        to="/signup"
+        :to="signupLink"
         class="font-medium text-primary-600 hover:underline dark:text-primary-400"
       >Create an account</NuxtLink>
     </p>

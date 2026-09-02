@@ -5,12 +5,19 @@ definePageMeta({ layout: 'onboarding' })
 useHead({ title: 'Set up your workspace · Perch' })
 
 const toast = useToast()
-const { refresh } = useAuth()
+const route = useRoute()
+const { refresh, currentWorkspace } = useAuth()
 const { copy } = useCopyToClipboard()
 const origin = useRequestURL().origin
 
-const steps = ['Workspace', 'Invite team', 'You’re live'] as const
-const step = ref(0)
+const steps = ['Workspace', 'Invite team', 'Install'] as const
+const continuation = route.query.continue === 'install'
+  ? 'install'
+  : route.query.continue === 'invites' ? 'invites' : null
+const step = ref(currentWorkspace.value
+  ? continuation === 'install' ? 2 : continuation === 'invites' ? 1 : 0
+  : 0)
+const proIntent = computed(() => route.query.plan === 'pro')
 
 /* step 1: workspace */
 const swatches = ['#8b5cf6', '#6366f1', '#f43f5e', '#ec4899', '#f59e0b', '#f97316', '#0ea5e9', '#10b981']
@@ -23,7 +30,24 @@ const logoPreview = ref<string | null>(null)
 const logoEl = ref<HTMLInputElement | null>(null)
 const { uploading: logoUploading, uploadImage } = useImageUpload()
 
-const created = ref<{ id: string, siteId: string, name: string } | null>(null)
+const created = ref<{ id: string, siteId: string, name: string } | null>(currentWorkspace.value
+  ? {
+      id: currentWorkspace.value.workspaceId,
+      siteId: currentWorkspace.value.siteId,
+      name: currentWorkspace.value.workspaceName
+    }
+  : null)
+
+async function setContinuation(next: 'invites' | 'install') {
+  step.value = next === 'invites' ? 1 : 2
+  await navigateTo({
+    path: '/onboarding',
+    query: {
+      continue: next,
+      ...(proIntent.value ? { plan: 'pro' } : {})
+    }
+  }, { replace: true })
+}
 
 function pickLogo() {
   logoEl.value?.click()
@@ -91,7 +115,7 @@ async function createWorkspace() {
         color: 'warning'
       })
     }
-    step.value = 1
+    await setContinuation('invites')
   } catch (e) {
     createError.value = getErrorMessage(e, 'Could not create workspace')
   } finally {
@@ -100,7 +124,10 @@ async function createWorkspace() {
 }
 
 /* step 2: invites */
-const roleItems = ['agent', 'admin']
+const roleItems = [
+  { label: 'Agent', value: 'agent' },
+  { label: 'Admin', value: 'admin' }
+]
 const inviteRows = reactive<Array<{ email: string, role: 'agent' | 'admin' }>>([{ email: '', role: 'agent' }])
 const sending = ref(false)
 const inviteError = ref('')
@@ -117,7 +144,7 @@ function removeRow(i: number) {
 async function sendInvites() {
   const invites = inviteRows.filter(r => r.email.trim()).map(r => ({ email: r.email.trim(), role: r.role }))
   if (invites.length === 0) {
-    step.value = 2
+    await setContinuation('install')
     return
   }
   sending.value = true
@@ -139,7 +166,7 @@ async function sendInvites() {
 const snippet = computed(() => created.value ? buildEmbedSnippet(origin, created.value.siteId) : '')
 
 async function finish() {
-  await navigateTo('/installation')
+  await navigateTo(proIntent.value ? '/billing' : '/installation')
 }
 </script>
 
@@ -312,30 +339,48 @@ async function finish() {
             <div
               v-for="(row, i) in inviteRows"
               :key="i"
-              class="flex items-center gap-2"
+              class="grid gap-3 rounded-xl bg-default p-3 ring-1 ring-default sm:grid-cols-[minmax(0,1fr)_8rem_auto] sm:items-end"
             >
-              <UInput
-                v-model="row.email"
-                type="email"
-                placeholder="teammate@company.com"
-                size="lg"
-                class="flex-1"
-              />
-              <USelect
-                v-model="row.role"
-                :items="roleItems"
-                size="lg"
-                class="w-28"
-              />
+              <UFormField :label="`Teammate ${i + 1} email`">
+                <UInput
+                  v-model="row.email"
+                  type="email"
+                  autocomplete="email"
+                  placeholder="teammate@company.com"
+                  size="lg"
+                  class="w-full"
+                />
+              </UFormField>
+              <UFormField label="Role">
+                <USelect
+                  v-model="row.role"
+                  :items="roleItems"
+                  size="lg"
+                  class="w-full"
+                />
+              </UFormField>
               <UButton
                 color="neutral"
                 variant="ghost"
                 icon="i-lucide-x"
                 square
                 size="lg"
-                aria-label="Remove"
+                :aria-label="`Remove teammate ${i + 1}`"
+                class="justify-self-end sm:justify-self-auto"
                 @click="removeRow(i)"
               />
+              <p
+                v-if="row.role === 'admin'"
+                class="text-xs leading-relaxed text-amber-700 dark:text-amber-400 sm:col-span-3"
+              >
+                Admins can manage billing, installation, teammates, security settings, and workspace deletion.
+              </p>
+              <p
+                v-else
+                class="text-xs leading-relaxed text-dimmed sm:col-span-3"
+              >
+                Agents can reply to customers and collaborate, but cannot manage billing or workspace security.
+              </p>
             </div>
           </div>
 
@@ -365,7 +410,7 @@ async function finish() {
               variant="subtle"
               size="lg"
               class="flex-1"
-              @click="step = 2"
+              @click="setContinuation('install')"
             >
               Skip for now
             </UButton>
@@ -414,7 +459,7 @@ async function finish() {
             block
             class="mt-8 font-medium"
             trailing-icon="i-lucide-arrow-right"
-            @click="step = 2"
+            @click="setContinuation('install')"
           >
             Continue
           </UButton>
@@ -433,10 +478,10 @@ async function finish() {
           />
         </div>
         <h1 class="mt-5 font-display text-2xl font-bold text-highlighted">
-          You’re live!
+          Your workspace is ready
         </h1>
         <p class="mt-1.5 text-sm text-muted">
-          Paste this snippet before <code class="font-mono text-highlighted">&lt;/body&gt;</code> on your site to start receiving chats.
+          The next step is to install and verify the widget before you start receiving customer chats.
         </p>
 
         <EmbedSnippetCard
@@ -452,7 +497,7 @@ async function finish() {
           trailing-icon="i-lucide-arrow-right"
           @click="finish"
         >
-          Finish installation
+          {{ proIntent ? 'Continue to Pro' : 'Open installation checklist' }}
         </UButton>
       </div>
     </div>

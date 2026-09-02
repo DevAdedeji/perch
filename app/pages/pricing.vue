@@ -4,6 +4,18 @@ useSeoMeta({
   description: 'Simple Perch pricing for fast customer support: a generous Free workspace and one flat Pro plan without per-seat fees.'
 })
 
+const { loggedIn, hasWorkspace, ensureLoaded } = useAuth()
+await ensureLoaded()
+
+function planLink(plan: string) {
+  if (plan === 'Pro') {
+    if (loggedIn.value) return hasWorkspace.value ? '/billing' : '/onboarding?plan=pro'
+    return `/signup?redirect=${encodeURIComponent('/onboarding?plan=pro')}`
+  }
+  if (loggedIn.value) return hasWorkspace.value ? '/dashboard' : '/onboarding'
+  return '/signup'
+}
+
 const plans = [
   {
     name: 'Free',
@@ -105,7 +117,7 @@ const plans = [
             </li>
           </ul>
           <UButton
-            to="/signup"
+            :to="planLink(plan.name)"
             block
             size="lg"
             class="mt-8"
