@@ -1,7 +1,7 @@
 import { and, billingWebhookDeliveries, desc, eq, lt, or, sql, users, workspaceInvoices, workspaceMembers, workspaceSubscriptions } from '@perch/db'
 import type { BillingInterval, SubscriptionStatus } from '@perch/shared'
 import { PERCH_PRO_PLAN, proPriceCents } from '@perch/shared'
-import type { BachsSubscription } from './bachs'
+import type { BachsCheckoutSession, BachsSubscription } from './bachs'
 
 export interface WorkspaceEntitlement {
   plan: 'free' | 'pro'
@@ -16,17 +16,23 @@ export interface WorkspaceEntitlement {
 
 export function subscriptionHasPaidAccess(
   row: Pick<typeof workspaceSubscriptions.$inferSelect, 'status' | 'currentPeriodEnd'> | undefined,
+  hasConfirmedInvoice: boolean,
   now = new Date()
 ) {
-  if (!row) return false
-  if (row.status === 'active' || row.status === 'trialing') return true
-  if (row.status !== 'past_due' && row.status !== 'canceled') return false
+  if (!row || !hasConfirmedInvoice) return false
+  if (!['trialing', 'active', 'past_due', 'canceled'].includes(row.status)) return false
   return Boolean(row.currentPeriodEnd && row.currentPeriodEnd.getTime() > now.getTime())
 }
 
 export async function workspaceEntitlement(workspaceId: string): Promise<WorkspaceEntitlement> {
   const row = await useDb().query.workspaceSubscriptions.findFirst({ where: eq(workspaceSubscriptions.workspaceId, workspaceId) })
-  const isPro = subscriptionHasPaidAccess(row)
+  const invoice = row?.lastInvoiceReference
+    ? await useDb().query.workspaceInvoices.findFirst({ where: and(
+        eq(workspaceInvoices.workspaceId, workspaceId),
+        eq(workspaceInvoices.reference, row.lastInvoiceReference)
+      ) })
+    : undefined
+  const isPro = subscriptionHasPaidAccess(row, invoice?.status === 'paid')
   return {
     plan: isPro ? 'pro' : 'free',
     isPro,
@@ -63,6 +69,47 @@ function assertPublicReturnUrl(origin: string) {
   }
 }
 
+export function providerAmountCents(amount: string | null | undefined): number | null {
+  if (!amount || !/^\d+(?:\.\d+)?$/.test(amount)) return null
+  const [whole, fraction = ''] = amount.split('.')
+  if (fraction.length > 2) return null
+  const cents = Number(whole) * 100 + Number(fraction.padEnd(2, '0'))
+  return Number.isSafeInteger(cents) ? cents : null
+}
+
+export function checkoutPaymentState(checkout: BachsCheckoutSession): 'paid' | 'pending' | 'failed' {
+  const paymentStatus = checkout.charge?.status ?? checkout.payment_status
+  if (checkout.charge && ['succeeded', 'accepted'].includes(checkout.charge.status)) return 'paid'
+  if (checkout.status === 'completed' && paymentStatus === 'succeeded') return 'paid'
+  if (checkout.status === 'expired'
+    || checkout.status === 'cancelled'
+    || ['failed', 'canceled', 'cancelled', 'expired'].includes(paymentStatus ?? '')) return 'failed'
+  return 'pending'
+}
+
+export function checkoutMatchesInvoice(
+  checkout: BachsCheckoutSession,
+  invoice: Pick<typeof workspaceInvoices.$inferSelect, 'reference' | 'bachsCheckoutId' | 'amountCents' | 'currency'>
+) {
+  if (!invoice.bachsCheckoutId || checkout.checkout_id !== invoice.bachsCheckoutId) return false
+  if (checkout.reference !== invoice.reference) return false
+  if (checkout.currency.toUpperCase() !== invoice.currency.toUpperCase()) return false
+  if (providerAmountCents(checkout.amount) !== invoice.amountCents) return false
+  if (checkout.charge) {
+    if (checkout.charge.currency.toUpperCase() !== invoice.currency.toUpperCase()) return false
+    if (providerAmountCents(checkout.charge.amount) !== invoice.amountCents) return false
+    if (checkout.charge.amount_paid && providerAmountCents(checkout.charge.amount_paid) !== invoice.amountCents) return false
+  }
+  return true
+}
+
+export function providerPaidThroughEnd(subscription: BachsSubscription): Date | null {
+  const value = subscription.status === 'trialing'
+    ? subscription.trial_end
+    : subscription.current_period_end
+  return value ? new Date(value) : null
+}
+
 export async function startWorkspaceCheckout(input: {
   workspaceId: string
   interval: BillingInterval
@@ -77,7 +124,15 @@ export async function startWorkspaceCheckout(input: {
   const db = useDb()
   const reference = `perch-workspace-${input.workspaceId}-${input.requestId}`
   const existing = await db.query.workspaceInvoices.findFirst({ where: eq(workspaceInvoices.reference, reference) })
-  if (existing?.status === 'pending' && existing.checkoutUrl) return { checkoutUrl: existing.checkoutUrl, reference }
+  if (existing?.status === 'pending' && existing.checkoutUrl && existing.bachsCheckoutId) {
+    const canonicalCheckout = await getBachsCheckoutSession(existing.bachsCheckoutId)
+    if (isApprovedBachsCheckoutUrl(existing.checkoutUrl)
+      && checkoutMatchesInvoice(canonicalCheckout, existing)
+      && checkoutPaymentState(canonicalCheckout) === 'pending') {
+      return { checkoutUrl: existing.checkoutUrl, reference }
+    }
+    throw createError({ statusCode: 409, statusMessage: 'That checkout attempt can no longer be resumed.' })
+  }
   if (existing) throw createError({ statusCode: 409, statusMessage: 'That checkout attempt has already finished.' })
 
   const start = new Date()
@@ -99,9 +154,21 @@ export async function startWorkspaceCheckout(input: {
       customer: input.customer,
       successUrl: `${input.origin}/billing?paid=1`,
       cancelUrl: `${input.origin}/billing`,
-      metadata: { workspaceId: input.workspaceId, interval: input.interval, perchPlan: 'workspace_pro' }
+      metadata: {
+        workspaceId: input.workspaceId,
+        interval: input.interval,
+        perchPlan: 'workspace_pro',
+        invoiceReference: reference
+      }
     })
-    if (!checkout.checkout_url) throw createError({ statusCode: 502, statusMessage: 'Bachs did not return a checkout URL.' })
+    if (!isApprovedBachsCheckoutUrl(checkout.checkout_url)) {
+      throw createError({ statusCode: 502, statusMessage: 'Bachs did not return a trusted checkout URL.' })
+    }
+    const canonicalCheckout = await getBachsCheckoutSession(checkout.checkout_id)
+    const expectedInvoice = { ...invoice!, bachsCheckoutId: checkout.checkout_id }
+    if (!checkoutMatchesInvoice(canonicalCheckout, expectedInvoice)) {
+      throw createError({ statusCode: 502, statusMessage: 'Bachs checkout did not match the expected plan.' })
+    }
     await db.transaction(async (tx) => {
       await tx.update(workspaceInvoices).set({
         bachsCheckoutId: checkout.checkout_id,
@@ -130,12 +197,21 @@ export async function startWorkspaceCheckout(input: {
 
 export async function cancelWorkspacePlan(workspaceId: string) {
   const db = useDb()
-  const row = await db.query.workspaceSubscriptions.findFirst({ where: eq(workspaceSubscriptions.workspaceId, workspaceId) })
-  if (!row || !subscriptionHasPaidAccess(row)) throw createError({ statusCode: 409, statusMessage: 'Perch Pro is not active.' })
+  const [row, entitlement] = await Promise.all([
+    db.query.workspaceSubscriptions.findFirst({ where: eq(workspaceSubscriptions.workspaceId, workspaceId) }),
+    workspaceEntitlement(workspaceId)
+  ])
+  if (!row || !entitlement.isPro) throw createError({ statusCode: 409, statusMessage: 'Perch Pro is not active.' })
   if (!row.bachsSubscriptionId) {
-    return { cancelAtPeriodEnd: true, currentPeriodEnd: row.currentPeriodEnd?.toISOString() ?? null }
+    throw createError({ statusCode: 409, statusMessage: 'The billing provider subscription could not be confirmed.' })
   }
   const subscription = await cancelBachsSubscription(row.bachsSubscriptionId)
+  if (subscription.id !== row.bachsSubscriptionId) {
+    throw createError({ statusCode: 502, statusMessage: 'Bachs returned a different subscription.' })
+  }
+  if (!subscription.cancel_at_period_end && subscription.status !== 'canceled') {
+    throw createError({ statusCode: 502, statusMessage: 'Bachs did not confirm the cancellation.' })
+  }
   const end = subscription.current_period_end ? new Date(subscription.current_period_end) : row.currentPeriodEnd
   await db.update(workspaceSubscriptions).set({
     status: subscription.status,
@@ -175,34 +251,57 @@ export async function billingOverview(workspaceId: string) {
 
 export async function applyWorkspaceSubscriptionState(subscription: BachsSubscription) {
   const workspaceId = subscription.metadata?.workspaceId
-  if (!workspaceId || subscription.metadata?.perchPlan !== 'workspace_pro') return { applied: false, reason: 'not-perch-pro' as const }
-  const interval: BillingInterval = subscription.product?.metadata?.perch_plan?.endsWith('_yearly')
-    || subscription.metadata.interval === 'yearly'
+  const invoiceReference = subscription.metadata?.invoiceReference
+  if (!workspaceId || !invoiceReference || subscription.metadata?.perchPlan !== 'workspace_pro') {
+    return { applied: false, reason: 'not-perch-pro' as const }
+  }
+  const productPlan = subscription.product?.metadata?.perch_plan
+  const interval: BillingInterval | null = productPlan === 'workspace_pro_yearly'
     ? 'yearly'
-    : 'monthly'
-  const end = subscription.current_period_end ?? subscription.next_billed_at
-  await useDb().insert(workspaceSubscriptions).values({
+    : productPlan === 'workspace_pro_monthly'
+      ? 'monthly'
+      : null
+  if (!interval || (subscription.metadata.interval && subscription.metadata.interval !== interval)) {
+    return { applied: false, reason: 'unexpected-product' as const }
+  }
+  const db = useDb()
+  const [invoice, existingSubscription] = await Promise.all([
+    db.query.workspaceInvoices.findFirst({ where: and(
+      eq(workspaceInvoices.workspaceId, workspaceId),
+      eq(workspaceInvoices.reference, invoiceReference),
+      eq(workspaceInvoices.interval, interval)
+    ) }),
+    db.query.workspaceSubscriptions.findFirst({ where: eq(workspaceSubscriptions.workspaceId, workspaceId) })
+  ])
+  if (!invoice?.bachsCheckoutId) return { applied: false, reason: 'unknown-invoice' as const }
+  if (existingSubscription?.bachsSubscriptionId && existingSubscription.bachsSubscriptionId !== subscription.id) {
+    return { applied: false, reason: 'subscription-mismatch' as const }
+  }
+  const end = providerPaidThroughEnd(subscription)
+  await db.insert(workspaceSubscriptions).values({
     workspaceId,
     status: subscription.status,
     interval,
-    currentPeriodEnd: end ? new Date(end) : null,
+    currentPeriodEnd: end,
     cancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end),
-    bachsSubscriptionId: subscription.id
+    bachsSubscriptionId: subscription.id,
+    lastInvoiceReference: invoiceReference
   }).onConflictDoUpdate({
     target: workspaceSubscriptions.workspaceId,
     set: {
       status: subscription.status,
       interval,
-      currentPeriodEnd: end ? new Date(end) : null,
+      currentPeriodEnd: end,
       cancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end),
       bachsSubscriptionId: subscription.id,
+      lastInvoiceReference: invoiceReference,
       updatedAt: sql`now()`
     }
   })
   return { applied: true, workspaceId }
 }
 
-export async function markWorkspaceInvoicePaid(reference: string, chargeId?: string | null) {
+async function markWorkspaceInvoicePaid(reference: string, chargeId?: string | null) {
   return useDb().transaction(async (tx) => {
     const [invoice] = await tx.select().from(workspaceInvoices).where(eq(workspaceInvoices.reference, reference)).limit(1).for('update')
     if (!invoice) return { applied: false, reason: 'unknown-reference' as const }
@@ -210,27 +309,33 @@ export async function markWorkspaceInvoicePaid(reference: string, chargeId?: str
     await tx.update(workspaceInvoices).set({
       status: 'paid', paidAt: sql`now()`, bachsChargeId: chargeId ?? invoice.bachsChargeId, updatedAt: sql`now()`
     }).where(eq(workspaceInvoices.id, invoice.id))
-    await tx.insert(workspaceSubscriptions).values({
-      workspaceId: invoice.workspaceId,
-      status: 'active',
-      interval: invoice.interval,
-      currentPeriodEnd: invoice.periodEnd,
-      lastInvoiceReference: invoice.reference
-    }).onConflictDoUpdate({
-      target: workspaceSubscriptions.workspaceId,
-      set: {
-        status: 'active', interval: invoice.interval, currentPeriodEnd: invoice.periodEnd,
-        cancelAtPeriodEnd: false, lastInvoiceReference: invoice.reference, updatedAt: sql`now()`
-      }
-    })
     return { applied: true, reason: 'paid' as const, workspaceId: invoice.workspaceId }
   })
+}
+
+export async function confirmWorkspaceInvoiceFromCheckout(input: { checkoutId?: string | null, reference?: string | null }) {
+  if (!input.checkoutId && !input.reference) return { applied: false, reason: 'missing-checkout' as const }
+  const invoice = await useDb().query.workspaceInvoices.findFirst({ where: input.checkoutId
+    ? eq(workspaceInvoices.bachsCheckoutId, input.checkoutId)
+    : eq(workspaceInvoices.reference, input.reference!) })
+  if (!invoice?.bachsCheckoutId) return { applied: false, reason: 'unknown-checkout' as const }
+
+  const checkout = await getBachsCheckoutSession(invoice.bachsCheckoutId)
+  if (!checkoutMatchesInvoice(checkout, invoice)) {
+    throw createError({ statusCode: 502, statusMessage: 'Bachs checkout did not match the local invoice.' })
+  }
+  const state = checkoutPaymentState(checkout)
+  if (state !== 'paid') return { applied: false, reason: state === 'failed' ? 'provider-failed' as const : 'provider-pending' as const }
+  return markWorkspaceInvoicePaid(invoice.reference, checkout.charge?.payment_id)
 }
 
 export async function markWorkspaceInvoiceFailed(reference: string, reason: string) {
   const rows = await useDb().update(workspaceInvoices).set({
     status: 'failed', lastError: reason.slice(0, 1000), updatedAt: sql`now()`
-  }).where(eq(workspaceInvoices.reference, reference)).returning({ id: workspaceInvoices.id })
+  }).where(and(
+    eq(workspaceInvoices.reference, reference),
+    eq(workspaceInvoices.status, 'pending')
+  )).returning({ id: workspaceInvoices.id })
   return Boolean(rows.length)
 }
 

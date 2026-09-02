@@ -6,7 +6,7 @@ import * as schema from '../packages/db/src/schema'
 import { eq } from '../packages/db/node_modules/drizzle-orm/index.js'
 import { emailLayout, escapeHtml } from '../server/utils/email'
 import { isWithinBusinessHours } from '../server/utils/business-hours'
-import { markWorkspaceInvoicePaid, workspaceEntitlement } from '../server/utils/billing'
+import { applyWorkspaceSubscriptionState, workspaceEntitlement } from '../server/utils/billing'
 import { runUnansweredReminderSweep } from '../server/utils/unanswered-reminders'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
@@ -57,10 +57,28 @@ describe.skipIf(!databaseUrl)('billing and reminder database integration', () =>
 
   afterEach(async () => {
     await db.delete(schema.workspaceSubscriptions).where(eq(schema.workspaceSubscriptions.workspaceId, workspaceId))
+    await db.delete(schema.workspaceInvoices).where(eq(schema.workspaceInvoices.workspaceId, workspaceId))
   })
 
   it('delivers exactly one email for the same unanswered visitor message', async () => {
-    await db.insert(schema.workspaceSubscriptions).values({ workspaceId, status: 'active', interval: 'monthly' })
+    const reference = `perch-test-${randomUUID()}`
+    await db.insert(schema.workspaceInvoices).values({
+      workspaceId,
+      reference,
+      status: 'paid',
+      interval: 'monthly',
+      amountCents: 900,
+      bachsCheckoutId: `checkout_${randomUUID()}`,
+      periodStart: new Date('2026-09-01T00:00:00Z'),
+      periodEnd: new Date('2026-10-01T00:00:00Z')
+    })
+    await applyWorkspaceSubscriptionState({
+      id: `sub_${randomUUID()}`,
+      status: 'active',
+      current_period_end: '2026-10-01T00:00:00.000Z',
+      metadata: { workspaceId, interval: 'monthly', perchPlan: 'workspace_pro', invoiceReference: reference },
+      product: { id: 'product_monthly', metadata: { perch_plan: 'workspace_pro_monthly' } }
+    })
     const sent: Array<{ to: string, subject: string }> = []
     const sender = async (message: { to: string, subject: string }) => {
       sent.push(message)
@@ -76,7 +94,7 @@ describe.skipIf(!databaseUrl)('billing and reminder database integration', () =>
     expect(delivery?.status).toBe('sent')
   })
 
-  it('activates workspace Pro only after a paid invoice is applied', async () => {
+  it('activates workspace Pro only after payment and a provider-bounded subscription agree', async () => {
     expect((await workspaceEntitlement(workspaceId)).isPro).toBe(false)
     const reference = `perch-test-${randomUUID()}`
     await db.insert(schema.workspaceInvoices).values({
@@ -84,10 +102,19 @@ describe.skipIf(!databaseUrl)('billing and reminder database integration', () =>
       reference,
       interval: 'monthly',
       amountCents: 900,
+      bachsCheckoutId: `checkout_${randomUUID()}`,
       periodStart: new Date(),
       periodEnd: new Date(Date.now() + 30 * 24 * 60 * 60_000)
     })
-    expect((await markWorkspaceInvoicePaid(reference, 'charge_test')).applied).toBe(true)
+    await applyWorkspaceSubscriptionState({
+      id: `sub_${randomUUID()}`,
+      status: 'active',
+      current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60_000).toISOString(),
+      metadata: { workspaceId, interval: 'monthly', perchPlan: 'workspace_pro', invoiceReference: reference },
+      product: { id: 'product_monthly', metadata: { perch_plan: 'workspace_pro_monthly' } }
+    })
+    expect((await workspaceEntitlement(workspaceId)).isPro).toBe(false)
+    await db.update(schema.workspaceInvoices).set({ status: 'paid', paidAt: new Date() }).where(eq(schema.workspaceInvoices.reference, reference))
     expect((await workspaceEntitlement(workspaceId)).isPro).toBe(true)
   })
 })

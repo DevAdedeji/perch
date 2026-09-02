@@ -12,6 +12,7 @@ export interface LaunchEnvironment {
   NUXT_OAUTH_GOOGLE_REDIRECT_URL?: string
   RESEND_API_KEY?: string
   RESEND_FROM?: string
+  BACHS_ENV?: string
   BACHS_SECRET_KEY?: string
   BACHS_WEBHOOK_SECRET?: string
   CLOUDINARY_CLOUD_NAME?: string
@@ -101,7 +102,17 @@ export function productionConfigErrors(environment: LaunchEnvironment): string[]
   if (!value(environment.RESEND_API_KEY) || !value(environment.RESEND_FROM)) {
     errors.push('RESEND_API_KEY and RESEND_FROM are required for production account recovery')
   }
-  requireCompleteGroup(errors, environment, ['BACHS_SECRET_KEY', 'BACHS_WEBHOOK_SECRET'])
+  requireCompleteGroup(errors, environment, ['BACHS_ENV', 'BACHS_SECRET_KEY', 'BACHS_WEBHOOK_SECRET'])
+  const bachsEnvironment = value(environment.BACHS_ENV)
+  if (bachsEnvironment && bachsEnvironment !== 'sandbox' && bachsEnvironment !== 'live') {
+    errors.push('BACHS_ENV must be sandbox or live')
+  }
+  if (bachsEnvironment && value(environment.BACHS_SECRET_KEY)) {
+    const sandboxKey = value(environment.BACHS_SECRET_KEY).startsWith('sk_sandbox_')
+    if ((bachsEnvironment === 'sandbox') !== sandboxKey) {
+      errors.push('BACHS_ENV must match the Bachs secret-key environment')
+    }
+  }
   requireCompleteGroup(errors, environment, [
     'CLOUDINARY_CLOUD_NAME',
     'CLOUDINARY_API_KEY',

@@ -5,7 +5,7 @@ This is the practical checklist for deploying and operating Perch. It separates 
 ## What the application enforces
 
 - Production refuses to start without a valid PostgreSQL URL, a strong session secret, an HTTPS public origin, and complete transactional-email settings for account recovery.
-- Optional provider credentials must be complete sets. For example, Perch will not start with a Bachs API key but no Bachs webhook secret.
+- Optional provider credentials must be complete sets. For example, Perch will not start with a Bachs API key but no explicit environment and webhook secret.
 - Signed-in API changes must come from the exact Perch origin. Bachs webhooks and the public widget installation handshake are the only intentional cross-origin exceptions.
 - API bodies are limited to 2 MB before JSON parsing. Image uploads have their stricter existing 1 MB file limit.
 - API responses are marked `no-store`, sessions are cookie-only, and production cookies are secure, HTTP-only, and SameSite=Lax.
@@ -42,7 +42,7 @@ This is the practical checklist for deploying and operating Perch. It separates 
 - Rotate a session secret as an incident response action: it signs everyone out. Rotate the realtime secret at the same time only when it is separate.
 - Configure Google client ID, client secret, and the exact HTTPS redirect URL together.
 - Configure Resend API key and verified sender together. Railway staging also runs with `NODE_ENV=production`, so it needs separate staging/test Resend credentials rather than the local-development console fallback. Monitor delivery failures and domain authentication.
-- Configure Bachs API and webhook secrets together. Keep sandbox keys on staging and verify the production webhook URL and signature secret before launch.
+- Configure `BACHS_ENV`, the API key, and webhook secret together. Use `sandbox` with a sandbox key on staging and `live` with a live key in production; Perch refuses mismatched credentials. Verify the production webhook URL and signature secret before launch.
 - Configure all three Cloudinary values together. Keep upload presets private; uploads pass through Perch's signed, authenticated proxy.
 - Never paste secret values into tickets, screenshots, commits, or logs.
 

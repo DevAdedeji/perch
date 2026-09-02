@@ -64,6 +64,7 @@ export default defineNuxtConfig({
     resendApiKey: '',
     emailFrom: '',
     // workspace subscriptions via Bachs
+    bachsEnvironment: '',
     bachsSecretKey: '',
     bachsWebhookSecret: '',
     // signed image uploads (attachments) — optional; endpoint 503s without them
