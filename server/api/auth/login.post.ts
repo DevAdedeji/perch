@@ -1,4 +1,13 @@
+import { randomBytes } from 'node:crypto'
 import { eq, users } from '@perch/db'
+
+const dummyPassword = randomBytes(32).toString('base64url')
+let dummyPasswordHash: Promise<string> | undefined
+
+function loginDummyPasswordHash() {
+  dummyPasswordHash ??= hashPassword(dummyPassword)
+  return dummyPasswordHash
+}
 
 export default defineEventHandler(async (event) => {
   assertRateLimit('login:ip', requestIp(event), { max: 10, windowMs: 5 * 60 * 1000 })
@@ -12,11 +21,12 @@ export default defineEventHandler(async (event) => {
   assertRateLimit('login:email', email, { max: 10, windowMs: 5 * 60 * 1000 })
 
   const db = useDb()
-  const user = await db.query.users.findFirst({ where: eq(users.email, email) })
-
-  // verify even when the user is missing would leak timing; nuxt-auth-utils'
-  // verifyPassword is constant-time enough for this project's threat model.
-  if (!user?.passwordHash || !(await verifyPassword(user.passwordHash, password))) {
+  const [user, fallbackHash] = await Promise.all([
+    db.query.users.findFirst({ where: eq(users.email, email) }),
+    loginDummyPasswordHash()
+  ])
+  const passwordMatches = await verifyPassword(user?.passwordHash ?? fallbackHash, password)
+  if (!user?.passwordHash || !passwordMatches) {
     throw createError({ statusCode: 401, statusMessage: 'Invalid email or password' })
   }
 

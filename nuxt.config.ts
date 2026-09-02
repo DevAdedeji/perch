@@ -84,7 +84,9 @@ export default defineNuxtConfig({
       // canonical and social metadata at localhost.
       siteUrl: publicSiteUrl,
       // the workspace the landing page's live demo widget talks to (site_ids are public by design)
-      demoSiteId: process.env.NUXT_PUBLIC_DEMO_SITE_ID || 'ws_18c6715c14'
+      demoSiteId: process.env.NUXT_PUBLIC_DEMO_SITE_ID || 'ws_18c6715c14',
+      sentryDsn: process.env.NUXT_PUBLIC_SENTRY_DSN || '',
+      sentryEnvironment: process.env.NUXT_PUBLIC_SENTRY_ENVIRONMENT || (process.env.NODE_ENV === 'production' ? 'production' : 'development')
     }
   },
 
