@@ -1,4 +1,5 @@
 import { and, eq, triggerFires } from '@perch/db'
+import { safeErrorSummary } from '../utils/request-security'
 
 /**
  * Proactive-trigger sweep. Every 5s, look at who's live (visitor-presence
@@ -68,8 +69,8 @@ export default defineNitroPlugin(() => {
           }
         }
       }
-    } catch (err) {
-      console.error('[trigger-sweep] pass failed:', err)
+    } catch (error) {
+      console.error('[trigger-sweep] pass failed', safeErrorSummary(error))
     } finally {
       running = false
     }

@@ -1,3 +1,5 @@
+import { safeErrorSummary } from '../utils/request-security'
+
 const AUTOMATION_SWEEP_INTERVAL = 60_000
 
 export default defineNitroPlugin(() => {
@@ -8,7 +10,7 @@ export default defineNitroPlugin(() => {
     try {
       await runAutomationSweep()
     } catch (error) {
-      console.error('[automation] sweep failed', error)
+      console.error('[automation] sweep failed', safeErrorSummary(error))
     } finally {
       running = false
     }

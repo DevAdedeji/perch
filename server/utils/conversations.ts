@@ -4,6 +4,7 @@ import { channels } from '@perch/shared'
 import type { ConversationDTO, MessageDTO, VisitorConversationDTO, VisitorMessageDTO } from '@perch/shared'
 import { enqueueWebhookEvent } from './webhooks'
 import { agentWorkspaceAuthorization } from './realtime'
+import { safeErrorSummary } from './request-security'
 
 /* serialization (rows → §6 wire DTOs) */
 
@@ -221,7 +222,10 @@ export async function ingestVisitorMessage(input: IncomingVisitorMessage) {
     conversation = automated.conversation
     automationTagsChanged = automated.tagsChanged
   } catch (error) {
-    console.error('[automation] entry pass failed', { conversationId: conversation.id, error })
+    console.error('[automation] entry pass failed', {
+      conversationId: conversation.id,
+      ...safeErrorSummary(error)
+    })
   }
   // broadcast
   const wsChannel = channels.workspace(input.workspaceId)
