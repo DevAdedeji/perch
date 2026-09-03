@@ -121,6 +121,14 @@ export function checkoutPaymentState(checkout: BachsCheckoutSession): 'paid' | '
   return 'pending'
 }
 
+export function checkoutCanBeSafelyReplaced(checkout: BachsCheckoutSession) {
+  return checkout.status === 'expired'
+    && checkout.charge?.status === 'cancelled'
+    && providerAmountCents(checkout.charge.amount_paid) === 0
+    && !checkout.subscription_id
+    && !['processing', 'succeeded'].includes(checkout.payment_status ?? '')
+}
+
 export function invoiceMatchesPerchPlan(
   invoice: Pick<typeof workspaceInvoices.$inferSelect, 'interval' | 'amountCents' | 'currency'>
 ) {
@@ -140,7 +148,9 @@ export function checkoutMatchesInvoice(
   if (checkout.charge) {
     if (checkout.charge.currency.toUpperCase() !== invoice.currency.toUpperCase()) return false
     if (providerAmountCents(checkout.charge.amount) !== invoice.amountCents) return false
-    if (checkout.charge.amount_paid && providerAmountCents(checkout.charge.amount_paid) !== invoice.amountCents) return false
+    if (checkoutPaymentState(checkout) === 'paid'
+      && checkout.charge.amount_paid
+      && providerAmountCents(checkout.charge.amount_paid) !== invoice.amountCents) return false
   }
   return true
 }
@@ -173,7 +183,7 @@ export async function startWorkspaceCheckout(input: {
   requestId: string
   customer: { email: string, name: string }
   origin: string
-}) {
+}, options: { retryUnusableCheckout?: boolean } = { retryUnusableCheckout: true }) {
   assertPublicReturnUrl(input.origin)
   const db = useDb()
   const reference = `perch-workspace-${input.workspaceId}-${input.requestId}`
@@ -315,6 +325,35 @@ export async function startWorkspaceCheckout(input: {
     const expectedInvoice = { ...reservation.invoice, bachsCheckoutId: checkout.checkout_id, bachsProductId: productId }
     if (!checkoutMatchesInvoice(canonicalCheckout, expectedInvoice)) {
       throw createError({ statusCode: 502, statusMessage: 'Bachs checkout did not match the expected plan.' })
+    }
+    if (checkoutPaymentState(canonicalCheckout) === 'failed') {
+      const canReplace = checkoutCanBeSafelyReplaced(canonicalCheckout)
+      const [closedInvoice] = await db.update(workspaceInvoices).set({
+        status: 'failed',
+        bachsCheckoutId: checkout.checkout_id,
+        bachsProductId: productId,
+        checkoutUrl: checkout.checkout_url,
+        checkoutClaimToken: null,
+        checkoutClaimedAt: null,
+        checkoutClosedAt: canReplace ? sql`now()` : null,
+        lastError: `Bachs checkout is ${canonicalCheckout.charge?.status ?? canonicalCheckout.status}.`.slice(0, 1000),
+        updatedAt: sql`now()`
+      }).where(and(
+        eq(workspaceInvoices.id, reservation.invoice.id),
+        eq(workspaceInvoices.checkoutClaimToken, claimToken)
+      )).returning({ id: workspaceInvoices.id })
+      if (!closedInvoice) {
+        throw createError({ statusCode: 409, statusMessage: 'A newer checkout request replaced this attempt.' })
+      }
+      if (canReplace && options.retryUnusableCheckout !== false) {
+        return await startWorkspaceCheckout({ ...input, requestId: randomUUID() }, { retryUnusableCheckout: false })
+      }
+      throw createError({
+        statusCode: canReplace ? 502 : 409,
+        statusMessage: canReplace
+          ? 'Bachs returned an unusable checkout. Please try again.'
+          : 'The checkout needs payment verification before another can be created.'
+      })
     }
     await db.transaction(async (tx) => {
       const [updatedInvoice] = await tx.update(workspaceInvoices).set({

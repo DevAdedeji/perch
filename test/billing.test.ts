@@ -15,7 +15,7 @@ import {
   verifyBachsWebhookSignature
 } from '../server/utils/bachs'
 import { effectiveReminderSettings, reminderIsDue, reminderRetryAt } from '../server/utils/unanswered-reminders'
-import { billingCheckoutEnabled, checkoutMatchesInvoice, checkoutPaymentState, invoiceMatchesPerchPlan, providerAmountCents, providerPaidThroughEnd, providerSubscriptionIdentity, subscriptionHasPaidAccess } from '../server/utils/billing'
+import { billingCheckoutEnabled, checkoutCanBeSafelyReplaced, checkoutMatchesInvoice, checkoutPaymentState, invoiceMatchesPerchPlan, providerAmountCents, providerPaidThroughEnd, providerSubscriptionIdentity, subscriptionHasPaidAccess } from '../server/utils/billing'
 
 describe('Perch plan pricing', () => {
   it('keeps the yearly plan cheaper than twelve monthly payments', () => {
@@ -63,6 +63,16 @@ describe('canonical Bachs payment data', () => {
   it('accepts only exact invoice identity, currency, and amount matches', () => {
     const invoice = { reference: 'invoice_123', bachsCheckoutId: 'co_123', interval: 'monthly' as const, amountCents: 900, currency: 'USD' }
     expect(checkoutMatchesInvoice(checkout, invoice)).toBe(true)
+    expect(checkoutMatchesInvoice({
+      ...checkout,
+      status: 'open',
+      payment_status: 'requires_payment_method',
+      charge: { ...checkout.charge, status: 'created', amount_paid: '0.00' }
+    }, invoice)).toBe(true)
+    expect(checkoutMatchesInvoice({
+      ...checkout,
+      charge: { ...checkout.charge, amount_paid: '8.99' }
+    }, invoice)).toBe(false)
     expect(checkoutMatchesInvoice({ ...checkout, currency: 'NGN' }, invoice)).toBe(false)
     expect(checkoutMatchesInvoice({ ...checkout, amount: '8.99' }, invoice)).toBe(false)
     expect(checkoutMatchesInvoice({ ...checkout, reference: 'another' }, invoice)).toBe(false)
@@ -82,6 +92,33 @@ describe('canonical Bachs payment data', () => {
     expect(checkoutPaymentState({ ...checkout, status: 'expired', payment_status: 'failed', charge: null })).toBe('failed')
     expect(checkoutPaymentState({ ...checkout, charge: { ...checkout.charge, status: 'refunded' } })).toBe('failed')
     expect(checkoutPaymentState({ ...checkout, charge: { ...checkout.charge, status: 'underpaid' } })).toBe('failed')
+  })
+
+  it('replaces only an expired checkout proven to have collected no money', () => {
+    const replaceable = {
+      ...checkout,
+      status: 'expired' as const,
+      payment_status: 'failed' as const,
+      subscription_id: null,
+      charge: { ...checkout.charge, status: 'cancelled' as const, amount_paid: '0.00' }
+    }
+    expect(checkoutCanBeSafelyReplaced(replaceable)).toBe(true)
+    expect(checkoutCanBeSafelyReplaced({
+      ...replaceable,
+      charge: { ...replaceable.charge, amount_paid: '9.00' }
+    })).toBe(false)
+    expect(checkoutCanBeSafelyReplaced({
+      ...replaceable,
+      payment_status: 'processing'
+    })).toBe(false)
+    expect(checkoutCanBeSafelyReplaced({
+      ...replaceable,
+      charge: { ...replaceable.charge, status: 'underpaid' }
+    })).toBe(false)
+    expect(checkoutCanBeSafelyReplaced({
+      ...replaceable,
+      subscription_id: 'subscription_123'
+    })).toBe(false)
   })
 
   it('binds a canonical subscription to one workspace, invoice, product, and interval', () => {
