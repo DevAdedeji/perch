@@ -9,8 +9,10 @@ import {
   isNull,
   lt,
   messages,
+  ne,
   or,
-  sql
+  sql,
+  workspaces
 } from '@perch/db'
 import type { Database } from '@perch/db'
 import { z } from 'zod'
@@ -196,11 +198,15 @@ export async function queueLegacyLogoCleanup(
     secureUrl: string
     reason: 'logo_replaced' | 'logo_removed' | 'workspace_deleted'
   },
-  now = new Date()
+  now = new Date(),
+  externallyReferencedPublicIds?: ReadonlySet<string>
 ) {
   const config = cloudinaryConfig()
   const publicId = cloudinaryPublicIdFromUrl(input.secureUrl, config.cloudName)
   if (!publicId) return
+  const protectedIds = externallyReferencedPublicIds
+    ?? await legacyPublicIdsReferencedOutsideWorkspace(tx, input.workspaceId, config.cloudName)
+  if (protectedIds.has(publicId)) return
   await tx.insert(attachmentAssets).values({
     workspaceId: input.workspaceId,
     uploaderUserId: input.uploaderUserId,
@@ -215,24 +221,74 @@ export async function queueLegacyLogoCleanup(
   }).onConflictDoNothing({ target: attachmentAssets.publicId })
 }
 
+async function legacyPublicIdsReferencedOutsideWorkspace(
+  tx: DbExecutor,
+  workspaceId: string,
+  cloudName: string
+) {
+  const [messageUrls, logoUrls] = await Promise.all([
+    tx.select({ secureUrl: messages.attachmentUrl }).from(messages).innerJoin(
+      conversations,
+      eq(messages.conversationId, conversations.id)
+    ).where(and(
+      ne(conversations.workspaceId, workspaceId),
+      sql`${messages.attachmentUrl} is not null`
+    )),
+    tx.select({ secureUrl: workspaces.logoUrl }).from(workspaces).where(and(
+      ne(workspaces.id, workspaceId),
+      sql`${workspaces.logoUrl} is not null`
+    ))
+  ])
+  const publicIds = new Set<string>()
+  for (const row of [...messageUrls, ...logoUrls]) {
+    if (!row.secureUrl) continue
+    const publicId = cloudinaryPublicIdFromUrl(row.secureUrl, cloudName)
+    if (publicId) publicIds.add(publicId)
+  }
+  return publicIds
+}
+
 export async function queueWorkspaceAttachmentCleanup(
   tx: DbTransaction,
   input: { workspaceId: string, uploaderUserId: string, legacyLogoUrl?: string | null },
   now = new Date()
 ) {
-  await tx.update(attachmentAssets).set({
-    state: 'retrying',
-    cleanupAttempts: sql`case when ${attachmentAssets.state} = 'dead_letter' then 0 else ${attachmentAssets.cleanupAttempts} end`,
-    cleanupReason: 'workspace_deleted',
-    cleanupNextAttemptAt: now,
-    cleanupLockedAt: null,
-    cleanupLastError: null,
-    updatedAt: sql`now()`
-  }).where(and(
+  const config = cloudinaryConfig()
+  const externallyReferencedPublicIds = await legacyPublicIdsReferencedOutsideWorkspace(
+    tx,
+    input.workspaceId,
+    config.cloudName
+  )
+  await captureWorkspaceLegacyAttachments(tx, input, now, externallyReferencedPublicIds)
+  const ownedAssets = await tx.select({
+    id: attachmentAssets.id,
+    publicId: attachmentAssets.publicId
+  }).from(attachmentAssets).where(and(
     eq(attachmentAssets.workspaceId, input.workspaceId),
     inArray(attachmentAssets.state, ['pending', 'claimed', 'retrying', 'dead_letter'])
   ))
+  const cleanupIds = ownedAssets
+    .filter(asset => !externallyReferencedPublicIds.has(asset.publicId))
+    .map(asset => asset.id)
+  for (let offset = 0; offset < cleanupIds.length; offset += 500) {
+    await tx.update(attachmentAssets).set({
+      state: 'retrying',
+      cleanupAttempts: sql`case when ${attachmentAssets.state} = 'dead_letter' then 0 else ${attachmentAssets.cleanupAttempts} end`,
+      cleanupReason: 'workspace_deleted',
+      cleanupNextAttemptAt: now,
+      cleanupLockedAt: null,
+      cleanupLastError: null,
+      updatedAt: sql`now()`
+    }).where(inArray(attachmentAssets.id, cleanupIds.slice(offset, offset + 500)))
+  }
+}
 
+export async function captureWorkspaceLegacyAttachments(
+  tx: DbTransaction,
+  input: { workspaceId: string, uploaderUserId: string, legacyLogoUrl?: string | null },
+  now = new Date(),
+  knownExternalPublicIds?: ReadonlySet<string>
+) {
   const legacyMessages = await tx.select({
     secureUrl: messages.attachmentUrl,
     mimeType: messages.attachmentType
@@ -245,10 +301,13 @@ export async function queueWorkspaceAttachmentCleanup(
     sql`${messages.attachmentUrl} is not null`
   ))
   const config = cloudinaryConfig()
+  const externallyReferencedPublicIds = knownExternalPublicIds
+    ?? await legacyPublicIdsReferencedOutsideWorkspace(tx, input.workspaceId, config.cloudName)
   for (const message of legacyMessages) {
     if (!message.secureUrl) continue
     const publicId = cloudinaryPublicIdFromUrl(message.secureUrl, config.cloudName)
     if (!publicId) continue
+    if (externallyReferencedPublicIds.has(publicId)) continue
     await tx.insert(attachmentAssets).values({
       workspaceId: input.workspaceId,
       uploaderUserId: input.uploaderUserId,
@@ -269,7 +328,7 @@ export async function queueWorkspaceAttachmentCleanup(
     uploaderUserId: input.uploaderUserId,
     secureUrl: input.legacyLogoUrl,
     reason: 'workspace_deleted'
-  }, now)
+  }, now, externallyReferencedPublicIds)
 }
 
 export async function queueUnattachedUserUploads(
@@ -371,6 +430,20 @@ export async function runAttachmentCleanupSweep(options: {
         eq(attachmentAssets.cleanupLockedAt, asset.cleanupLockedAt!)
       )
       try {
+        if (asset.workspaceId) {
+          const { cloudName } = cloudinaryConfig()
+          const protectedIds = await legacyPublicIdsReferencedOutsideWorkspace(db, asset.workspaceId, cloudName)
+          if (protectedIds.has(asset.publicId)) {
+            await db.update(attachmentAssets).set({
+              state: 'dead_letter',
+              cleanupNextAttemptAt: null,
+              cleanupLockedAt: null,
+              cleanupLastError: '{"type":"SharedLegacyReference"}',
+              updatedAt: sql`now()`
+            }).where(claimFence)
+            continue
+          }
+        }
         await destroyAttachmentAsset(asset.publicId, { transport: options.transport, now })
         const completed = await db.update(attachmentAssets).set({
           state: 'deleted',

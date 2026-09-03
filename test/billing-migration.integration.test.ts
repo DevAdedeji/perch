@@ -37,9 +37,10 @@ describe.skipIf(!databaseUrl)('billing migration chain', () => {
     const migrations = readdirSync(new URL('../packages/db/migrations', import.meta.url))
       .filter(name => /^\d{4}.*\.sql$/.test(name))
       .sort()
-    const finalMigration = migrations.at(-1)
-    expect(finalMigration).toBe('0029_fair_hiroim.sql')
-    for (const name of migrations.slice(0, -1)) await applyMigration(name)
+    const reconciliationMigration = '0029_fair_hiroim.sql'
+    const reconciliationIndex = migrations.indexOf(reconciliationMigration)
+    expect(reconciliationIndex).toBeGreaterThan(0)
+    for (const name of migrations.slice(0, reconciliationIndex)) await applyMigration(name)
 
     const workspaceId = randomUUID()
     const historicalInvoiceId = randomUUID()
@@ -74,7 +75,7 @@ describe.skipIf(!databaseUrl)('billing migration chain', () => {
       values ('${workspaceId}', 'active', 'monthly', '2026-09-01T00:00:00Z', 'subscription-b', 'current-lineage-b')
     `)
 
-    await applyMigration(finalMigration!)
+    await applyMigration(reconciliationMigration)
 
     const rows = await client.unsafe<Array<{ reference: string, checkout_closed_at: Date | null, bachs_product_id: string | null }>>(`
       select reference, checkout_closed_at, bachs_product_id
@@ -95,5 +96,7 @@ describe.skipIf(!databaseUrl)('billing migration chain', () => {
       where workspace_id = '${workspaceId}'
     `)
     expect(jobs).toEqual([{ workspace_id: workspaceId, status: 'pending' }])
+
+    for (const name of migrations.slice(reconciliationIndex + 1)) await applyMigration(name)
   }, 60_000)
 })

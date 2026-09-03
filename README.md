@@ -219,7 +219,7 @@ Useful scripts: `pnpm build` (production Nitro bundle), `pnpm preview`, `pnpm li
 | `VISITOR_EMAIL_HASH_SECRET` | Stable, separate 32+ character HMAC key for email suppression and delivery-dedup hashes. Do not rotate it during normal return-link key rotation |
 | `VISITOR_REPLY_EMAIL_FEATURE_ENABLED` | Global feature-exposure gate. When `false`, Settings and the widget do not offer visitor reply emails and the opt-in API rejects requests |
 | `VISITOR_REPLY_EMAIL_DELIVERY_ENABLED` | Independent delivery safety gate. It requires feature exposure and must remain `false` until the approved scheduled worker and Resend bounce/complaint webhook are configured |
-| `RESEND_WEBHOOK_SECRET` | Planned signed Resend webhook secret for durable bounce/complaint suppression; visitor reply delivery must stay disabled until this external setup is complete |
+| `RESEND_WEBHOOK_SECRET` | Signed Resend webhook secret used to verify bounce/complaint events and durably suppress unsafe future delivery; visitor reply delivery must stay disabled until this is configured |
 | `BACHS_ENV` / `BACHS_SECRET_KEY` / `BACHS_WEBHOOK_SECRET` | Bachs subscription environment, API key, and webhook signature secret. Configure all three together |
 | `PERCH_BILLING_CHECKOUT_ENABLED` | Fail-closed gate for new paid checkouts. Explicit sandbox checkout is allowed for contract verification, but live checkout remains closed until Bachs' canonical recurring product/subscription response contract is authoritatively verified. Disabling it does not interrupt existing subscriptions or webhooks |
 | `SENTRY_DSN` | *(optional)* server-side error tracking; the client DSN lives in `sentry.client.config.ts` |

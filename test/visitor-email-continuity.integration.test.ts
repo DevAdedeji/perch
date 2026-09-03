@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { drizzle } from '../packages/db/node_modules/drizzle-orm/postgres-js/index.js'
-import { eq } from '../packages/db/node_modules/drizzle-orm/index.js'
+import { and, eq } from '../packages/db/node_modules/drizzle-orm/index.js'
 import postgres from '../packages/db/node_modules/postgres/src/index.js'
 import * as schema from '../packages/db/src/schema'
+import { applyResendVisitorSuppression } from '../server/utils/resend-webhooks'
 import { runVisitorReplyEmailSweep, visitorEmailHash } from '../server/utils/visitor-email-continuity'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
@@ -105,6 +106,50 @@ describe.skipIf(!databaseUrl)('visitor email continuity database integration', (
     expect(sent[0]!.html).not.toContain('private visitor question')
     expect(sent[0]!.html).not.toContain('private agent answer')
     expect(delivery).toMatchObject({ status: 'sent', providerMessageId: 'resend_1' })
+  })
+
+  it('reconciles a bounce that arrives before the provider message ID is stored', async () => {
+    const turn = await createTurn('2026-09-02T10:20:00Z')
+    const deliveryId = randomUUID()
+    const providerMessageId = `resend_race_${randomUUID()}`
+    await db.insert(schema.visitorReplyDeliveries).values({
+      id: deliveryId,
+      workspaceId,
+      conversationId,
+      visitorRef: visitorId,
+      visitorMessageId: turn.visitorMessageId,
+      agentMessageId: turn.agentMessageId,
+      recipientEmailHash: visitorEmailHash(recipient),
+      nextAttemptAt: new Date('2026-09-02T10:21:30Z'),
+      tokenExpiresAt: new Date('2026-09-09T10:20:00Z')
+    })
+
+    await runVisitorReplyEmailSweep({
+      now: new Date('2026-09-02T10:22:00Z'),
+      sender: async () => {
+        expect(await applyResendVisitorSuppression(providerMessageId, 'bounce'))
+          .toEqual({ matched: 0, canceled: 0 })
+        return { accepted: true, providerMessageId, retryable: false, error: null }
+      }
+    })
+
+    expect(await db.query.visitorReplyDeliveries.findFirst({
+      where: eq(schema.visitorReplyDeliveries.id, deliveryId)
+    })).toMatchObject({ status: 'sent', providerMessageId })
+    expect(await db.query.visitorEmailSuppressions.findFirst({ where: and(
+      eq(schema.visitorEmailSuppressions.workspaceId, workspaceId),
+      eq(schema.visitorEmailSuppressions.emailHash, visitorEmailHash(recipient))
+    ) })).toMatchObject({ reason: 'bounce' })
+    expect(await db.query.resendSuppressionEvents.findFirst({
+      where: eq(schema.resendSuppressionEvents.providerMessageId, providerMessageId)
+    })).toMatchObject({ status: 'processed' })
+
+    await db.delete(schema.visitorEmailSuppressions).where(and(
+      eq(schema.visitorEmailSuppressions.workspaceId, workspaceId),
+      eq(schema.visitorEmailSuppressions.emailHash, visitorEmailHash(recipient))
+    ))
+    await db.delete(schema.resendSuppressionEvents)
+      .where(eq(schema.resendSuppressionEvents.providerMessageId, providerMessageId))
   })
 
   it('cancels delivery when the visitor already read the agent response', async () => {

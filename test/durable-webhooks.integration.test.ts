@@ -81,6 +81,8 @@ describe.skipIf(!databaseUrl)('durable webhook database delivery', () => {
     await enqueue()
     await db.update(schema.webhookEndpoints).set({ secret: 'whsec_rotated' }).where(eq(schema.webhookEndpoints.id, target.id))
     const calls: Array<{ body: string, headers: Record<string, string> }> = []
+    // Jobs default to the database clock, so keep the sweep just ahead of the
+    // test run instead of pinning it to a date that eventually becomes stale.
     const first = new Date(Date.now() + 1000)
     await runWebhookDeliverySweep({
       db,

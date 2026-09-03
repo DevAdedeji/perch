@@ -180,9 +180,18 @@ export async function startWorkspaceCheckout(input: {
   const now = new Date()
   const staleClaim = new Date(now.getTime() - CHECKOUT_CREATION_LEASE_MS)
   const reservation = await db.transaction(async (tx) => {
-    const [workspace] = await tx.select({ id: workspaces.id }).from(workspaces)
+    const [workspace] = await tx.select({
+      id: workspaces.id,
+      deletionRequestedAt: workspaces.deletionRequestedAt
+    }).from(workspaces)
       .where(eq(workspaces.id, input.workspaceId)).limit(1).for('update')
     if (!workspace) throw createError({ statusCode: 404, statusMessage: 'Workspace not found.' })
+    if (workspace.deletionRequestedAt) {
+      throw createError({
+        statusCode: 409,
+        statusMessage: 'Workspace deletion has started, so a new paid checkout cannot be created.'
+      })
+    }
 
     const subscription = await tx.query.workspaceSubscriptions.findFirst({
       where: eq(workspaceSubscriptions.workspaceId, input.workspaceId)
@@ -767,6 +776,11 @@ async function claimBillingReconciliation(
     updatedAt: sql`now()`
   }).where(and(
     eq(billingReconciliationJobs.workspaceId, workspaceId),
+    sql`exists (
+      select 1 from ${workspaces}
+      where ${workspaces.id} = ${billingReconciliationJobs.workspaceId}
+        and ${workspaces.deletionRequestedAt} is null
+    )`,
     or(
       ne(billingReconciliationJobs.status, 'processing'),
       isNull(billingReconciliationJobs.claimedAt),

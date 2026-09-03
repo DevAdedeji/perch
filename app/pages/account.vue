@@ -155,10 +155,19 @@ const changingPassword = ref(false)
 const deleteAccountOpen = ref(false)
 const deleteAccountPassword = ref('')
 const deletingAccount = ref(false)
+const deleteAccountError = ref('')
+
+watch(deleteAccountOpen, (open) => {
+  if (!open) {
+    deleteAccountPassword.value = ''
+    deleteAccountError.value = ''
+  }
+})
 
 async function deleteAccount() {
   if (!deleteAccountPassword.value || deletingAccount.value) return
   deletingAccount.value = true
+  deleteAccountError.value = ''
   try {
     await $fetch('/api/auth/account', {
       method: 'DELETE',
@@ -167,7 +176,8 @@ async function deleteAccount() {
     await refresh()
     await navigateTo('/')
   } catch (e) {
-    toast.add({ title: getErrorMessage(e, 'Could not delete account'), color: 'error' })
+    deleteAccountError.value = getErrorMessage(e, 'Could not delete account')
+    toast.add({ title: deleteAccountError.value, color: 'error' })
   } finally {
     deletingAccount.value = false
   }
@@ -525,21 +535,35 @@ async function changePassword() {
     <UModal
       v-model:open="deleteAccountOpen"
       title="Delete your account?"
-      description="Your login and any workspace where you're the only member will be permanently deleted."
+      description="Your login and any workspace where you're the only member will be permanently deleted. Perch will confirm renewal is canceled for paid workspaces first."
     >
       <template #body>
-        <UFormField label="Confirm with your password">
-          <PasswordInput
-            v-model="deleteAccountPassword"
-            autocomplete="current-password"
+        <div class="space-y-4">
+          <UAlert
+            v-if="deleteAccountError"
+            color="error"
+            variant="soft"
+            icon="i-lucide-circle-alert"
+            title="Account was not deleted"
+            :description="deleteAccountError"
           />
-        </UFormField>
+          <UFormField label="Confirm with your password">
+            <PasswordInput
+              v-model="deleteAccountPassword"
+              autocomplete="current-password"
+            />
+          </UFormField>
+          <p class="text-xs text-muted">
+            Keep this page open while Perch checks billing. If cancellation cannot be confirmed, nothing is deleted and you can retry safely.
+          </p>
+        </div>
       </template>
       <template #footer>
         <div class="flex justify-end gap-2 w-full">
           <UButton
             color="neutral"
             variant="ghost"
+            :disabled="deletingAccount"
             @click="deleteAccountOpen = false"
           >
             Cancel

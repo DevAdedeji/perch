@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { drizzle } from '../packages/db/node_modules/drizzle-orm/postgres-js/index.js'
-import { and, eq } from '../packages/db/node_modules/drizzle-orm/index.js'
+import { and, eq, inArray } from '../packages/db/node_modules/drizzle-orm/index.js'
 import postgres from '../packages/db/node_modules/postgres/src/index.js'
 import * as schema from '../packages/db/src/schema'
-import { applyResendVisitorSuppression } from '../server/utils/resend-webhooks'
+import { applyResendVisitorSuppression, runResendSuppressionSweep } from '../server/utils/resend-webhooks'
 
 const databaseUrl = process.env.TEST_DATABASE_URL
 
@@ -18,6 +18,11 @@ describe.skipIf(!databaseUrl)('Resend suppression database integration', () => {
   const conversationId = randomUUID()
   const otherConversationId = randomUUID()
   const emailHash = 'stable-private-email-hash'
+  const providerMessageIds = [
+    'resend-provider-message-1',
+    'unknown-provider-message',
+    'never-linked-provider-message'
+  ]
 
   beforeAll(async () => {
     Object.assign(globalThis, { useDb: () => db })
@@ -36,6 +41,10 @@ describe.skipIf(!databaseUrl)('Resend suppression database integration', () => {
   })
 
   afterAll(async () => {
+    await db.delete(schema.resendSuppressionEvents).where(inArray(
+      schema.resendSuppressionEvents.providerMessageId,
+      providerMessageIds
+    ))
     await db.delete(schema.workspaces).where(eq(schema.workspaces.id, workspaceId))
     await db.delete(schema.workspaces).where(eq(schema.workspaces.id, otherWorkspaceId))
     await client.end()
@@ -118,5 +127,28 @@ describe.skipIf(!databaseUrl)('Resend suppression database integration', () => {
       )
     })
     expect(suppression?.reason).toBe('complaint')
+  })
+
+  it('retains an unmatched signed event and dead-letters only after bounded retries', async () => {
+    const started = new Date('2026-09-03T08:00:00.000Z')
+    expect(await applyResendVisitorSuppression(
+      'never-linked-provider-message',
+      'bounce',
+      db,
+      started
+    )).toEqual({ matched: 0, canceled: 0 })
+    expect(await db.query.resendSuppressionEvents.findFirst({
+      where: eq(schema.resendSuppressionEvents.providerMessageId, 'never-linked-provider-message')
+    })).toMatchObject({ status: 'pending', attempts: 0 })
+
+    for (let attempt = 1; attempt <= 6; attempt++) {
+      await runResendSuppressionSweep({
+        db,
+        now: new Date(started.getTime() + attempt * 7 * 60 * 60_000)
+      })
+    }
+    expect(await db.query.resendSuppressionEvents.findFirst({
+      where: eq(schema.resendSuppressionEvents.providerMessageId, 'never-linked-provider-message')
+    })).toMatchObject({ status: 'dead_letter', attempts: 6 })
   })
 })

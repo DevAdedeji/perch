@@ -424,6 +424,149 @@ describe.skipIf(!databaseUrl)('secure attachment lifecycle', () => {
     createdIds.push(...tracked.filter(row => row.id !== upload.id).map(row => row.id))
   })
 
+  it('does not queue a legacy public id still referenced by another workspace', async () => {
+    const doomedWorkspaceId = randomUUID()
+    const doomedVisitorId = randomUUID()
+    const doomedConversationId = randomUUID()
+    const externalVisitorId = randomUUID()
+    const externalConversationId = randomUUID()
+    const sharedMessagePublicId = 'perch/shared/legacy-message'
+    const sharedLogoPublicId = 'perch/shared/legacy-logo'
+    await db.insert(schema.workspaces).values({
+      id: doomedWorkspaceId,
+      name: 'Shared legacy assets',
+      siteId: `site_${randomUUID()}`,
+      logoUrl: `https://res.cloudinary.com/perch-test/image/upload/v1/${sharedLogoPublicId}.png`
+    })
+    await db.update(schema.workspaces).set({
+      logoUrl: `https://res.cloudinary.com/perch-test/image/upload/v99/${sharedLogoPublicId}.webp`
+    }).where(eq(schema.workspaces.id, otherWorkspaceId))
+    await db.insert(schema.visitors).values([
+      { id: doomedVisitorId, workspaceId: doomedWorkspaceId, visitorId: `visitor_${randomUUID()}` },
+      { id: externalVisitorId, workspaceId: otherWorkspaceId, visitorId: `visitor_${randomUUID()}` }
+    ])
+    await db.insert(schema.conversations).values([
+      { id: doomedConversationId, workspaceId: doomedWorkspaceId, visitorRef: doomedVisitorId },
+      { id: externalConversationId, workspaceId: otherWorkspaceId, visitorRef: externalVisitorId }
+    ])
+    await db.insert(schema.messages).values([
+      {
+        conversationId: doomedConversationId,
+        senderType: 'visitor',
+        content: '',
+        attachmentUrl: `https://res.cloudinary.com/perch-test/image/upload/v1/${sharedMessagePublicId}.png`,
+        attachmentType: 'image/png'
+      },
+      {
+        conversationId: externalConversationId,
+        senderType: 'visitor',
+        content: '',
+        attachmentUrl: `https://res.cloudinary.com/perch-test/image/upload/v42/${sharedMessagePublicId}.webp`,
+        attachmentType: 'image/webp'
+      }
+    ])
+
+    await db.transaction(async (tx) => {
+      await queueWorkspaceAttachmentCleanup(tx, {
+        workspaceId: doomedWorkspaceId,
+        uploaderUserId: userId,
+        legacyLogoUrl: `https://res.cloudinary.com/perch-test/image/upload/v1/${sharedLogoPublicId}.png`
+      })
+      await tx.delete(schema.workspaces).where(eq(schema.workspaces.id, doomedWorkspaceId))
+    })
+
+    expect(await db.query.attachmentAssets.findFirst({
+      where: inArray(schema.attachmentAssets.publicId, [sharedMessagePublicId, sharedLogoPublicId])
+    })).toBeUndefined()
+    await db.update(schema.workspaces).set({ logoUrl: null })
+      .where(eq(schema.workspaces.id, otherWorkspaceId))
+  })
+
+  it('does not queue a tracked asset still referenced by another workspace legacy URL', async () => {
+    const doomedWorkspaceId = randomUUID()
+    const externalVisitorId = randomUUID()
+    const externalConversationId = randomUUID()
+    await db.insert(schema.workspaces).values({
+      id: doomedWorkspaceId,
+      name: 'Tracked shared asset',
+      siteId: `site_${randomUUID()}`
+    })
+    const tracked = await asset({ workspaceId: doomedWorkspaceId })
+    await db.update(schema.attachmentAssets).set({ state: 'claimed', claimedAt: new Date() })
+      .where(eq(schema.attachmentAssets.id, tracked.id))
+    await db.insert(schema.visitors).values({
+      id: externalVisitorId,
+      workspaceId: otherWorkspaceId,
+      visitorId: `visitor_${randomUUID()}`
+    })
+    await db.insert(schema.conversations).values({
+      id: externalConversationId,
+      workspaceId: otherWorkspaceId,
+      visitorRef: externalVisitorId
+    })
+    await db.insert(schema.messages).values({
+      conversationId: externalConversationId,
+      senderType: 'visitor',
+      content: '',
+      attachmentUrl: `https://res.cloudinary.com/perch-test/image/upload/v42/${tracked.publicId}.webp`,
+      attachmentType: 'image/webp'
+    })
+
+    await db.transaction(async (tx) => {
+      await queueWorkspaceAttachmentCleanup(tx, {
+        workspaceId: doomedWorkspaceId,
+        uploaderUserId: userId
+      })
+      await tx.delete(schema.workspaces).where(eq(schema.workspaces.id, doomedWorkspaceId))
+    })
+
+    expect((await db.query.attachmentAssets.findFirst({
+      where: eq(schema.attachmentAssets.id, tracked.id)
+    }))?.state).toBe('claimed')
+  })
+
+  it('rechecks legacy references before calling the attachment provider', async () => {
+    const guarded = await asset()
+    const externalVisitorId = randomUUID()
+    const externalConversationId = randomUUID()
+    const now = new Date('2026-09-03T12:00:00.000Z')
+    await db.transaction(tx => queueAssetCleanup(tx, guarded.id, 'workspace_deleted', now))
+    await db.insert(schema.visitors).values({
+      id: externalVisitorId,
+      workspaceId: otherWorkspaceId,
+      visitorId: `visitor_${randomUUID()}`
+    })
+    await db.insert(schema.conversations).values({
+      id: externalConversationId,
+      workspaceId: otherWorkspaceId,
+      visitorRef: externalVisitorId
+    })
+    await db.insert(schema.messages).values({
+      conversationId: externalConversationId,
+      senderType: 'visitor',
+      content: '',
+      attachmentUrl: `https://res.cloudinary.com/perch-test/image/upload/v99/${guarded.publicId}.avif`,
+      attachmentType: 'image/avif'
+    })
+    const providerCalls: string[] = []
+
+    await runAttachmentCleanupSweep({
+      db,
+      now,
+      transport: async ({ publicId }) => {
+        providerCalls.push(publicId)
+        return { result: 'ok' }
+      }
+    })
+
+    const retained = await db.query.attachmentAssets.findFirst({
+      where: eq(schema.attachmentAssets.id, guarded.id)
+    })
+    expect(providerCalls).not.toContain(guarded.publicId)
+    expect(retained?.state).toBe('dead_letter')
+    expect(retained?.cleanupLastError).toBe('{"type":"SharedLegacyReference"}')
+  })
+
   it('claims a logo once, binds it to the workspace, and queues replacement', async () => {
     const logo = await asset({ workspaceId: null, kind: 'logo' })
     const claimed = await db.transaction(tx => claimLogoAttachment(tx, {

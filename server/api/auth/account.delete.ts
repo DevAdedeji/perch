@@ -1,4 +1,4 @@
-import { and, count, eq, inArray, sessions, sql, users, workspaceMembers, workspaces } from '@perch/db'
+import { eq, users } from '@perch/db'
 import { z } from 'zod'
 
 const schema = z.object({
@@ -35,57 +35,17 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 401, statusMessage: 'Incorrect password' })
   }
 
-  const deletion = await db.transaction(async (tx) => {
-    const memberships = await tx.query.workspaceMembers.findMany({
-      where: eq(workspaceMembers.userId, user.id)
-    })
-    // Stable ordering avoids deadlocks when two users share several workspaces.
-    for (const workspaceId of memberships.map(m => m.workspaceId).sort()) {
-      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${workspaceId}))`)
-    }
-
-    const soloWorkspaceIds: string[] = []
-    for (const membership of memberships) {
-      const [total] = await tx.select({ n: count() }).from(workspaceMembers)
-        .where(eq(workspaceMembers.workspaceId, membership.workspaceId))
-      if (Number(total?.n) === 1) {
-        soloWorkspaceIds.push(membership.workspaceId)
-        continue
-      }
-      if (membership.role === 'admin') {
-        const [admins] = await tx.select({ n: count() }).from(workspaceMembers).where(and(
-          eq(workspaceMembers.workspaceId, membership.workspaceId), eq(workspaceMembers.role, 'admin')
-        ))
-        if (Number(admins?.n) === 1) {
-          const workspace = await tx.query.workspaces.findFirst({ where: eq(workspaces.id, membership.workspaceId) })
-          throw createError({
-            statusCode: 409,
-            statusMessage: `You're the only admin of "${workspace?.name ?? 'a workspace'}" — promote a teammate or delete that workspace first`
-          })
-        }
-      }
-    }
-
-    const activeSessions = await tx.query.sessions.findMany({
-      where: eq(sessions.userId, user.id), columns: { id: true }
-    })
-    if (soloWorkspaceIds.length) {
-      const soloWorkspaces = await tx.query.workspaces.findMany({ where: inArray(workspaces.id, soloWorkspaceIds) })
-      for (const workspace of soloWorkspaces) {
-        await queueWorkspaceAttachmentCleanup(tx, {
-          workspaceId: workspace.id,
-          uploaderUserId: user.id,
-          legacyLogoUrl: workspace.logoAssetId ? null : workspace.logoUrl
-        })
-      }
-      await tx.delete(workspaces).where(inArray(workspaces.id, soloWorkspaceIds))
-    }
-    await queueUnattachedUserUploads(tx, user.id)
-    await tx.delete(users).where(eq(users.id, user.id))
-    return {
-      revokedSessionIds: activeSessions.map(row => row.id),
-      soloWorkspaceIds
-    }
+  const preparation = await prepareAccountDeletion(user.id)
+  const billingConfirmations = []
+  for (const requirement of preparation.requirements) {
+    const confirmation = await confirmSubscriptionWillNotRenew(requirement)
+    await recordBillingDeletionConfirmation(confirmation, 'account')
+    billingConfirmations.push(confirmation)
+  }
+  const deletion = await finalizeAccountDeletion({
+    userId: user.id,
+    preparedWorkspaceIds: preparation.workspaceIds,
+    billingConfirmations
   })
 
   logDeletionReceipt({
