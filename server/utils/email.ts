@@ -63,7 +63,7 @@ export async function sendEmailDetailed({ to, subject, html, idempotencyKey }: S
   const from = config.emailFrom || process.env.RESEND_FROM || `Perch <no-reply@${new URL(PERCH_PRODUCTION_ORIGIN).hostname}>`
 
   if (!apiKey) {
-    console.warn(`[email] RESEND_API_KEY not set — skipped "${subject}"`)
+    console.warn('[email] provider is not configured; delivery skipped')
     return { accepted: false, providerMessageId: null, retryable: true, error: 'email_provider_not_configured' }
   }
 
@@ -88,7 +88,7 @@ export async function sendEmailDetailed({ to, subject, html, idempotencyKey }: S
     const status = failure.statusCode ?? failure.status
     const retryable = status === undefined || status === 408 || status === 429 || (typeof status === 'number' && status >= 500)
     const error = `email_provider_${status ?? 'network'}`
-    console.error(`[email] failed to send "${subject}":`, error)
+    console.error('[email] provider request failed', { status: status ?? 'network', retryable })
     return { accepted: false, providerMessageId: null, retryable, error }
   }
 }

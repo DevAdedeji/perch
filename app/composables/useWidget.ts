@@ -104,8 +104,7 @@ export function useWidget(
       site_id: siteId,
       embed_ticket: embedTicket,
       visitor_session: visitorSession || undefined,
-      page_url: document.referrer,
-      ua: navigator.userAgent
+      page_url: document.referrer
     })
     let res: SessionResponse
     try {

@@ -11,7 +11,7 @@ export default defineEventHandler(async (event) => {
   event.context.requestId = requestId
   setResponseHeader(event, 'X-Request-Id', requestId)
   setResponseHeader(event, 'X-Frame-Options', 'DENY')
-  setResponseHeader(event, 'Content-Security-Policy', contentSecurityPolicy('\'none\''))
+  setResponseHeader(event, 'Content-Security-Policy', contentSecurityPolicy('\'none\'', import.meta.dev))
   setResponseHeader(event, 'Cross-Origin-Opener-Policy', 'same-origin')
   setResponseHeader(event, 'X-Content-Type-Options', 'nosniff')
   setResponseHeader(event, 'Referrer-Policy', path.startsWith('/reply') ? 'no-referrer' : 'strict-origin-when-cross-origin')
@@ -75,6 +75,6 @@ export default defineEventHandler(async (event) => {
         : '*'
     removeResponseHeader(event, 'X-Frame-Options')
     removeResponseHeader(event, 'Cross-Origin-Opener-Policy')
-    setResponseHeader(event, 'Content-Security-Policy', contentSecurityPolicy(ancestors))
+    setResponseHeader(event, 'Content-Security-Policy', contentSecurityPolicy(ancestors, import.meta.dev))
   }
 })

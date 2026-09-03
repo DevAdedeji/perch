@@ -1,6 +1,6 @@
 import { safeErrorSummary } from '../utils/request-security'
 
-const REMINDER_SWEEP_INTERVAL = 60_000
+const PRIVACY_SWEEP_INTERVAL = 60 * 60 * 1000
 
 export default defineNitroPlugin(() => {
   if (import.meta.prerender) return
@@ -9,13 +9,13 @@ export default defineNitroPlugin(() => {
     if (running) return
     running = true
     try {
-      await runUnansweredReminderSweep()
+      await runPrivacyRetentionSweep()
     } catch (error) {
-      console.error('[reminders] sweep failed', safeErrorSummary(error))
+      console.error('[privacy-retention] sweep failed', safeErrorSummary(error))
     } finally {
       running = false
     }
   }
-  setTimeout(sweep, 10_000).unref()
-  setInterval(sweep, REMINDER_SWEEP_INTERVAL).unref()
+  setTimeout(sweep, 30_000).unref()
+  setInterval(sweep, PRIVACY_SWEEP_INTERVAL).unref()
 })

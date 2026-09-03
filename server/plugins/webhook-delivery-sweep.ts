@@ -1,3 +1,5 @@
+import { safeErrorSummary } from '../utils/request-security'
+
 const WEBHOOK_SWEEP_INTERVAL = 15_000
 
 export default defineNitroPlugin(() => {
@@ -9,7 +11,7 @@ export default defineNitroPlugin(() => {
     try {
       await runWebhookDeliverySweep()
     } catch (error) {
-      console.error('[webhooks] delivery sweep failed', safeWebhookError(error))
+      console.error('[webhooks] delivery sweep failed', safeErrorSummary(error))
     } finally {
       running = false
     }

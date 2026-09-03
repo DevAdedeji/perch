@@ -63,9 +63,12 @@ describe('API request boundaries', () => {
 
 describe('browser security policy', () => {
   it('keeps active content and framing locked down without blocking approved widget ancestors', () => {
-    expect(contentSecurityPolicy('\'none\'')).toBe(
-      'base-uri \'self\'; object-src \'none\'; form-action \'self\'; frame-ancestors \'none\''
-    )
+    const dashboard = contentSecurityPolicy('\'none\'')
+    expect(dashboard).toContain('default-src \'self\'')
+    expect(dashboard).toContain('object-src \'none\'')
+    expect(dashboard).toContain('script-src-attr \'none\'')
+    expect(dashboard).toContain('frame-ancestors \'none\'')
+    expect(dashboard).not.toContain('\'unsafe-eval\'')
     expect(contentSecurityPolicy('https://example.com')).toContain('frame-ancestors https://example.com')
   })
 

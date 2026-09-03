@@ -74,7 +74,9 @@ async function changeEmail() {
 /* active sessions */
 interface SessionRow {
   id: string
-  user_agent: string | null
+  browser: string
+  os: string | null
+  device_type: 'desktop' | 'mobile' | 'tablet' | 'unknown'
   ip: string | null
   created_at: string
   last_seen_at: string
@@ -97,23 +99,8 @@ async function loadSessions() {
 }
 onMounted(loadSessions)
 
-function deviceLabel(ua: string | null) {
-  if (!ua) return 'Unknown device'
-  const browser = /edg\//i.test(ua)
-    ? 'Edge'
-    : /firefox/i.test(ua)
-      ? 'Firefox'
-      : /chrome|crios/i.test(ua)
-        ? 'Chrome'
-        : /safari/i.test(ua) ? 'Safari' : 'Browser'
-  const os = /iphone|ipad/i.test(ua)
-    ? 'iOS'
-    : /android/i.test(ua)
-      ? 'Android'
-      : /mac os/i.test(ua)
-        ? 'macOS'
-        : /windows/i.test(ua) ? 'Windows' : /linux/i.test(ua) ? 'Linux' : ''
-  return os ? `${browser} · ${os}` : browser
+function deviceLabel(row: SessionRow) {
+  return row.os ? `${row.browser} · ${row.os}` : row.browser
 }
 
 function lastSeenLabel(iso: string) {
@@ -400,12 +387,12 @@ async function changePassword() {
             class="flex items-center gap-3 rounded-xl bg-elevated/50 ring-1 ring-default px-4 py-3"
           >
             <UIcon
-              :name="/iphone|ipad|android/i.test(s.user_agent ?? '') ? 'i-lucide-smartphone' : 'i-lucide-monitor'"
+              :name="s.device_type === 'mobile' ? 'i-lucide-smartphone' : s.device_type === 'tablet' ? 'i-lucide-tablet' : 'i-lucide-monitor'"
               class="size-4.5 shrink-0 text-dimmed"
             />
             <div class="min-w-0 flex-1">
               <p class="text-sm font-medium text-highlighted truncate">
-                {{ deviceLabel(s.user_agent) }}
+                {{ deviceLabel(s) }}
                 <UBadge
                   v-if="s.current"
                   color="success"

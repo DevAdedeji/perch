@@ -1,5 +1,6 @@
 import { auditLogs } from '@perch/db'
 import type { SessionUser } from './require-user'
+import { safeErrorSummary } from './request-security'
 
 /**
  * Append a workspace audit entry. Fire-and-forget by design: an audit write
@@ -17,7 +18,7 @@ export function logAudit(
     actorName: actor.name,
     action,
     detail
-  }).catch((err) => {
-    console.error('[audit] write failed:', err)
+  }).catch((error) => {
+    console.error('[audit] write failed', safeErrorSummary(error))
   })
 }

@@ -1,6 +1,7 @@
 import { and, conversations, desc, eq, ne, visitors } from '@perch/db'
 import { channels } from '@perch/shared'
 import { z } from 'zod'
+import { safeErrorSummary } from '../../utils/request-security'
 
 const schema = z.object({
   site_id: z.string().min(1),
@@ -111,7 +112,10 @@ export default defineEventHandler(async (event) => {
           }, inboxScope(workspace.id, automated.conversation.assignedAgentId, automated.conversation.collaboratorMemberIds))
         }
       } catch (error) {
-        console.error('[automation] identify pass failed', { conversationId: conversation.id, error })
+        console.error('[automation] identify pass failed', {
+          conversationId: conversation.id,
+          ...safeErrorSummary(error)
+        })
       }
     }
   }

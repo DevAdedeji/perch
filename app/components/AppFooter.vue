@@ -1,18 +1,24 @@
 <script setup lang="ts">
-const cols = [
+interface FooterLink {
+  label: string
+  to: string
+  external?: boolean
+}
+
+const cols: Array<{ title: string, links: FooterLink[] }> = [
   {
     title: 'Product',
     links: [
       { label: 'Get started', to: '/signup' },
-      { label: 'Sign in', to: '/login' },
-      { label: 'Status', to: '/api/health', external: true }
+      { label: 'Pricing', to: '/pricing' },
+      { label: 'Sign in', to: '/login' }
     ]
   },
   {
-    title: 'Developers',
+    title: 'Support',
     links: [
-      { label: 'Source on GitHub', to: 'https://github.com/DevAdedeji/perch', external: true },
-      { label: 'Report an issue', to: 'https://github.com/DevAdedeji/perch/issues', external: true }
+      { label: 'Email support', to: 'mailto:adedejitewogbade2@gmail.com', external: true },
+      { label: 'Service health', to: '/api/health', external: true }
     ]
   },
   {
@@ -36,18 +42,6 @@ const year = new Date().getFullYear()
           <p class="mt-4 max-w-xs text-sm text-muted leading-relaxed">
             Real-time live chat for support teams. One script tag from “hello” to “how can I help?”.
           </p>
-          <div class="mt-5 flex items-center gap-2">
-            <UButton
-              icon="i-simple-icons-github"
-              to="https://github.com/DevAdedeji/perch"
-              target="_blank"
-              color="neutral"
-              variant="soft"
-              size="sm"
-              square
-              aria-label="Perch on GitHub"
-            />
-          </div>
         </div>
 
         <div
@@ -65,8 +59,8 @@ const year = new Date().getFullYear()
               <a
                 v-if="link.external"
                 :href="link.to"
-                target="_blank"
-                rel="noreferrer"
+                :target="link.to.startsWith('mailto:') ? undefined : '_blank'"
+                :rel="link.to.startsWith('mailto:') ? undefined : 'noreferrer'"
                 class="text-sm text-muted hover:text-highlighted transition-colors"
               >{{ link.label }}</a>
               <NuxtLink
