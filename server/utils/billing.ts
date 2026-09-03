@@ -10,6 +10,7 @@ import {
   ensurePerchProProduct,
   getBachsCheckoutSession,
   getBachsSubscription,
+  inspectBachsCheckoutUrl,
   isApprovedBachsCheckoutUrl,
   productMatchesPerchPlan,
   BACHS_MAX_GET_ATTEMPTS
@@ -302,7 +303,12 @@ export async function startWorkspaceCheckout(input: {
         invoiceReference: reservation.invoice.reference
       }
     })
-    if (!isApprovedBachsCheckoutUrl(checkout.checkout_url)) {
+    const checkoutUrlInspection = inspectBachsCheckoutUrl(checkout.checkout_url)
+    if (!checkoutUrlInspection.approved) {
+      console.error('[billing] Bachs checkout URL rejected', {
+        reason: checkoutUrlInspection.reason,
+        ...(checkoutUrlInspection.hostname ? { hostname: checkoutUrlInspection.hostname } : {})
+      })
       throw createError({ statusCode: 502, statusMessage: 'Bachs did not return a trusted checkout URL.' })
     }
     const canonicalCheckout = await getBachsCheckoutSession(checkout.checkout_id)

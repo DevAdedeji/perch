@@ -219,12 +219,35 @@ export function verifyBachsWebhookSignature(
 }
 
 export function isApprovedBachsCheckoutUrl(value: string | undefined): value is string {
-  if (!value) return false
+  return inspectBachsCheckoutUrl(value).approved
+}
+
+type BachsCheckoutUrlInspection
+  = | { approved: true, reason: 'approved', hostname: 'checkout.bachs.io' }
+    | {
+      approved: false
+      reason: 'missing' | 'malformed' | 'non_https' | 'embedded_credentials' | 'untrusted_hostname'
+      hostname?: string
+    }
+
+function checkoutHostnameForLog(hostname: string) {
+  const sanitized = hostname.toLowerCase().replace(/[^a-z0-9.:[\]-]/g, '_').slice(0, 253)
+  return sanitized || undefined
+}
+
+export function inspectBachsCheckoutUrl(value: string | undefined): BachsCheckoutUrlInspection {
+  if (!value) return { approved: false, reason: 'missing' }
   try {
     const url = new URL(value)
-    return url.protocol === 'https:' && url.hostname === 'checkout.bachs.io' && !url.username && !url.password
+    const hostname = checkoutHostnameForLog(url.hostname)
+    if (url.protocol !== 'https:') return { approved: false, reason: 'non_https', hostname }
+    if (url.username || url.password) return { approved: false, reason: 'embedded_credentials', hostname }
+    if (url.hostname !== 'checkout.bachs.io') {
+      return { approved: false, reason: 'untrusted_hostname', hostname }
+    }
+    return { approved: true, reason: 'approved', hostname: 'checkout.bachs.io' }
   } catch {
-    return false
+    return { approved: false, reason: 'malformed' }
   }
 }
 
