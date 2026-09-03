@@ -180,6 +180,35 @@ describe.skipIf(!databaseUrl)('visitor email continuity database integration', (
     ])
   })
 
+  it('does not mark a delivery sent when the provider omits its message ID', async () => {
+    const turn = await createTurn('2026-09-02T12:20:00Z')
+    const deliveryId = randomUUID()
+    await db.insert(schema.visitorReplyDeliveries).values({
+      id: deliveryId,
+      workspaceId,
+      conversationId,
+      visitorRef: visitorId,
+      visitorMessageId: turn.visitorMessageId,
+      agentMessageId: turn.agentMessageId,
+      recipientEmailHash: visitorEmailHash(recipient),
+      nextAttemptAt: new Date('2026-09-02T12:21:30Z'),
+      tokenExpiresAt: new Date('2026-09-09T12:20:00Z')
+    })
+
+    await runVisitorReplyEmailSweep({
+      now: new Date('2026-09-02T12:22:00Z'),
+      sender: async () => ({ accepted: true, providerMessageId: null, retryable: false, error: null })
+    })
+
+    const delivery = await db.query.visitorReplyDeliveries.findFirst({ where: eq(schema.visitorReplyDeliveries.id, deliveryId) })
+    expect(delivery).toMatchObject({
+      status: 'failed',
+      attempts: 1,
+      providerMessageId: null,
+      lastError: 'email_provider_message_id_missing'
+    })
+  })
+
   it('recovers a stale final-attempt claim without exceeding the retry bound', async () => {
     const turn = await createTurn('2026-09-02T13:00:00Z')
     const deliveryId = randomUUID()

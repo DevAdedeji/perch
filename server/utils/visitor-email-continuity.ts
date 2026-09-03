@@ -355,10 +355,18 @@ async function deliverOne(
     error.retryable = result.retryable
     throw error
   }
+  if (!result.providerMessageId) {
+    const error = new Error('email_provider_message_id_missing') as Error & { retryable?: boolean }
+    error.retryable = true
+    throw error
+  }
   await useDb().update(visitorReplyDeliveries).set({
     status: 'sent', sentAt: now, lockedAt: null, providerMessageId: result.providerMessageId,
     lastError: null, updatedAt: sql`now()`
-  }).where(eq(visitorReplyDeliveries.id, delivery.id))
+  }).where(and(
+    eq(visitorReplyDeliveries.id, delivery.id),
+    eq(visitorReplyDeliveries.status, 'processing')
+  ))
 }
 
 export async function runVisitorReplyEmailSweep(options: { now?: Date, sender?: VisitorReplyEmailSender } = {}) {
@@ -380,7 +388,10 @@ export async function runVisitorReplyEmailSweep(options: { now?: Date, sender?: 
         nextAttemptAt: replyEmailRetryAt(delivery.attempts, now),
         lastError: String(error.message || 'delivery_failed').slice(0, 200),
         updatedAt: sql`now()`
-      }).where(eq(visitorReplyDeliveries.id, delivery.id))
+      }).where(and(
+        eq(visitorReplyDeliveries.id, delivery.id),
+        eq(visitorReplyDeliveries.status, 'processing')
+      ))
     }
   }
   return { processed: deliveries.length }
