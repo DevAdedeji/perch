@@ -111,6 +111,7 @@ export default defineEventHandler(async (event) => {
   const expectedPrefix = workspaceId ? `perch/${workspaceId}/` : `perch/users/${uploaderUserId}/`
   if (providerUpload.bytes > ATTACHMENT_MAX_BYTES
     || !isOwnCloudinaryImageUrl(providerUpload.secure_url, cloudName)
+    || cloudinaryPublicIdFromUrl(providerUpload.secure_url, cloudName) !== providerUpload.public_id
     || !providerUpload.public_id.startsWith(expectedPrefix)) {
     if (providerUpload.public_id.startsWith(expectedPrefix)) {
       try {
