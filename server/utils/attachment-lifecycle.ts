@@ -2,9 +2,13 @@ import {
   and,
   asc,
   attachmentAssets,
+  conversations,
   eq,
+  gte,
   inArray,
+  isNull,
   lt,
+  messages,
   or,
   sql
 } from '@perch/db'
@@ -96,6 +100,25 @@ export async function registerAttachmentAsset(input: {
   return asset!
 }
 
+export async function finalizeAttachmentAssetRegistration(input: {
+  assetId: string
+  publicId: string
+  secureUrl: string
+  byteSize: number
+}, db: Database = useDb()) {
+  const [asset] = await db.update(attachmentAssets).set({
+    secureUrl: input.secureUrl,
+    byteSize: input.byteSize,
+    updatedAt: sql`now()`
+  }).where(and(
+    eq(attachmentAssets.id, input.assetId),
+    eq(attachmentAssets.publicId, input.publicId),
+    eq(attachmentAssets.state, 'pending')
+  )).returning()
+  if (!asset) throw new Error('Attachment upload intent is no longer pending')
+  return asset
+}
+
 export async function claimMessageAttachment(tx: DbTransaction, input: {
   workspaceId: string
   secureUrl: string
@@ -148,7 +171,7 @@ export async function claimLogoAttachment(tx: DbTransaction, input: {
 export async function queueAssetCleanup(
   tx: DbExecutor,
   assetId: string,
-  reason: 'logo_replaced' | 'logo_removed' | 'workspace_deleted' | 'account_deleted',
+  reason: 'logo_replaced' | 'logo_removed' | 'workspace_deleted' | 'account_deleted' | 'upload_failed',
   now = new Date()
 ) {
   await tx.update(attachmentAssets).set({
@@ -189,18 +212,7 @@ export async function queueLegacyLogoCleanup(
     state: 'retrying',
     cleanupReason: input.reason,
     cleanupNextAttemptAt: now
-  }).onConflictDoUpdate({
-    target: attachmentAssets.publicId,
-    set: {
-      state: 'retrying',
-      cleanupAttempts: sql`case when ${attachmentAssets.state} = 'dead_letter' then 0 else ${attachmentAssets.cleanupAttempts} end`,
-      cleanupReason: input.reason,
-      cleanupNextAttemptAt: now,
-      cleanupLockedAt: null,
-      cleanupLastError: null,
-      updatedAt: sql`now()`
-    }
-  })
+  }).onConflictDoNothing({ target: attachmentAssets.publicId })
 }
 
 export async function queueWorkspaceAttachmentCleanup(
@@ -220,6 +232,36 @@ export async function queueWorkspaceAttachmentCleanup(
     eq(attachmentAssets.workspaceId, input.workspaceId),
     inArray(attachmentAssets.state, ['pending', 'claimed', 'retrying', 'dead_letter'])
   ))
+
+  const legacyMessages = await tx.select({
+    secureUrl: messages.attachmentUrl,
+    mimeType: messages.attachmentType
+  }).from(messages).innerJoin(
+    conversations,
+    eq(messages.conversationId, conversations.id)
+  ).where(and(
+    eq(conversations.workspaceId, input.workspaceId),
+    isNull(messages.attachmentAssetId),
+    sql`${messages.attachmentUrl} is not null`
+  ))
+  const config = cloudinaryConfig()
+  for (const message of legacyMessages) {
+    if (!message.secureUrl) continue
+    const publicId = cloudinaryPublicIdFromUrl(message.secureUrl, config.cloudName)
+    if (!publicId) continue
+    await tx.insert(attachmentAssets).values({
+      workspaceId: input.workspaceId,
+      uploaderUserId: input.uploaderUserId,
+      kind: 'message',
+      publicId,
+      secureUrl: message.secureUrl,
+      mimeType: message.mimeType ?? 'image/*',
+      byteSize: 0,
+      state: 'retrying',
+      cleanupReason: 'workspace_deleted',
+      cleanupNextAttemptAt: now
+    }).onConflictDoNothing({ target: attachmentAssets.publicId })
+  }
 
   if (!input.legacyLogoUrl) return
   await queueLegacyLogoCleanup(tx, {
@@ -272,10 +314,26 @@ async function claimCleanupAssets(db: Database, now: Date) {
   return db.transaction(async (tx) => {
     const abandonedBefore = new Date(now.getTime() - ATTACHMENT_ABANDONED_AFTER_MS)
     const staleBefore = new Date(now.getTime() - ATTACHMENT_CLEANUP_STALE_MS)
+    // A crashed worker may leave its final allowed attempt in processing.
+    // Exhaust it without making an unbounded sixth provider call.
+    await tx.update(attachmentAssets).set({
+      state: 'dead_letter',
+      cleanupLockedAt: null,
+      cleanupNextAttemptAt: null,
+      updatedAt: sql`now()`
+    }).where(and(
+      eq(attachmentAssets.state, 'processing'),
+      lt(attachmentAssets.cleanupLockedAt, staleBefore),
+      gte(attachmentAssets.cleanupAttempts, ATTACHMENT_CLEANUP_MAX_ATTEMPTS)
+    ))
     const rows = await tx.select().from(attachmentAssets).where(or(
       and(eq(attachmentAssets.state, 'pending'), lt(attachmentAssets.createdAt, abandonedBefore)),
       and(eq(attachmentAssets.state, 'retrying'), lt(attachmentAssets.cleanupNextAttemptAt, new Date(now.getTime() + 1))),
-      and(eq(attachmentAssets.state, 'processing'), lt(attachmentAssets.cleanupLockedAt, staleBefore))
+      and(
+        eq(attachmentAssets.state, 'processing'),
+        lt(attachmentAssets.cleanupLockedAt, staleBefore),
+        lt(attachmentAssets.cleanupAttempts, ATTACHMENT_CLEANUP_MAX_ATTEMPTS)
+      )
     )).orderBy(asc(attachmentAssets.cleanupNextAttemptAt), asc(attachmentAssets.createdAt))
       .limit(ATTACHMENT_CLEANUP_CLAIM_LIMIT)
       .for('update', { skipLocked: true })
@@ -283,7 +341,7 @@ async function claimCleanupAssets(db: Database, now: Date) {
     return tx.update(attachmentAssets).set({
       state: 'processing',
       cleanupReason: sql`coalesce(${attachmentAssets.cleanupReason}, 'abandoned_upload')`,
-      cleanupAttempts: sql`case when ${attachmentAssets.state} = 'processing' then ${attachmentAssets.cleanupAttempts} else ${attachmentAssets.cleanupAttempts} + 1 end`,
+      cleanupAttempts: sql`${attachmentAssets.cleanupAttempts} + 1`,
       cleanupLockedAt: now,
       cleanupNextAttemptAt: null,
       updatedAt: sql`now()`
@@ -305,32 +363,43 @@ export async function runAttachmentCleanupSweep(options: {
   const workers = Array.from({ length: Math.min(concurrency, claimed.length) }, async () => {
     while (index < claimed.length) {
       const asset = claimed[index++]!
+      // cleanupLockedAt is the worker lease token. Matching it prevents a
+      // timed-out worker from overwriting a newer worker's result.
+      const claimFence = and(
+        eq(attachmentAssets.id, asset.id),
+        eq(attachmentAssets.state, 'processing'),
+        eq(attachmentAssets.cleanupLockedAt, asset.cleanupLockedAt!)
+      )
       try {
         await destroyAttachmentAsset(asset.publicId, { transport: options.transport, now })
-        await db.update(attachmentAssets).set({
+        const completed = await db.update(attachmentAssets).set({
           state: 'deleted',
           deletedAt: now,
           cleanupLockedAt: null,
           cleanupNextAttemptAt: null,
           cleanupLastError: null,
           updatedAt: sql`now()`
-        }).where(and(eq(attachmentAssets.id, asset.id), eq(attachmentAssets.state, 'processing')))
-        console.info('[attachments] cleanup completed', { assetId: asset.id, attempts: asset.cleanupAttempts })
+        }).where(claimFence).returning({ id: attachmentAssets.id })
+        if (completed.length) {
+          console.info('[attachments] cleanup completed', { assetId: asset.id, attempts: asset.cleanupAttempts })
+        }
       } catch (error) {
         const final = asset.cleanupAttempts >= ATTACHMENT_CLEANUP_MAX_ATTEMPTS
-        await db.update(attachmentAssets).set({
+        const failed = await db.update(attachmentAssets).set({
           state: final ? 'dead_letter' : 'retrying',
           cleanupNextAttemptAt: final ? null : attachmentCleanupRetryAt(asset.cleanupAttempts, now),
           cleanupLockedAt: null,
           cleanupLastError: JSON.stringify(safeErrorSummary(error)).slice(0, 500),
           updatedAt: sql`now()`
-        }).where(and(eq(attachmentAssets.id, asset.id), eq(attachmentAssets.state, 'processing')))
-        console.error('[attachments] cleanup failed', {
-          assetId: asset.id,
-          attempts: asset.cleanupAttempts,
-          final,
-          ...safeErrorSummary(error)
-        })
+        }).where(claimFence).returning({ id: attachmentAssets.id })
+        if (failed.length) {
+          console.error('[attachments] cleanup failed', {
+            assetId: asset.id,
+            attempts: asset.cleanupAttempts,
+            final,
+            ...safeErrorSummary(error)
+          })
+        }
       }
     }
   })

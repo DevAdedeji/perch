@@ -68,6 +68,7 @@ describe('attachment lifecycle migration', () => {
     expect(journal.entries.find((entry: { idx: number }) => entry.idx === 30))
       .toMatchObject({ idx: 30, tag: '0030_attachment-lifecycle' })
     expect(migration).toContain('attachment_assets_owner_ck')
+    expect(migration).toContain('attachment_assets_scope_ck')
     expect(migration).toContain('attachment_assets_public_id_unique')
     expect(migration).toContain('messages_attachment_asset_uq')
   })

@@ -22,7 +22,8 @@ CREATE TABLE "attachment_assets" (
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "attachment_assets_public_id_unique" UNIQUE("public_id"),
 	CONSTRAINT "attachment_assets_secure_url_unique" UNIQUE("secure_url"),
-	CONSTRAINT "attachment_assets_owner_ck" CHECK ("attachment_assets"."uploader_user_id" is not null or "attachment_assets"."visitor_ref" is not null),
+	CONSTRAINT "attachment_assets_owner_ck" CHECK (num_nonnulls("attachment_assets"."uploader_user_id", "attachment_assets"."visitor_ref") = 1),
+	CONSTRAINT "attachment_assets_scope_ck" CHECK (("attachment_assets"."kind" = 'message' and "attachment_assets"."workspace_id" is not null) or ("attachment_assets"."kind" = 'logo' and "attachment_assets"."uploader_user_id" is not null and "attachment_assets"."visitor_ref" is null)),
 	CONSTRAINT "attachment_assets_size_ck" CHECK ("attachment_assets"."byte_size" >= 0 and "attachment_assets"."byte_size" <= 1048576),
 	CONSTRAINT "attachment_assets_attempts_ck" CHECK ("attachment_assets"."cleanup_attempts" >= 0 and "attachment_assets"."cleanup_attempts" <= 5)
 );

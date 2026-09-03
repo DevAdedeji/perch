@@ -7,8 +7,10 @@ import * as schema from '../packages/db/src/schema'
 import {
   ATTACHMENT_ABANDONED_AFTER_MS,
   ATTACHMENT_CLEANUP_MAX_ATTEMPTS,
+  ATTACHMENT_CLEANUP_STALE_MS,
   claimLogoAttachment,
   claimMessageAttachment,
+  finalizeAttachmentAssetRegistration,
   queueAssetCleanup,
   queueWorkspaceAttachmentCleanup,
   registerAttachmentAsset,
@@ -109,6 +111,39 @@ describe.skipIf(!databaseUrl)('secure attachment lifecycle', () => {
       where: eq(schema.messages.attachmentAssetId, uploaded.id)
     })
     expect(messages).toHaveLength(1)
+  })
+
+  it('records a provider identity before upload and only finalizes the matching intent', async () => {
+    const intent = await asset({
+      secureUrl: `https://res.cloudinary.com/perch-test/image/upload/perch/${workspaceId}/${randomUUID()}`,
+      byteSize: 64
+    })
+    const deliveredUrl = `https://res.cloudinary.com/perch-test/image/upload/v1/${intent.publicId}.png`
+    const finalized = await finalizeAttachmentAssetRegistration({
+      assetId: intent.id,
+      publicId: intent.publicId,
+      secureUrl: deliveredUrl,
+      byteSize: 128
+    }, db)
+    expect(finalized.secureUrl).toBe(deliveredUrl)
+    expect(finalized.byteSize).toBe(128)
+    await expect(finalizeAttachmentAssetRegistration({
+      assetId: intent.id,
+      publicId: `perch/${workspaceId}/${randomUUID()}`,
+      secureUrl: deliveredUrl,
+      byteSize: 128
+    }, db)).rejects.toThrow('no longer pending')
+  })
+
+  it('enforces one owner and valid message/logo scope in the database', async () => {
+    await expect(asset({ visitorRef })).rejects.toMatchObject({ cause: { code: '23514' } })
+    await expect(asset({ workspaceId: null })).rejects.toMatchObject({ cause: { code: '23514' } })
+    await expect(asset({
+      workspaceId: null,
+      uploaderUserId: null,
+      visitorRef,
+      kind: 'logo'
+    })).rejects.toMatchObject({ cause: { code: '23514' } })
   })
 
   it('rejects cross-workspace, cross-uploader, cross-visitor, and arbitrary URLs', async () => {
@@ -233,13 +268,130 @@ describe.skipIf(!databaseUrl)('secure attachment lifecycle', () => {
     expect(calls.size).toBe(8)
   })
 
+  it('fences a stale worker after a newer worker reclaims its cleanup lease', async () => {
+    const uploaded = await asset()
+    const firstNow = new Date('2026-09-03T12:00:00.000Z')
+    const secondNow = new Date(firstNow.getTime() + ATTACHMENT_CLEANUP_STALE_MS + 1)
+    await db.transaction(tx => queueAssetCleanup(tx, uploaded.id, 'logo_removed', firstNow))
+
+    let rejectFirst!: (error: Error) => void
+    let resolveSecond!: (value: { result: 'ok' }) => void
+    let firstStarted!: () => void
+    let secondStarted!: () => void
+    const firstReady = new Promise<void>((resolve) => {
+      firstStarted = resolve
+    })
+    const secondReady = new Promise<void>((resolve) => {
+      secondStarted = resolve
+    })
+    const firstResponse = new Promise<never>((_resolve, reject) => {
+      rejectFirst = reject
+    })
+    const secondResponse = new Promise<{ result: 'ok' }>((resolve) => {
+      resolveSecond = resolve
+    })
+
+    const firstSweep = runAttachmentCleanupSweep({
+      db,
+      now: firstNow,
+      transport: async () => {
+        firstStarted()
+        return firstResponse
+      }
+    })
+    await firstReady
+
+    const secondSweep = runAttachmentCleanupSweep({
+      db,
+      now: secondNow,
+      transport: async () => {
+        secondStarted()
+        return secondResponse
+      }
+    })
+    await secondReady
+
+    rejectFirst(new Error('late stale failure'))
+    await firstSweep
+    const reclaimed = await db.query.attachmentAssets.findFirst({
+      where: eq(schema.attachmentAssets.id, uploaded.id)
+    })
+    expect(reclaimed?.state).toBe('processing')
+    expect(reclaimed?.cleanupAttempts).toBe(2)
+    expect(reclaimed?.cleanupLockedAt?.getTime()).toBe(secondNow.getTime())
+
+    resolveSecond({ result: 'ok' })
+    await secondSweep
+    expect((await db.query.attachmentAssets.findFirst({
+      where: eq(schema.attachmentAssets.id, uploaded.id)
+    }))?.state).toBe('deleted')
+  })
+
+  it('dead-letters an exhausted stale lease without making another provider call', async () => {
+    const uploaded = await asset()
+    const now = new Date('2026-09-03T12:00:00.000Z')
+    await db.update(schema.attachmentAssets).set({
+      state: 'processing',
+      cleanupAttempts: ATTACHMENT_CLEANUP_MAX_ATTEMPTS,
+      cleanupLockedAt: new Date(now.getTime() - ATTACHMENT_CLEANUP_STALE_MS - 1)
+    }).where(eq(schema.attachmentAssets.id, uploaded.id))
+    let calls = 0
+    await runAttachmentCleanupSweep({
+      db,
+      now,
+      transport: async () => {
+        calls++
+        return { result: 'ok' }
+      }
+    })
+    const exhausted = await db.query.attachmentAssets.findFirst({
+      where: eq(schema.attachmentAssets.id, uploaded.id)
+    })
+    expect(calls).toBe(0)
+    expect(exhausted?.state).toBe('dead_letter')
+    expect(exhausted?.cleanupAttempts).toBe(ATTACHMENT_CLEANUP_MAX_ATTEMPTS)
+    expect(exhausted?.cleanupLockedAt).toBeNull()
+  })
+
   it('keeps cleanup jobs durable after workspace deletion and handles logos deliberately', async () => {
     const doomedWorkspaceId = randomUUID()
+    const doomedVisitorId = randomUUID()
+    const doomedConversationId = randomUUID()
+    const legacyMessageUrl = `https://res.cloudinary.com/perch-test/image/upload/v1/perch/${doomedWorkspaceId}/legacy-message.png`
     await db.insert(schema.workspaces).values({
       id: doomedWorkspaceId,
       name: 'Doomed',
       siteId: `site_${randomUUID()}`,
       logoUrl: `https://res.cloudinary.com/perch-test/image/upload/v1/perch/${doomedWorkspaceId}/legacy-logo.png`
+    })
+    await db.insert(schema.visitors).values({
+      id: doomedVisitorId,
+      workspaceId: doomedWorkspaceId,
+      visitorId: `visitor_${randomUUID()}`
+    })
+    await db.insert(schema.conversations).values({
+      id: doomedConversationId,
+      workspaceId: doomedWorkspaceId,
+      visitorRef: doomedVisitorId
+    })
+    await db.insert(schema.messages).values({
+      conversationId: doomedConversationId,
+      senderType: 'visitor',
+      content: '',
+      attachmentUrl: legacyMessageUrl,
+      attachmentType: 'image/png'
+    })
+    const foreignUpload = await asset({ workspaceId: otherWorkspaceId })
+    await db.update(schema.attachmentAssets).set({
+      state: 'claimed',
+      claimedAt: new Date()
+    }).where(eq(schema.attachmentAssets.id, foreignUpload.id))
+    await db.insert(schema.messages).values({
+      conversationId: doomedConversationId,
+      senderType: 'visitor',
+      content: '',
+      attachmentUrl: foreignUpload.secureUrl,
+      attachmentType: 'image/png'
     })
     const upload = await asset({ workspaceId: doomedWorkspaceId })
     await db.update(schema.attachmentAssets).set({
@@ -262,9 +414,13 @@ describe.skipIf(!databaseUrl)('secure attachment lifecycle', () => {
     })
     expect(tracked.map(row => row.publicId).sort()).toEqual([
       upload.publicId,
+      `perch/${doomedWorkspaceId}/legacy-message`,
       `perch/${doomedWorkspaceId}/legacy-logo`
     ].sort())
     expect(tracked.find(row => row.id === upload.id)?.cleanupAttempts).toBe(0)
+    expect((await db.query.attachmentAssets.findFirst({
+      where: eq(schema.attachmentAssets.id, foreignUpload.id)
+    }))?.state).toBe('claimed')
     createdIds.push(...tracked.filter(row => row.id !== upload.id).map(row => row.id))
   })
 

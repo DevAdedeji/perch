@@ -106,7 +106,8 @@ export const attachmentAssets = pgTable('attachment_assets', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
 }, t => [
-  check('attachment_assets_owner_ck', sql`${t.uploaderUserId} is not null or ${t.visitorRef} is not null`),
+  check('attachment_assets_owner_ck', sql`num_nonnulls(${t.uploaderUserId}, ${t.visitorRef}) = 1`),
+  check('attachment_assets_scope_ck', sql`(${t.kind} = 'message' and ${t.workspaceId} is not null) or (${t.kind} = 'logo' and ${t.uploaderUserId} is not null and ${t.visitorRef} is null)`),
   check('attachment_assets_size_ck', sql`${t.byteSize} >= 0 and ${t.byteSize} <= 1048576`),
   check('attachment_assets_attempts_ck', sql`${t.cleanupAttempts} >= 0 and ${t.cleanupAttempts} <= 5`),
   index('attachment_assets_workspace_state_idx').on(t.workspaceId, t.state),
