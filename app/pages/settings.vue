@@ -255,8 +255,14 @@ const personalNotificationScope = computed(() => user.value?.id && wid.value
   ? notificationPreferenceScope(user.value.id, wid.value)
   : null)
 const personalNotifications = ref<NotificationPreference[]>(defaultNotificationPreferences())
-const notificationsLoading = ref(true)
 const notificationsSaving = ref(false)
+const notificationsDirty = ref(false)
+const personalNotificationEntry = computed(() => personalNotificationStore.entry(personalNotificationScope.value))
+const notificationsLoading = computed(() => !personalNotificationEntry.value || personalNotificationEntry.value.loading)
+const notificationsLoadFailed = computed(() => {
+  const entry = personalNotificationEntry.value
+  return Boolean(entry && !entry.ready && !entry.loading)
+})
 const notificationMeta: Array<{
   category: NotificationCategory
   title: string
@@ -288,6 +294,8 @@ function setPersonalPreference(
   channel: NotificationPreferenceChannel,
   enabled: boolean
 ) {
+  if (notificationsSaving.value) return
+  notificationsDirty.value = true
   personalNotifications.value = updatedNotificationPreferences(
     personalNotifications.value,
     category,
@@ -296,27 +304,39 @@ function setPersonalPreference(
   )
 }
 
+function syncPersonalNotificationsFromStore() {
+  const scope = personalNotificationScope.value
+  if (!scope) return
+  const draft = notificationPreferenceDraft(
+    personalNotificationStore.entry(scope),
+    notificationsDirty.value
+  )
+  if (draft) personalNotifications.value = draft
+}
+
 async function loadPersonalNotifications() {
   const workspaceId = wid.value
   const scope = personalNotificationScope.value
   if (!workspaceId || !scope) return
-  notificationsLoading.value = true
   browserNotifications.refreshPermission()
   try {
     const preferences = await personalNotificationStore.load(scope, workspaceId)
-    if (!preferences || personalNotificationScope.value !== scope) return
-    personalNotifications.value = preferences.map(preference => ({ ...preference }))
+    if (personalNotificationScope.value !== scope) return
+    if (preferences && !notificationsDirty.value) {
+      personalNotifications.value = preferences.map(preference => ({ ...preference }))
+    } else {
+      syncPersonalNotificationsFromStore()
+    }
   } catch (error) {
-    if (personalNotificationScope.value === scope) {
-      personalNotifications.value = defaultNotificationPreferences()
+    const entry = personalNotificationStore.entry(scope)
+    if (personalNotificationScope.value === scope && !entry?.ready && !notificationsDirty.value) {
       toast.add({ title: getErrorMessage(error, 'Could not load your notification preferences'), color: 'error' })
     }
-  } finally {
-    if (personalNotificationScope.value === scope) notificationsLoading.value = false
   }
 }
 
 async function setBrowserPreference(category: NotificationCategory, enabled: boolean) {
+  if (notificationsSaving.value) return
   if (!enabled) {
     setPersonalPreference(category, 'browser_enabled', false)
     return
@@ -349,6 +369,7 @@ async function savePersonalNotifications() {
     personalNotificationStore.replace(scope, result.preferences)
     if (personalNotificationScope.value === scope) {
       personalNotifications.value = result.preferences.map(preference => ({ ...preference }))
+      notificationsDirty.value = false
     }
     toast.add({ title: 'Your notification preferences are saved', icon: 'i-lucide-check', color: 'success' })
   } catch (error) {
@@ -360,9 +381,21 @@ async function savePersonalNotifications() {
 
 onMounted(loadPersonalNotifications)
 watch(personalNotificationScope, () => {
+  notificationsDirty.value = false
   personalNotifications.value = defaultNotificationPreferences()
+  syncPersonalNotificationsFromStore()
   void loadPersonalNotifications()
 })
+// The dashboard shell loads the same shared preferences. Follow whichever
+// request wins, but never replace switches the user has already edited.
+watch(
+  () => {
+    const scope = personalNotificationScope.value
+    const entry = scope ? personalNotificationStore.entry(scope) : undefined
+    return [scope, entry?.generation, entry?.ready, entry?.loading] as const
+  },
+  syncPersonalNotificationsFromStore
+)
 
 /* canned replies */
 interface Canned {
@@ -865,6 +898,27 @@ async function removeLogo() {
           </div>
 
           <div
+            v-else-if="notificationsLoadFailed"
+            class="mt-5 rounded-xl border border-error/30 bg-error/5 p-4"
+            role="alert"
+          >
+            <p class="text-sm font-medium text-highlighted">
+              We couldn't load your notification choices.
+            </p>
+            <p class="mt-1 text-xs text-muted">
+              Your saved choices have not been changed. Try loading them again.
+            </p>
+            <UButton
+              class="mt-3"
+              color="neutral"
+              size="sm"
+              @click="loadPersonalNotifications"
+            >
+              Retry
+            </UButton>
+          </div>
+
+          <div
             v-else
             class="mt-5 space-y-3"
           >
@@ -887,6 +941,7 @@ async function removeLogo() {
                   <USwitch
                     :model-value="personalPreference(item.category).in_app_enabled"
                     :aria-label="`Show ${item.title.toLowerCase()} as in-app pop-ups`"
+                    :disabled="notificationsSaving"
                     @update:model-value="setPersonalPreference(item.category, 'in_app_enabled', $event)"
                   />
                 </label>
@@ -895,6 +950,7 @@ async function removeLogo() {
                   <USwitch
                     :model-value="personalPreference(item.category).browser_enabled"
                     :aria-label="`Show ${item.title.toLowerCase()} as browser notifications`"
+                    :disabled="notificationsSaving"
                     @update:model-value="setBrowserPreference(item.category, $event)"
                   />
                 </label>
@@ -906,6 +962,7 @@ async function removeLogo() {
                   <USwitch
                     :model-value="personalPreference(item.category).email_enabled"
                     aria-label="Email me unanswered-message reminders"
+                    :disabled="notificationsSaving"
                     @update:model-value="setPersonalPreference(item.category, 'email_enabled', $event)"
                   />
                 </label>
@@ -935,6 +992,7 @@ async function removeLogo() {
             <UButton
               color="neutral"
               :loading="notificationsSaving"
+              :disabled="notificationsSaving || !notificationsDirty"
               @click="savePersonalNotifications"
             >
               Save my notifications

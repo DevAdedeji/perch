@@ -10,6 +10,8 @@ export interface PersonalNotificationPreferenceEntry {
   generation: number
 }
 
+const pendingPreferenceLoads = new Map<string, Promise<NotificationPreference[] | null>>()
+
 export function notificationPreferenceScope(userId: string, workspaceId: string) {
   return `${userId}:${workspaceId}`
 }
@@ -59,6 +61,30 @@ export function updatedNotificationPreferences(
     : preference)
 }
 
+export function notificationPreferenceDraft(
+  entry: PersonalNotificationPreferenceEntry | undefined,
+  dirty: boolean
+): NotificationPreference[] | null {
+  if (!entry?.ready || dirty) return null
+  return entry.preferences.map(preference => ({ ...preference }))
+}
+
+export function coalescedNotificationPreferenceLoad(
+  scope: string,
+  start: () => Promise<NotificationPreference[] | null>
+) {
+  const pending = pendingPreferenceLoads.get(scope)
+  if (pending) return pending
+
+  const request = start()
+  pendingPreferenceLoads.set(scope, request)
+  const clear = () => {
+    if (pendingPreferenceLoads.get(scope) === request) pendingPreferenceLoads.delete(scope)
+  }
+  request.then(clear, clear)
+  return request
+}
+
 export function usePersonalNotificationPreferences() {
   const entries = useState<Record<string, PersonalNotificationPreferenceEntry>>(
     'notifications:personal-preferences',
@@ -70,36 +96,43 @@ export function usePersonalNotificationPreferences() {
   }
 
   async function load(scope: string, workspaceId: string) {
-    const generation = nextPreferenceGeneration(entries.value[scope])
-    entries.value[scope] = {
-      preferences: entries.value[scope]?.preferences ?? defaultNotificationPreferences(),
-      ready: false,
-      loading: true,
-      generation
-    }
-    try {
-      const result = await $fetch<{ preferences: NotificationPreference[] }>(
-        `/api/workspaces/${workspaceId}/notification-preferences`
-      )
-      if (!isCurrentPreferenceGeneration(entries.value[scope], generation)) return null
+    const existing = entries.value[scope]
+    if (existing?.ready) return existing.preferences
+
+    return coalescedNotificationPreferenceLoad(scope, async () => {
+      const current = entries.value[scope]
+      if (current?.ready) return current.preferences
+      const generation = nextPreferenceGeneration(current)
       entries.value[scope] = {
-        preferences: result.preferences,
-        ready: true,
-        loading: false,
+        preferences: current?.preferences ?? defaultNotificationPreferences(),
+        ready: false,
+        loading: true,
         generation
       }
-      return result.preferences
-    } catch (error) {
-      if (isCurrentPreferenceGeneration(entries.value[scope], generation)) {
+      try {
+        const result = await $fetch<{ preferences: NotificationPreference[] }>(
+          `/api/workspaces/${workspaceId}/notification-preferences`
+        )
+        if (!isCurrentPreferenceGeneration(entries.value[scope], generation)) return null
         entries.value[scope] = {
-          preferences: entries.value[scope]!.preferences,
-          ready: false,
+          preferences: result.preferences,
+          ready: true,
           loading: false,
           generation
         }
+        return result.preferences
+      } catch (error) {
+        if (isCurrentPreferenceGeneration(entries.value[scope], generation)) {
+          entries.value[scope] = {
+            preferences: entries.value[scope]!.preferences,
+            ready: false,
+            loading: false,
+            generation
+          }
+        }
+        throw error
       }
-      throw error
-    }
+    })
   }
 
   function replace(scope: string, preferences: NotificationPreference[]) {

@@ -1,13 +1,16 @@
 import { readFileSync } from 'node:fs'
+import type { NotificationPreference } from '@perch/shared'
 import { describe, expect, it } from 'vitest'
 import { defaultNotificationPreference, defaultNotificationPreferences } from '../packages/shared/src/notifications'
 import { mergeNotificationPreferences } from '../server/utils/notification-preferences'
 import { notificationPreferenceUpdateSchema } from '../server/utils/notification-preference-validation'
 import {
+  coalescedNotificationPreferenceLoad,
   drainPendingReminders,
   isCurrentPreferenceGeneration,
   nextPreferenceGeneration,
   notificationAlertsReady,
+  notificationPreferenceDraft,
   notificationPreferenceScope,
   queuePendingReminder,
   replacedPreferenceEntry,
@@ -99,6 +102,50 @@ describe('personal notification preferences', () => {
     expect(edited.find(row => row.category === 'mention')).toBe(loaded.find(row => row.category === 'mention'))
   })
 
+  it('hydrates a clean settings draft from the winning concurrent load', () => {
+    const preferences = updatedNotificationPreferences(
+      defaultNotificationPreferences(),
+      'assignment',
+      'in_app_enabled',
+      false
+    )
+    const entry = replacedPreferenceEntry(undefined, preferences)
+    const draft = notificationPreferenceDraft(entry, false)
+
+    expect(draft?.find(row => row.category === 'assignment')?.in_app_enabled).toBe(false)
+    expect(draft).not.toBe(entry.preferences)
+    expect(notificationPreferenceDraft(entry, true)).toBeNull()
+    expect(notificationPreferenceDraft(undefined, false)).toBeNull()
+  })
+
+  it('shares concurrent preference loads and permits a retry after failure', async () => {
+    const preferences = defaultNotificationPreferences()
+    let starts = 0
+    let finish!: (value: NotificationPreference[]) => void
+    const first = coalescedNotificationPreferenceLoad('success-scope', () => {
+      starts += 1
+      return new Promise((resolve) => {
+        finish = resolve
+      })
+    })
+    const second = coalescedNotificationPreferenceLoad('success-scope', async () => {
+      starts += 1
+      return preferences
+    })
+
+    expect(second).toBe(first)
+    expect(starts).toBe(1)
+    finish(preferences)
+    await expect(Promise.all([first, second])).resolves.toEqual([preferences, preferences])
+
+    const failed = coalescedNotificationPreferenceLoad('failure-scope', async () => {
+      throw new Error('temporary failure')
+    })
+    await expect(failed).rejects.toThrow('temporary failure')
+    await expect(coalescedNotificationPreferenceLoad('failure-scope', async () => preferences))
+      .resolves.toBe(preferences)
+  })
+
   it('fails closed while saved opt-outs are still loading', () => {
     expect(notificationAlertsReady(undefined)).toBe(false)
     expect(notificationAlertsReady({
@@ -124,6 +171,8 @@ describe('personal notification preferences', () => {
     expect(composable.match(/Notification\.requestPermission\(\)/g)).toHaveLength(1)
     expect(settings).toContain('@update:model-value="setBrowserPreference')
     expect(settings).toContain('@update:model-value="setPersonalPreference(item.category, \'in_app_enabled\', $event)"')
+    expect(settings.match(/:disabled="notificationsSaving"/g)).toHaveLength(3)
+    expect(settings).toContain('v-else-if="notificationsLoadFailed"')
     expect(settings).not.toContain('v-model="personalPreference(')
     expect(settings).not.toContain('onMounted(requestPermission)')
   })
