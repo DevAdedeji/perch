@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   assertProductionConfig,
+  BACHS_RECURRING_RESPONSE_CONTRACT_VERIFIED,
   normalizeLaunchOrigin,
   productionConfigErrors,
   type LaunchEnvironment
@@ -69,16 +70,25 @@ describe('launch configuration', () => {
     expect(productionConfigErrors({ ...validEnvironment, BACHS_ENV: 'preview' })).toContain('BACHS_ENV must be sandbox or live')
   })
 
-  it('keeps checkout fail-closed and validates the explicit launch gate', () => {
+  it('allows explicit sandbox verification but keeps live checkout fail-closed', () => {
     expect(productionConfigErrors({
       ...validEnvironment,
       PERCH_BILLING_CHECKOUT_ENABLED: 'sometimes'
     })).toContain('PERCH_BILLING_CHECKOUT_ENABLED must be true or false')
 
-    expect(productionConfigErrors({
+    const completeProviderErrors = productionConfigErrors({
       ...validEnvironment,
       PERCH_BILLING_CHECKOUT_ENABLED: 'true'
-    })).toEqual([])
+    })
+    expect(BACHS_RECURRING_RESPONSE_CONTRACT_VERIFIED).toBe(false)
+    expect(completeProviderErrors).toEqual([])
+
+    expect(productionConfigErrors({
+      ...validEnvironment,
+      BACHS_ENV: 'live',
+      BACHS_SECRET_KEY: 'sk_live_example',
+      PERCH_BILLING_CHECKOUT_ENABLED: 'true'
+    })).toContain('Live Bachs checkout requires an authoritative recurring-response contract')
 
     expect(productionConfigErrors({
       ...validEnvironment,
@@ -130,6 +140,29 @@ describe('launch configuration', () => {
       VISITOR_REPLY_EMAIL_FEATURE_ENABLED: 'true',
       VISITOR_REPLY_SECRET: 'visitor-reply-secret-unique-849201',
       VISITOR_EMAIL_HASH_SECRET: 'visitor-email-hash-secret-unique-572940'
+    })).toEqual([])
+  })
+
+  it('requires a strong Resend webhook secret before visitor reply delivery is enabled', () => {
+    const errors = productionConfigErrors({
+      ...validEnvironment,
+      VISITOR_REPLY_EMAIL_FEATURE_ENABLED: 'true',
+      VISITOR_REPLY_EMAIL_DELIVERY_ENABLED: 'true',
+      VISITOR_REPLY_SECRET: 'strong-reply-link-secret-value-849201',
+      VISITOR_EMAIL_HASH_SECRET: 'strong-email-hash-secret-value-572940',
+      RESEND_WEBHOOK_SECRET: 'short'
+    })
+    expect(errors).toContain(
+      'RESEND_WEBHOOK_SECRET must be a non-placeholder secret of at least 32 characters when visitor reply email delivery is enabled'
+    )
+
+    expect(productionConfigErrors({
+      ...validEnvironment,
+      VISITOR_REPLY_EMAIL_FEATURE_ENABLED: 'true',
+      VISITOR_REPLY_EMAIL_DELIVERY_ENABLED: 'true',
+      VISITOR_REPLY_SECRET: 'strong-reply-link-secret-value-849201',
+      VISITOR_EMAIL_HASH_SECRET: 'strong-email-hash-secret-value-572940',
+      RESEND_WEBHOOK_SECRET: 'whsec_strong-resend-webhook-secret-638105'
     })).toEqual([])
   })
 

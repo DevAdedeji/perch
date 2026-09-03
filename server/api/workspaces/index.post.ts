@@ -1,4 +1,4 @@
-import { workspaceMembers, workspaces } from '@perch/db'
+import { eq, workspaceMembers, workspaces } from '@perch/db'
 import type { Workspace } from '@perch/db'
 
 export default defineEventHandler(async (event) => {
@@ -25,7 +25,7 @@ export default defineEventHandler(async (event) => {
           name,
           siteId: generateSiteId(),
           widgetPrimaryColor: widgetPrimaryColor ?? undefined,
-          logoUrl: logoUrl ?? null,
+          logoUrl: null,
           visitorReplyEmailEnabled: visitorReplyEmailFeatureEnabled(event)
         }).returning()
         await tx.insert(workspaceMembers).values({
@@ -35,7 +35,17 @@ export default defineEventHandler(async (event) => {
           presence: 'online',
           lastSeenAt: new Date()
         })
-        return created
+        if (!logoUrl) return created
+        const asset = await claimLogoAttachment(tx, {
+          workspaceId: created!.id,
+          secureUrl: logoUrl,
+          uploaderUserId: user.id
+        })
+        const [withLogo] = await tx.update(workspaces).set({
+          logoUrl,
+          logoAssetId: asset.id
+        }).where(eq(workspaces.id, created!.id)).returning()
+        return withLogo
       })
       workspace = row
       break

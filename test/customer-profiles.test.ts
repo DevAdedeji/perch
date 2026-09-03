@@ -64,7 +64,7 @@ describe.skipIf(!databaseUrl)('customer context database integration', () => {
   beforeAll(async () => {
     Object.assign(globalThis, {
       useDb: () => db,
-      visitorReplyEmailFeatureEnabled: () => false
+      useRuntimeConfig: () => ({ visitorReplyEmailFeatureEnabled: false })
     })
     await db.insert(schema.users).values([
       { id: adminUserId, email: `${adminUserId}@example.com`, name: 'Admin' },

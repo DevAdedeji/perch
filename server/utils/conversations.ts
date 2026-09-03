@@ -5,6 +5,7 @@ import type { ConversationDTO, MessageDTO, VisitorConversationDTO, VisitorMessag
 import { enqueueWebhookEvent } from './webhooks'
 import { agentWorkspaceAuthorization } from './realtime'
 import { safeErrorSummary } from './request-security'
+import { claimMessageAttachment } from './attachment-lifecycle'
 
 /* serialization (rows → §6 wire DTOs) */
 
@@ -196,12 +197,20 @@ export async function ingestVisitorMessage(input: IncomingVisitorMessage) {
       }
     }
 
+    const attachment = input.attachmentUrl
+      ? await claimMessageAttachment(tx, {
+          workspaceId: input.workspaceId,
+          secureUrl: input.attachmentUrl,
+          visitorRef: visitor!.id
+        })
+      : null
     const [message] = await tx.insert(messages).values({
       conversationId: conversation.id,
       senderType: 'visitor',
       content: input.content,
       attachmentUrl: input.attachmentUrl ?? null,
-      attachmentType: input.attachmentType ?? null
+      attachmentType: input.attachmentType ?? null,
+      attachmentAssetId: attachment?.id ?? null
     }).returning()
     if (isNew) {
       await enqueueWebhookEvent(tx, input.workspaceId, 'conversation.created', {
@@ -274,6 +283,7 @@ interface AgentMessageInput {
   conversationId: string
   workspaceId: string
   senderMemberId: string
+  uploaderUserId?: string
   content: string
   attachmentUrl?: string | null
   attachmentType?: string | null
@@ -306,6 +316,13 @@ export async function addAgentMessage(input: AgentMessageInput) {
       .where(eq(conversations.id, input.conversationId))
       .returning()
     if (!conv) throw createError({ statusCode: 404, statusMessage: 'Conversation not found' })
+    const attachment = input.attachmentUrl
+      ? await claimMessageAttachment(tx, {
+          workspaceId: input.workspaceId,
+          secureUrl: input.attachmentUrl,
+          uploaderUserId: input.uploaderUserId
+        })
+      : null
     const [message] = await tx.insert(messages).values({
       conversationId: input.conversationId,
       senderType: 'agent',
@@ -313,6 +330,7 @@ export async function addAgentMessage(input: AgentMessageInput) {
       content: input.content,
       attachmentUrl: input.attachmentUrl ?? null,
       attachmentType: input.attachmentType ?? null,
+      attachmentAssetId: attachment?.id ?? null,
       isInternalNote: input.isInternalNote ?? false,
       mentionedMemberIds: input.isInternalNote ? (input.mentionRecipientIds ?? []) : []
     }).returning()

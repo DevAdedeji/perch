@@ -7,14 +7,28 @@ const SANDBOX_API = 'https://sandbox-api.bachs.io/v1'
 const LIVE_API = 'https://api.bachs.io/v1'
 const WEBHOOK_TOLERANCE_SECONDS = 300
 const REQUEST_TIMEOUT_MS = 15_000
+export const BACHS_MAX_GET_ATTEMPTS = 3
 const productCache = new Map<BillingInterval, string>()
 
 const bachsEnvironmentSchema = z.enum(['sandbox', 'live'])
 const providerDateSchema = z.string().refine(value => !Number.isNaN(Date.parse(value)), 'Invalid provider date')
 const providerMetadataSchema = z.record(z.string(), z.string()).nullable().optional()
-const providerProductSchema = z.object({
+const providerPriceSchema = z.object({
+  currency: z.string().min(3).max(8),
+  price_type: z.literal('fixed'),
+  amount: z.string().regex(/^\d+(?:\.\d+)?$/)
+}).passthrough()
+
+const providerBillingCycleSchema = z.object({
+  interval: z.enum(['month', 'year']),
+  frequency: z.number().int().positive()
+}).passthrough()
+
+export const bachsProductSchema = z.object({
   id: z.string().min(1),
-  metadata: providerMetadataSchema
+  metadata: providerMetadataSchema,
+  price: providerPriceSchema,
+  billing_cycle: providerBillingCycleSchema
 }).passthrough()
 
 const checkoutCreatedSchema = z.object({
@@ -34,6 +48,7 @@ export const bachsCheckoutSessionSchema = z.object({
   amount: z.string().regex(/^\d+(?:\.\d+)?$/),
   currency: z.string().min(3).max(8),
   reference: z.string().nullable(),
+  subscription_id: z.string().min(1).max(500).nullable().optional(),
   charge: z.object({
     payment_id: z.string().min(1),
     status: z.enum([
@@ -54,7 +69,7 @@ export const bachsSubscriptionSchema = z.object({
   trial_end: providerDateSchema.nullable().optional(),
   cancel_at_period_end: z.boolean().optional(),
   metadata: providerMetadataSchema,
-  product: providerProductSchema.nullable().optional()
+  product: bachsProductSchema
 }).passthrough()
 
 export const bachsWebhookEventSchema = z.object({
@@ -70,6 +85,7 @@ export const bachsWebhookEventSchema = z.object({
 
 export type BachsCheckoutSession = z.infer<typeof bachsCheckoutSessionSchema>
 export type BachsSubscription = z.infer<typeof bachsSubscriptionSchema>
+export type BachsProduct = z.infer<typeof bachsProductSchema>
 export type BachsWebhookEvent = z.infer<typeof bachsWebhookEventSchema>
 
 function configuredSecretKey() {
@@ -125,34 +141,48 @@ async function bachsFetch<T>(path: string, options: BachsRequest = {}): Promise<
   for (const [key, value] of Object.entries(options.query ?? {})) {
     if (value !== undefined) url.searchParams.set(key, String(value))
   }
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
-  try {
-    const response = await fetch(url, {
-      method: options.method ?? 'GET',
-      headers: {
-        'Authorization': `Bearer ${secretKey()}`,
-        'Content-Type': 'application/json',
-        ...(options.idempotencyKey ? { 'Idempotency-Key': options.idempotencyKey } : {})
-      },
-      body: options.body ? JSON.stringify(options.body) : undefined,
-      signal: controller.signal
-    })
-    const text = await response.text()
-    const payload = text ? safeJson(text) : null
-    if (response.ok) return payload as T
-    throw createError({
-      statusCode: response.status >= 500 ? 503 : 502,
-      statusMessage: 'Billing provider request failed. Please try again.'
-    })
-  } catch (error) {
-    if ((error as Error).name === 'AbortError') {
-      throw createError({ statusCode: 503, statusMessage: 'Bachs took too long to respond. Please try again.' })
+  const method = options.method ?? 'GET'
+  const maxAttempts = method === 'GET' ? BACHS_MAX_GET_ATTEMPTS : 1
+  const key = secretKey()
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+    try {
+      const response = await fetch(url, {
+        method,
+        headers: {
+          'Authorization': `Bearer ${key}`,
+          'Content-Type': 'application/json',
+          ...(options.idempotencyKey ? { 'Idempotency-Key': options.idempotencyKey } : {})
+        },
+        body: options.body ? JSON.stringify(options.body) : undefined,
+        signal: controller.signal
+      })
+      const text = await response.text()
+      const payload = text ? safeJson(text) : null
+      if (response.ok) return payload as T
+      const retryable = response.status === 429 || response.status >= 500
+      if (!retryable || attempt === maxAttempts) {
+        throw createError({
+          statusCode: retryable ? 503 : 502,
+          statusMessage: 'Billing provider request failed. Please try again.'
+        })
+      }
+    } catch (error) {
+      const timedOut = (error as Error).name === 'AbortError'
+      const networkFailure = error instanceof TypeError
+      if ((!timedOut && !networkFailure) || attempt === maxAttempts) {
+        if (timedOut) {
+          throw createError({ statusCode: 503, statusMessage: 'Bachs took too long to respond. Please try again.' })
+        }
+        throw error
+      }
+    } finally {
+      clearTimeout(timeout)
     }
-    throw error
-  } finally {
-    clearTimeout(timeout)
+    await new Promise(resolve => setTimeout(resolve, 150 * 2 ** (attempt - 1)))
   }
+  throw createError({ statusCode: 503, statusMessage: 'Billing provider request failed. Please try again.' })
 }
 
 function parseProviderResponse<T>(schema: z.ZodType<T>, payload: unknown, resource: string): T {
@@ -199,19 +229,28 @@ export function isApprovedBachsCheckoutUrl(value: string | undefined): value is 
 }
 
 interface ProductPage {
-  items?: Array<z.infer<typeof providerProductSchema>>
+  items?: BachsProduct[]
   pagination?: { has_more?: boolean, next_cursor?: string | null }
 }
 
 const productPageSchema = z.object({
-  items: z.array(providerProductSchema).optional(),
+  items: z.array(bachsProductSchema).optional(),
   pagination: z.object({
     has_more: z.boolean().optional(),
     next_cursor: z.string().nullable().optional()
   }).optional()
 }).passthrough()
 
-async function findProduct(planKey: string) {
+export function productMatchesPerchPlan(product: BachsProduct, interval: BillingInterval) {
+  return product.metadata?.perch_plan === `workspace_pro_${interval}`
+    && product.price.price_type === 'fixed'
+    && product.price.currency.toUpperCase() === PERCH_PRO_PLAN.currency
+    && product.price.amount === toDecimalString(proPriceCents(interval))
+    && product.billing_cycle.interval === (interval === 'yearly' ? 'year' : 'month')
+    && product.billing_cycle.frequency === 1
+}
+
+async function findProduct(interval: BillingInterval) {
   let cursor: string | undefined
   do {
     const page = parseProviderResponse(
@@ -219,7 +258,7 @@ async function findProduct(planKey: string) {
       await bachsFetch<unknown>('/products', { query: { limit: 100, cursor } }),
       'product list'
     ) as ProductPage
-    const match = (page.items ?? []).find(product => product.metadata?.perch_plan === planKey)
+    const match = (page.items ?? []).find(product => productMatchesPerchPlan(product, interval))
     if (match) return match
     cursor = page.pagination?.has_more ? page.pagination.next_cursor ?? undefined : undefined
   } while (cursor)
@@ -230,12 +269,12 @@ export async function ensurePerchProProduct(interval: BillingInterval) {
   const cached = productCache.get(interval)
   if (cached) return cached
   const planKey = `workspace_pro_${interval}`
-  const existing = await findProduct(planKey)
+  const existing = await findProduct(interval)
   if (existing) {
     productCache.set(interval, existing.id)
     return existing.id
   }
-  const product = parseProviderResponse(providerProductSchema, await bachsFetch<unknown>('/products', {
+  const product = parseProviderResponse(bachsProductSchema, await bachsFetch<unknown>('/products', {
     method: 'POST',
     idempotencyKey: `perch-${planKey}`,
     body: {
@@ -250,6 +289,9 @@ export async function ensurePerchProProduct(interval: BillingInterval) {
       metadata: { perch_plan: planKey }
     }
   }), 'product')
+  if (!productMatchesPerchPlan(product, interval)) {
+    throw createError({ statusCode: 502, statusMessage: 'Bachs returned a product with unexpected recurring terms.' })
+  }
   productCache.set(interval, product.id)
   return product.id
 }
@@ -293,9 +335,10 @@ export async function getBachsSubscription(subscriptionId: string) {
   )
 }
 
-export async function cancelBachsSubscription(subscriptionId: string) {
+export async function cancelBachsSubscription(subscriptionId: string, idempotencyKey: string) {
   return parseProviderResponse(bachsSubscriptionSchema, await bachsFetch<unknown>(`/subscriptions/${encodeURIComponent(subscriptionId)}`, {
     method: 'DELETE',
+    idempotencyKey,
     body: { cancel_at_period_end: true }
   }), 'subscription')
 }

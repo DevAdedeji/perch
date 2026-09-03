@@ -6,6 +6,11 @@ interface Metrics {
   totals: { users: string, workspaces: string, conversations: string, messages: string }
   last_7d: { new_users_7d: string, active_workspaces_7d: string, new_conversations_7d: string, messages_7d: string }
   daily: { day: string, signups: string, messages: string }[]
+  billing: {
+    reconciliation: Array<{ workspaceId: string, workspaceName: string, attempts: number, error: string | null, correlationId: string | null, updatedAt: string }>
+    webhooks: Array<{ eventType: string, attempts: number, error: string | null, updatedAt: string }>
+    financialConflicts: Array<{ id: string, workspaceId: string, workspaceName: string, conflictingSubscriptionId: string, canonicalSubscriptionId: string | null, invoiceReference: string | null, amountCents: number | null, currency: string | null, providerChargeId: string | null, attempts: number, error: string | null, correlationId: string | null, updatedAt: string }>
+  }
 }
 
 const metrics = ref<Metrics | null>(null)
@@ -133,6 +138,62 @@ function dayLabel(iso: string) {
           <p class="mt-1 text-center text-[10px] uppercase tracking-wider text-dimmed">
             signups / day
           </p>
+        </section>
+
+        <section class="rounded-2xl border-glow bg-elevated/30 p-5 sm:p-6">
+          <h2 class="font-display font-semibold text-highlighted">
+            Billing attention queue
+          </h2>
+          <p class="mt-0.5 text-sm text-muted">
+            Failed reconciliation, failed signed webhooks, and duplicate subscriptions requiring verified cancellation or refund review.
+          </p>
+          <div
+            v-if="!metrics.billing.financialConflicts.length && !metrics.billing.reconciliation.length && !metrics.billing.webhooks.length"
+            class="mt-4 rounded-xl bg-success/10 p-4 text-sm text-success"
+          >
+            No billing failures need operator attention.
+          </div>
+          <div class="mt-4 space-y-3">
+            <div
+              v-for="row in metrics.billing.financialConflicts"
+              :key="row.id"
+              class="rounded-xl bg-error/10 p-4 ring-1 ring-error/20"
+            >
+              <p class="font-medium text-highlighted">
+                Duplicate subscription · {{ row.workspaceName }}
+              </p>
+              <p class="mt-1 break-all font-mono text-xs text-muted">
+                conflicting {{ row.conflictingSubscriptionId }} · canonical {{ row.canonicalSubscriptionId ?? 'unknown' }}
+              </p>
+              <p class="mt-1 text-xs text-muted">
+                {{ row.error }} · attempts {{ row.attempts }} · correlation {{ row.correlationId ?? 'unavailable' }}
+              </p>
+            </div>
+            <div
+              v-for="row in metrics.billing.reconciliation"
+              :key="`reconciliation-${row.workspaceId}`"
+              class="rounded-xl bg-warning/10 p-4 ring-1 ring-warning/20"
+            >
+              <p class="font-medium text-highlighted">
+                Reconciliation failed · {{ row.workspaceName }}
+              </p>
+              <p class="mt-1 text-xs text-muted">
+                {{ row.error }} · attempts {{ row.attempts }} · correlation {{ row.correlationId ?? 'unavailable' }}
+              </p>
+            </div>
+            <div
+              v-for="(row, index) in metrics.billing.webhooks"
+              :key="`billing-webhook-${index}`"
+              class="rounded-xl bg-warning/10 p-4 ring-1 ring-warning/20"
+            >
+              <p class="font-medium text-highlighted">
+                Signed billing webhook failed · {{ row.eventType }}
+              </p>
+              <p class="mt-1 text-xs text-muted">
+                {{ row.error }} · attempts {{ row.attempts }}
+              </p>
+            </div>
+          </div>
         </section>
       </template>
     </div>

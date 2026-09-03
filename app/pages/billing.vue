@@ -6,6 +6,19 @@ useHead({ title: 'Plans & billing · Perch' })
 
 interface BillingOverview {
   checkoutEnabled: boolean
+  providerConfigured: boolean
+  hasBillingHistory: boolean
+  needsProviderSubscription: boolean
+  needsFinancialReview: boolean
+  reconciliation: {
+    status: 'pending' | 'processing' | 'retrying' | 'idle' | 'failed'
+    lastCheckedAt: string | null
+    nextAttemptAt: string | null
+    needsAttention: boolean
+    attempts: number
+    error: string | null
+    correlationId: string | null
+  } | null
   entitlement: {
     plan: 'free' | 'pro'
     isPro: boolean
@@ -13,6 +26,7 @@ interface BillingOverview {
     interval: BillingInterval | null
     currentPeriodEnd: string | null
     cancelAtPeriodEnd: boolean
+    providerSubscriptionConnected: boolean
   }
   invoices: Array<{
     id: string
@@ -26,6 +40,18 @@ interface BillingOverview {
   }>
 }
 
+interface BillingRefreshResult {
+  checkedAt: string
+  invoicesChecked: number
+  invoicesChanged: number
+  subscriptionChecked: boolean
+  awaitingSubscription: boolean
+  providerResourcesChecked: number
+  providerRequestCap: number
+  nextCheckAt: string | null
+  overview: BillingOverview
+}
+
 const { currentWorkspace } = useAuth()
 const route = useRoute()
 const toast = useToast()
@@ -35,6 +61,11 @@ const overview = ref<BillingOverview | null>(null)
 const loading = ref(true)
 const loadError = ref('')
 const checkoutInterval = ref<BillingInterval>('yearly')
+const hasRenewingProviderSubscription = computed(() => Boolean(
+  overview.value?.entitlement.providerSubscriptionConnected
+  && overview.value.entitlement.status !== 'canceled'
+  && !overview.value.entitlement.cancelAtPeriodEnd
+))
 const displayedInterval = computed<BillingInterval>(() => {
   if (overview.value?.entitlement.isPro && overview.value.entitlement.interval) {
     return overview.value.entitlement.interval
@@ -43,7 +74,8 @@ const displayedInterval = computed<BillingInterval>(() => {
 })
 const checkingOut = ref(false)
 const canceling = ref(false)
-let paymentPoll: ReturnType<typeof setTimeout> | undefined
+const refreshingProvider = ref(false)
+const lastProviderCheck = ref<string | null>(null)
 let paymentPollSequence = 0
 let loadSequence = 0
 
@@ -56,6 +88,7 @@ async function load(options: { silent?: boolean } = {}) {
     const result = await $fetch<BillingOverview>(`/api/workspaces/${requestedWorkspaceId}/billing`)
     if (sequence !== loadSequence || workspaceId.value !== requestedWorkspaceId) return false
     overview.value = result
+    lastProviderCheck.value = result.reconciliation?.lastCheckedAt ?? null
     loadError.value = ''
     return true
   } catch (error) {
@@ -78,22 +111,19 @@ onMounted(() => {
       color: 'info',
       icon: 'i-lucide-loader-circle'
     })
-    pollForPaymentConfirmation(0, ++paymentPollSequence)
+    checkPaymentAfterReturn(++paymentPollSequence)
   } else {
     load()
   }
 })
 watch(workspaceId, () => {
-  clearTimeout(paymentPoll)
   paymentPollSequence++
   overview.value = null
   loadError.value = ''
   if (isAdmin.value) load()
 })
-onBeforeUnmount(() => clearTimeout(paymentPoll))
-
-async function pollForPaymentConfirmation(attempt: number, pollSequence: number) {
-  const loaded = await load({ silent: attempt > 0 })
+async function checkPaymentAfterReturn(pollSequence: number) {
+  const loaded = await refreshProvider({ notify: false })
   if (pollSequence !== paymentPollSequence) return
   if (loaded && overview.value?.entitlement.isPro) {
     toast.add({
@@ -104,18 +134,61 @@ async function pollForPaymentConfirmation(attempt: number, pollSequence: number)
     })
     return
   }
-  if (attempt >= 5) {
-    toast.add({
-      title: loaded ? 'Payment is still being verified' : 'Payment status could not be refreshed',
-      description: loaded
-        ? 'You can safely leave this page and return later. Pro activates only after payment confirmation.'
-        : 'Your payment was not marked as failed. Retry the billing page to check again.',
-      color: 'neutral',
-      icon: 'i-lucide-clock'
+  toast.add({
+    title: loaded ? 'Payment is still being verified' : 'Payment status could not be refreshed',
+    description: loaded
+      ? (overview.value?.reconciliation?.nextAttemptAt
+          ? 'Perch scheduled another provider check. Pro activates only after payment confirmation.'
+          : 'Perch is waiting for the signed subscription confirmation. Use Check Bachs status if it does not arrive.')
+      : 'Your payment was not marked as failed. You can safely retry from this page.',
+    color: 'neutral',
+    icon: 'i-lucide-clock'
+  })
+}
+
+async function refreshProvider(options: { silent?: boolean, notify?: boolean } = {}) {
+  const requestedWorkspaceId = workspaceId.value
+  if (!requestedWorkspaceId || !isAdmin.value || refreshingProvider.value) return false
+  refreshingProvider.value = true
+  if (!options.silent) loading.value = !overview.value
+  try {
+    const result = await $fetch<BillingRefreshResult>(`/api/workspaces/${requestedWorkspaceId}/billing/refresh`, {
+      method: 'POST'
     })
-    return
+    if (workspaceId.value !== requestedWorkspaceId) return false
+    if (result.providerResourcesChecked === 0) {
+      throw new Error('No Bachs checkout or subscription was available to verify.')
+    }
+    overview.value = result.overview
+    lastProviderCheck.value = result.checkedAt
+    loadError.value = ''
+    if (options.notify !== false) {
+      toast.add({
+        title: result.awaitingSubscription ? 'Payment details checked' : 'Billing status is up to date',
+        description: result.awaitingSubscription
+          ? 'The checkout is paid, but Bachs has not linked a subscription yet. Pro stays off until the matching subscription event arrives.'
+          : `Verified ${result.providerResourcesChecked} billing record${result.providerResourcesChecked === 1 ? '' : 's'} directly with Bachs.`,
+        color: result.awaitingSubscription ? 'warning' : 'success',
+        icon: result.awaitingSubscription ? 'i-lucide-clock' : 'i-lucide-circle-check'
+      })
+    }
+    return true
+  } catch (error) {
+    if (workspaceId.value === requestedWorkspaceId) {
+      loadError.value = getErrorMessage(error, 'Payment status could not be refreshed')
+    }
+    if (options.notify !== false) {
+      toast.add({
+        title: loadError.value,
+        description: 'The latest confirmed billing details are shown. A provider update may have been recorded before the later step failed; review alerts before retrying.',
+        color: 'error'
+      })
+    }
+    return false
+  } finally {
+    refreshingProvider.value = false
+    if (!options.silent) loading.value = false
   }
-  paymentPoll = setTimeout(() => pollForPaymentConfirmation(attempt + 1, pollSequence), 2000)
 }
 
 async function startCheckout() {
@@ -165,13 +238,36 @@ function date(value: string) {
 <template>
   <div class="h-full overflow-y-auto">
     <div class="mx-auto max-w-5xl space-y-6 p-5 sm:p-8">
-      <div>
-        <h1 class="font-display text-2xl font-bold text-highlighted">
-          Plans & billing
-        </h1>
-        <p class="mt-1 text-sm text-muted">
-          One workspace plan covers everyone on your support team.
-        </p>
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 class="font-display text-2xl font-bold text-highlighted">
+            Plans & billing
+          </h1>
+          <p class="mt-1 text-sm text-muted">
+            One workspace plan covers everyone on your support team.
+          </p>
+        </div>
+        <div
+          v-if="overview?.hasBillingHistory"
+          class="flex flex-col items-start gap-1 sm:items-end"
+        >
+          <UButton
+            color="neutral"
+            variant="outline"
+            icon="i-lucide-refresh-cw"
+            :loading="refreshingProvider"
+            :disabled="!overview.providerConfigured"
+            @click="refreshProvider()"
+          >
+            Check Bachs status
+          </UButton>
+          <p
+            v-if="lastProviderCheck"
+            class="text-xs text-muted"
+          >
+            Last checked {{ new Intl.DateTimeFormat(undefined, { timeStyle: 'short' }).format(new Date(lastProviderCheck)) }}
+          </p>
+        </div>
       </div>
 
       <USkeleton
@@ -192,7 +288,7 @@ function date(value: string) {
           Plans and billing could not load
         </h2>
         <p class="mx-auto mt-1 max-w-md text-sm text-muted">
-          {{ loadError }} Nothing was changed.
+          {{ loadError }} No billing action is available until the current details load.
         </p>
         <UButton
           class="mt-4"
@@ -206,6 +302,30 @@ function date(value: string) {
       </div>
 
       <template v-else-if="overview">
+        <UAlert
+          v-if="overview.reconciliation?.needsAttention"
+          color="error"
+          variant="subtle"
+          title="Automatic billing checks need attention"
+          description="Perch stopped automatic checks after repeated provider failures or an unresolved checkout exceeded its bounded verification window. An admin can check Bachs again safely; Pro access still follows the last confirmed paid period and cannot extend indefinitely."
+          icon="i-lucide-triangle-alert"
+        />
+        <UAlert
+          v-if="overview.needsFinancialReview"
+          color="error"
+          variant="subtle"
+          title="Duplicate subscription needs financial review"
+          description="Perch found another provider subscription and blocked reconciliation. An operator must verify cancellation and review the duplicate charge/refund before this alert can be resolved."
+          icon="i-lucide-badge-dollar-sign"
+        />
+        <UAlert
+          v-if="overview.needsProviderSubscription"
+          color="warning"
+          variant="subtle"
+          title="Waiting for subscription confirmation"
+          description="Bachs confirmed the checkout payment, but no matching subscription is connected yet. Pro remains off until Bachs sends that subscription record; checking again can verify the checkout but cannot invent a missing subscription."
+          icon="i-lucide-clock"
+        />
         <UAlert
           v-if="loadError"
           color="warning"
@@ -346,7 +466,7 @@ function date(value: string) {
             </ul>
 
             <UButton
-              v-if="!overview.entitlement.isPro && isAdmin"
+              v-if="!overview.entitlement.isPro && isAdmin && !hasRenewingProviderSubscription"
               block
               class="mt-6"
               :loading="checkingOut"
@@ -356,32 +476,42 @@ function date(value: string) {
               Upgrade to Pro
             </UButton>
             <p
-              v-if="!overview.checkoutEnabled && !overview.entitlement.isPro"
+              v-if="hasRenewingProviderSubscription && !overview.entitlement.isPro"
+              class="mt-4 text-center text-xs text-warning"
+            >
+              A Bachs subscription is still connected. Check its latest status or cancel renewal before starting another checkout.
+            </p>
+            <p
+              v-else-if="!overview.checkoutEnabled && !overview.entitlement.isPro"
               class="mt-2 text-center text-xs text-muted"
             >
               Pro upgrades are not open yet. Your workspace will stay on Free until checkout launches.
             </p>
             <div
-              v-if="overview.entitlement.isPro"
+              v-if="overview.entitlement.isPro || overview.entitlement.providerSubscriptionConnected"
               class="mt-6 rounded-xl bg-default p-4 ring-1 ring-default"
             >
               <p class="text-sm font-medium text-highlighted">
                 {{ overview.entitlement.cancelAtPeriodEnd || overview.entitlement.status === 'canceled'
-                  ? 'Ends at the close of this paid period'
+                  ? overview.entitlement.isPro
+                    ? 'Ends at the close of this paid period'
+                    : 'Renewal canceled'
                   : overview.entitlement.status === 'past_due'
                     ? 'Payment needs attention'
-                    : 'Subscription active' }}
+                    : overview.entitlement.isPro
+                      ? 'Subscription active'
+                      : 'Subscription needs attention' }}
               </p>
               <p
                 v-if="overview.entitlement.currentPeriodEnd"
                 class="mt-1 text-xs text-muted"
               >
                 {{ overview.entitlement.cancelAtPeriodEnd || overview.entitlement.status === 'canceled' || overview.entitlement.status === 'past_due'
-                  ? 'Access until'
+                  ? overview.entitlement.isPro ? 'Access until' : 'Provider period ends'
                   : 'Current paid period ends' }} {{ date(overview.entitlement.currentPeriodEnd) }}
               </p>
               <UButton
-                v-if="isAdmin && !overview.entitlement.cancelAtPeriodEnd"
+                v-if="isAdmin && overview.entitlement.status !== 'canceled' && !overview.entitlement.cancelAtPeriodEnd"
                 class="mt-3"
                 size="sm"
                 color="neutral"

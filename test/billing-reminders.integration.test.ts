@@ -6,7 +6,7 @@ import * as schema from '../packages/db/src/schema'
 import { eq } from '../packages/db/node_modules/drizzle-orm/index.js'
 import { emailLayout, escapeHtml } from '../server/utils/email'
 import { isWithinBusinessHours } from '../server/utils/business-hours'
-import { applyWorkspaceSubscriptionState, workspaceEntitlement } from '../server/utils/billing'
+import { workspaceEntitlement } from '../server/utils/billing'
 import { reminderDeliveryIsActionable, runUnansweredReminderSweep } from '../server/utils/unanswered-reminders'
 import { notificationChannelEnabled } from '../server/utils/notification-preferences'
 
@@ -76,12 +76,13 @@ describe.skipIf(!databaseUrl)('billing and reminder database integration', () =>
       periodStart: new Date('2026-09-01T00:00:00Z'),
       periodEnd: new Date('2026-10-01T00:00:00Z')
     })
-    await applyWorkspaceSubscriptionState({
-      id: `sub_${randomUUID()}`,
+    await db.insert(schema.workspaceSubscriptions).values({
+      workspaceId,
       status: 'active',
-      current_period_end: '2026-10-01T00:00:00.000Z',
-      metadata: { workspaceId, interval: 'monthly', perchPlan: 'workspace_pro', invoiceReference: reference },
-      product: { id: 'product_monthly', metadata: { perch_plan: 'workspace_pro_monthly' } }
+      interval: 'monthly',
+      currentPeriodEnd: new Date('2026-10-01T00:00:00.000Z'),
+      bachsSubscriptionId: `sub_${randomUUID()}`,
+      lastInvoiceReference: reference
     })
     const sent: Array<{ to: string, subject: string }> = []
     const sender = async (message: { to: string, subject: string }) => {
@@ -110,12 +111,13 @@ describe.skipIf(!databaseUrl)('billing and reminder database integration', () =>
       periodStart: new Date(),
       periodEnd: new Date(Date.now() + 30 * 24 * 60 * 60_000)
     })
-    await applyWorkspaceSubscriptionState({
-      id: `sub_${randomUUID()}`,
+    await db.insert(schema.workspaceSubscriptions).values({
+      workspaceId,
       status: 'active',
-      current_period_end: new Date(Date.now() + 30 * 24 * 60 * 60_000).toISOString(),
-      metadata: { workspaceId, interval: 'monthly', perchPlan: 'workspace_pro', invoiceReference: reference },
-      product: { id: 'product_monthly', metadata: { perch_plan: 'workspace_pro_monthly' } }
+      interval: 'monthly',
+      currentPeriodEnd: new Date(Date.now() + 30 * 24 * 60 * 60_000),
+      bachsSubscriptionId: `sub_${randomUUID()}`,
+      lastInvoiceReference: reference
     })
     expect((await workspaceEntitlement(workspaceId)).isPro).toBe(false)
     await db.update(schema.workspaceInvoices).set({ status: 'paid', paidAt: new Date() }).where(eq(schema.workspaceInvoices.reference, reference))

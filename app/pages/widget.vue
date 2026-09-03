@@ -103,7 +103,11 @@ async function onFilePicked(e: Event) {
   uploadError.value = ''
   const validationError = validateImageAttachment(file)
   if (!validationError) {
-    await widget.sendAttachment(file, () => uploadImage(file, { site_id: siteId.value, visitor_session: widget.visitorSession.value }))
+    await widget.sendAttachment(file, () => uploadImage(file, {
+      purpose: 'message',
+      site_id: siteId.value,
+      visitor_session: widget.visitorSession.value
+    }))
     return
   }
   uploadError.value = validationError

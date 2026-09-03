@@ -1,5 +1,11 @@
 const MIN_SECRET_LENGTH = 32
 
+// Bachs' public API reference does not currently document the canonical
+// subscription/product response fields needed to prove recurring price terms.
+// Keep new checkouts closed until the provider contract has been verified from
+// an authoritative response fixture or provider documentation.
+export const BACHS_RECURRING_RESPONSE_CONTRACT_VERIFIED = false
+
 export interface LaunchEnvironment {
   [key: string]: string | undefined
   NODE_ENV?: string
@@ -12,6 +18,7 @@ export interface LaunchEnvironment {
   NUXT_OAUTH_GOOGLE_REDIRECT_URL?: string
   RESEND_API_KEY?: string
   RESEND_FROM?: string
+  RESEND_WEBHOOK_SECRET?: string
   BACHS_ENV?: string
   PERCH_BILLING_CHECKOUT_ENABLED?: string
   VISITOR_REPLY_SECRET?: string
@@ -125,6 +132,9 @@ export function productionConfigErrors(environment: LaunchEnvironment): string[]
       errors.push('VISITOR_EMAIL_HASH_SECRET must be a non-placeholder secret of at least 32 characters when visitor reply email is enabled')
     }
   }
+  if (visitorReplyDeliveryEnabled && !isStrongSecret(environment.RESEND_WEBHOOK_SECRET)) {
+    errors.push('RESEND_WEBHOOK_SECRET must be a non-placeholder secret of at least 32 characters when visitor reply email delivery is enabled')
+  }
   requireCompleteGroup(errors, environment, ['BACHS_ENV', 'BACHS_SECRET_KEY', 'BACHS_WEBHOOK_SECRET'])
   const billingCheckoutFlag = value(environment.PERCH_BILLING_CHECKOUT_ENABLED)
   if (billingCheckoutFlag && billingCheckoutFlag !== 'true' && billingCheckoutFlag !== 'false') {
@@ -135,6 +145,11 @@ export function productionConfigErrors(environment: LaunchEnvironment): string[]
     errors.push('PERCH_BILLING_CHECKOUT_ENABLED=true requires complete Bachs configuration')
   }
   const bachsEnvironment = value(environment.BACHS_ENV)
+  if (explicitlyEnabled(environment.PERCH_BILLING_CHECKOUT_ENABLED)
+    && bachsEnvironment === 'live'
+    && !BACHS_RECURRING_RESPONSE_CONTRACT_VERIFIED) {
+    errors.push('Live Bachs checkout requires an authoritative recurring-response contract')
+  }
   if (bachsEnvironment && bachsEnvironment !== 'sandbox' && bachsEnvironment !== 'live') {
     errors.push('BACHS_ENV must be sandbox or live')
   }

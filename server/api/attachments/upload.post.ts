@@ -1,15 +1,19 @@
+import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 import { ATTACHMENT_MAX_BYTES, ATTACHMENT_MIME_TYPES } from '@perch/shared'
 
 const authSchema = z.object({
   site_id: z.string().min(1).optional(),
-  visitor_session: z.string().min(1).max(2048).optional()
+  visitor_session: z.string().min(1).max(2048).optional(),
+  workspace_id: z.string().uuid().optional(),
+  purpose: z.enum(['message', 'logo'])
 })
 
 const cloudinaryResponseSchema = z.object({
   secure_url: z.string().url(),
   resource_type: z.literal('image'),
-  bytes: z.number().int().nonnegative()
+  bytes: z.number().int().nonnegative(),
+  public_id: z.string().min(1).max(255)
 })
 
 const CLOUDINARY_TIMEOUT_MS = 15_000
@@ -42,17 +46,32 @@ export default defineEventHandler(async (event) => {
   }
 
   const session = await getUserSession(event)
+  let workspaceId: string | null = null
+  let uploaderUserId: string | null = null
+  let visitorRef: string | null = null
   if (session.user) {
     const user = await requireUser(event)
     assertRateLimit('attach-upload:user', user.id, { max: 30, windowMs: 60 * 1000 })
+    uploaderUserId = user.id
+    if (auth.data.purpose === 'message') {
+      if (!auth.data.workspace_id) throw createError({ statusCode: 400, statusMessage: 'Workspace is required' })
+      await requireMembership(event, auth.data.workspace_id)
+      workspaceId = auth.data.workspace_id
+    } else if (auth.data.workspace_id) {
+      await requireMembership(event, auth.data.workspace_id, { admin: true })
+      workspaceId = auth.data.workspace_id
+    }
   } else {
     const { site_id, visitor_session } = auth.data
+    if (auth.data.purpose !== 'message') throw createError({ statusCode: 401, statusMessage: 'Sign in to upload a logo' })
     if (!site_id || !visitor_session) {
       throw createError({ statusCode: 401, statusMessage: 'Sign in or provide a widget session' })
     }
-    const { visitor } = await requireVisitorSession(event, site_id, visitor_session)
+    const { workspace, visitor } = await requireVisitorSession(event, site_id, visitor_session)
     assertRateLimit('attach-upload:visitor', visitor.id, { max: 10, windowMs: 60 * 1000 })
     await assertVisitorCanMessage(visitor)
+    workspaceId = workspace.id
+    visitorRef = visitor.id
   }
 
   const { cloudName, apiKey, apiSecret } = cloudinaryConfig()
@@ -60,24 +79,83 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 503, statusMessage: 'Attachments are not configured' })
   }
   const timestamp = Math.floor(Date.now() / 1000)
-  const params = { timestamp, folder: 'perch', allowed_formats: ATTACHMENT_FORMATS }
+  const folder = workspaceId ? `perch/${workspaceId}` : `perch/users/${uploaderUserId}`
+  const uploadId = randomUUID()
+  const expectedPublicId = `${folder}/${uploadId}`
+  const params = {
+    timestamp,
+    public_id: expectedPublicId,
+    allowed_formats: ATTACHMENT_FORMATS,
+    overwrite: 'false',
+    unique_filename: 'false',
+    use_filename: 'false'
+  }
+  // Persist the provider identity before starting the external request. If the
+  // request times out after Cloudinary accepted it, the normal cleanup worker
+  // can still delete the known public id.
+  const uploadIntent = await registerAttachmentAsset({
+    workspaceId,
+    uploaderUserId,
+    visitorRef,
+    kind: auth.data.purpose,
+    publicId: expectedPublicId,
+    secureUrl: `https://res.cloudinary.com/${encodeURIComponent(cloudName)}/image/upload/${expectedPublicId}`,
+    mimeType: file.type,
+    byteSize: file.data.length
+  })
   const form = new FormData()
   const bytes = Uint8Array.from(file.data)
   form.append('file', new Blob([bytes], { type: file.type }), file.filename)
   form.append('api_key', apiKey)
   form.append('timestamp', String(timestamp))
-  form.append('folder', params.folder)
+  form.append('public_id', params.public_id)
   form.append('allowed_formats', params.allowed_formats)
+  form.append('overwrite', params.overwrite)
+  form.append('unique_filename', params.unique_filename)
+  form.append('use_filename', params.use_filename)
   form.append('signature', signCloudinaryParams(params, apiSecret))
 
-  const rawResponse = await $fetch<unknown>(
-    `https://api.cloudinary.com/v1_1/${encodeURIComponent(cloudName)}/image/upload`,
-    { method: 'POST', body: form, timeout: CLOUDINARY_TIMEOUT_MS }
-  )
+  let rawResponse: unknown
+  try {
+    rawResponse = await $fetch<unknown>(
+      `https://api.cloudinary.com/v1_1/${encodeURIComponent(cloudName)}/image/upload`,
+      { method: 'POST', body: form, timeout: CLOUDINARY_TIMEOUT_MS }
+    )
+  } catch (error) {
+    await queueAssetCleanup(useDb(), uploadIntent.id, 'upload_failed')
+    console.error('[attachments] provider upload failed', {
+      requestId: event.context.requestId,
+      ...safeErrorSummary(error)
+    })
+    throw createError({ statusCode: 502, statusMessage: 'The image host is unavailable. Please try again.' })
+  }
   const parsedResponse = cloudinaryResponseSchema.safeParse(rawResponse)
-  if (!parsedResponse.success || parsedResponse.data.bytes > ATTACHMENT_MAX_BYTES
-    || !isOwnCloudinaryImageUrl(parsedResponse.data.secure_url, cloudName)) {
+  if (!parsedResponse.success) {
+    await queueAssetCleanup(useDb(), uploadIntent.id, 'upload_failed')
     throw createError({ statusCode: 502, statusMessage: 'Image host returned an invalid upload' })
   }
-  return { url: parsedResponse.data.secure_url, type: file.type }
+  const providerUpload = parsedResponse.data
+  if (providerUpload.bytes > ATTACHMENT_MAX_BYTES
+    || !isOwnCloudinaryImageUrl(providerUpload.secure_url, cloudName)
+    || cloudinaryPublicIdFromUrl(providerUpload.secure_url, cloudName) !== providerUpload.public_id
+    || providerUpload.public_id !== expectedPublicId) {
+    await queueAssetCleanup(useDb(), uploadIntent.id, 'upload_failed')
+    throw createError({ statusCode: 502, statusMessage: 'Image host returned an invalid upload' })
+  }
+  try {
+    await finalizeAttachmentAssetRegistration({
+      assetId: uploadIntent.id,
+      publicId: expectedPublicId,
+      secureUrl: providerUpload.secure_url,
+      byteSize: providerUpload.bytes
+    })
+  } catch (error) {
+    await queueAssetCleanup(useDb(), uploadIntent.id, 'upload_failed')
+    console.error('[attachments] upload registration failed', {
+      requestId: event.context.requestId,
+      ...safeErrorSummary(error)
+    })
+    throw createError({ statusCode: 503, statusMessage: 'The upload could not be saved. Please try again.' })
+  }
+  return { url: providerUpload.secure_url, type: file.type }
 })

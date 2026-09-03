@@ -63,6 +63,7 @@ export default defineNuxtConfig({
     // transactional email (password reset, invites) — optional; logs in dev without it
     resendApiKey: '',
     emailFrom: '',
+    resendWebhookSecret: '',
     visitorReplySecret: '',
     visitorEmailHashSecret: '',
     visitorReplyEmailFeatureEnabled: process.env.VISITOR_REPLY_EMAIL_FEATURE_ENABLED === 'true',

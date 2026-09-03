@@ -21,6 +21,8 @@ import {
 import type { H3Event } from 'h3'
 import { emailLayout, escapeHtml, sendEmailDetailed } from './email'
 import type { EmailDeliveryResult, SendEmailOptions } from './email'
+import { reconcileResendSuppressionForMessage } from './resend-webhooks'
+import { safeErrorSummary } from './request-security'
 
 const MAX_ATTEMPTS = 5
 const CLAIM_LIMIT = 25
@@ -355,10 +357,26 @@ async function deliverOne(
     error.retryable = result.retryable
     throw error
   }
-  await useDb().update(visitorReplyDeliveries).set({
+  if (!result.providerMessageId) {
+    const error = new Error('email_provider_message_id_missing') as Error & { retryable?: boolean }
+    error.retryable = true
+    throw error
+  }
+  const [sent] = await useDb().update(visitorReplyDeliveries).set({
     status: 'sent', sentAt: now, lockedAt: null, providerMessageId: result.providerMessageId,
     lastError: null, updatedAt: sql`now()`
-  }).where(eq(visitorReplyDeliveries.id, delivery.id))
+  }).where(and(
+    eq(visitorReplyDeliveries.id, delivery.id),
+    eq(visitorReplyDeliveries.status, 'processing')
+  )).returning({ id: visitorReplyDeliveries.id })
+  if (!sent) return
+  try {
+    await reconcileResendSuppressionForMessage(result.providerMessageId)
+  } catch (error) {
+    // The email has already been accepted; retrying it could duplicate mail.
+    // The durable suppression sweep will retry this independent DB operation.
+    console.error('[resend] suppression reconciliation failed', safeErrorSummary(error))
+  }
 }
 
 export async function runVisitorReplyEmailSweep(options: { now?: Date, sender?: VisitorReplyEmailSender } = {}) {
@@ -380,7 +398,10 @@ export async function runVisitorReplyEmailSweep(options: { now?: Date, sender?: 
         nextAttemptAt: replyEmailRetryAt(delivery.attempts, now),
         lastError: String(error.message || 'delivery_failed').slice(0, 200),
         updatedAt: sql`now()`
-      }).where(eq(visitorReplyDeliveries.id, delivery.id))
+      }).where(and(
+        eq(visitorReplyDeliveries.id, delivery.id),
+        eq(visitorReplyDeliveries.status, 'processing')
+      ))
     }
   }
   return { processed: deliveries.length }
