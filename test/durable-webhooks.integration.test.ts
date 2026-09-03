@@ -81,7 +81,7 @@ describe.skipIf(!databaseUrl)('durable webhook database delivery', () => {
     await enqueue()
     await db.update(schema.webhookEndpoints).set({ secret: 'whsec_rotated' }).where(eq(schema.webhookEndpoints.id, target.id))
     const calls: Array<{ body: string, headers: Record<string, string> }> = []
-    const first = new Date('2026-09-02T12:00:00.000Z')
+    const first = new Date(Date.now() + 1000)
     await runWebhookDeliverySweep({
       db,
       now: first,
