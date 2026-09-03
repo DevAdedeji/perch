@@ -83,7 +83,7 @@ onBeforeUnmount(() => {
 
 async function saveSelectedLogo(workspaceId: string) {
   if (!logoFile.value) return
-  const uploaded = await uploadImage(logoFile.value)
+  const uploaded = await uploadImage(logoFile.value, { purpose: 'logo' })
   await $fetch(`/api/workspaces/${workspaceId}`, {
     method: 'PATCH',
     body: { logoUrl: uploaded.url }

@@ -229,7 +229,14 @@ async function onAttachmentPicked(event: Event) {
     toast.add({ title: validationError, color: 'error' })
     return
   }
-  await props.sendAttachment(file, () => uploadImage(file), internalNote.value)
+  if (!props.workspaceId) {
+    toast.add({ title: 'Select a workspace before uploading.', color: 'error' })
+    return
+  }
+  await props.sendAttachment(file, () => uploadImage(file, {
+    purpose: 'message',
+    workspace_id: props.workspaceId!
+  }), internalNote.value)
 }
 
 function presenceDot(status: TeamMember['presence']) {

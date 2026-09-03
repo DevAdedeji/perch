@@ -1,4 +1,4 @@
-import { billingFinancialConflicts, billingReconciliationJobs, billingWebhookDeliveries, conversations, desc, eq, messages, sql, users, workspaces } from '@perch/db'
+import { attachmentAssets, billingFinancialConflicts, billingReconciliationJobs, billingWebhookDeliveries, conversations, desc, eq, messages, sql, users, workspaces } from '@perch/db'
 
 function sanitizedBillingError(value: string | null) {
   if (!value) return null
@@ -16,17 +16,12 @@ function sanitizedBillingError(value: string | null) {
  * 14-day signups/messages series.
  */
 export default defineEventHandler(async (event) => {
-  const user = await requireUser(event)
-  const allowed = (useRuntimeConfig(event).adminEmails || process.env.PERCH_ADMIN_EMAILS || '')
-    .split(',').map((e: string) => e.trim().toLowerCase()).filter(Boolean)
-  if (!allowed.includes(user.email.toLowerCase())) {
-    throw createError({ statusCode: 404, statusMessage: 'Not found' }) // don't advertise the panel
-  }
+  await requirePlatformAdmin(event)
 
   const db = useDb()
   const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
 
-  const [totals, active, series, reconciliationAttention, webhookAttention, financialConflicts] = await Promise.all([
+  const [totals, active, series, reconciliationAttention, webhookAttention, financialConflicts, attachmentCleanup] = await Promise.all([
     db.execute(sql`
       select
         (select count(*) from ${users}) as users,
@@ -89,7 +84,14 @@ export default defineEventHandler(async (event) => {
     }).from(billingFinancialConflicts)
       .innerJoin(workspaces, eq(workspaces.id, billingFinancialConflicts.workspaceId))
       .where(eq(billingFinancialConflicts.status, 'open'))
-      .orderBy(desc(billingFinancialConflicts.updatedAt)).limit(50)
+      .orderBy(desc(billingFinancialConflicts.updatedAt)).limit(50),
+    db.execute(sql`
+      select
+        count(*) filter (where ${attachmentAssets.state} in ('pending', 'retrying', 'processing')) as outstanding,
+        count(*) filter (where ${attachmentAssets.state} = 'dead_letter') as failed,
+        min(${attachmentAssets.createdAt}) filter (where ${attachmentAssets.state} in ('pending', 'retrying', 'processing')) as oldest_outstanding_at
+      from ${attachmentAssets}
+    `)
   ])
 
   // postgres-js returns the row array directly
@@ -113,6 +115,7 @@ export default defineEventHandler(async (event) => {
         error: sanitizedBillingError(row.error),
         updatedAt: row.updatedAt.toISOString()
       }))
-    }
+    },
+    attachment_cleanup: attachmentCleanup[0]
   }
 })

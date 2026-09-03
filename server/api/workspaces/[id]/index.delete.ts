@@ -8,9 +8,19 @@ import { eq, workspaces } from '@perch/db'
  */
 export default defineEventHandler(async (event) => {
   const workspaceId = getRouterParam(event, 'id')!
-  await requireMembership(event, workspaceId, { admin: true })
+  const { user } = await requireMembership(event, workspaceId, { admin: true })
 
-  await useDb().delete(workspaces).where(eq(workspaces.id, workspaceId))
+  await useDb().transaction(async (tx) => {
+    const [workspace] = await tx.select().from(workspaces)
+      .where(eq(workspaces.id, workspaceId)).for('update')
+    if (!workspace) throw createError({ statusCode: 404, statusMessage: 'Workspace not found' })
+    await queueWorkspaceAttachmentCleanup(tx, {
+      workspaceId,
+      uploaderUserId: user.id,
+      legacyLogoUrl: workspace.logoAssetId ? null : workspace.logoUrl
+    })
+    await tx.delete(workspaces).where(eq(workspaces.id, workspaceId))
+  })
   logDeletionReceipt({ kind: 'workspace', subjectId: workspaceId })
   return { ok: true }
 })

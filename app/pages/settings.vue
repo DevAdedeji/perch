@@ -487,8 +487,10 @@ async function onLogoPicked(e: Event) {
   const file = input.files?.[0]
   input.value = ''
   if (!file) return
+  const workspaceId = wid.value
+  if (!workspaceId) return
   try {
-    const img = await uploadImage(file)
+    const img = await uploadImage(file, { purpose: 'logo', workspace_id: workspaceId })
     await patchWorkspace({ logoUrl: img.url }, 'Logo updated')
   } catch (err) {
     toast.add({ title: getErrorMessage(err, 'Could not upload the logo'), color: 'error' })

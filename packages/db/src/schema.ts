@@ -51,6 +51,15 @@ export const subscriptionStatusEnum = pgEnum('subscription_status', ['trialing',
 export const invoiceStatusEnum = pgEnum('invoice_status', ['pending', 'paid', 'failed'])
 export const billingWebhookStatusEnum = pgEnum('billing_webhook_status', ['processing', 'completed', 'ignored', 'failed'])
 export const billingReconciliationStatusEnum = pgEnum('billing_reconciliation_status', ['pending', 'processing', 'retrying', 'idle', 'failed'])
+export const attachmentKindEnum = pgEnum('attachment_kind', ['message', 'logo'])
+export const attachmentStateEnum = pgEnum('attachment_state', [
+  'pending',
+  'claimed',
+  'processing',
+  'retrying',
+  'deleted',
+  'dead_letter'
+])
 
 /* Tables */
 
@@ -70,12 +79,50 @@ export const users = pgTable('users', {
   uniqueIndex('users_google_id_uq').on(t.googleId)
 ])
 
+/**
+ * Every Cloudinary upload Perch creates is registered before its URL is
+ * accepted anywhere else. workspaceId intentionally has no foreign key: the
+ * row is also the durable deletion job after a workspace has been removed.
+ */
+export const attachmentAssets = pgTable('attachment_assets', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  workspaceId: uuid('workspace_id'),
+  // Snapshot identifiers deliberately survive account/workspace deletion until
+  // Cloudinary confirms deletion. They contain no email, name, or session data.
+  uploaderUserId: uuid('uploader_user_id'),
+  visitorRef: uuid('visitor_ref'),
+  kind: attachmentKindEnum('kind').notNull(),
+  publicId: text('public_id').notNull().unique(),
+  secureUrl: text('secure_url').notNull().unique(),
+  mimeType: text('mime_type').notNull(),
+  byteSize: integer('byte_size').notNull(),
+  state: attachmentStateEnum('state').default('pending').notNull(),
+  cleanupReason: text('cleanup_reason'),
+  cleanupAttempts: integer('cleanup_attempts').default(0).notNull(),
+  cleanupNextAttemptAt: timestamp('cleanup_next_attempt_at', { withTimezone: true }),
+  cleanupLockedAt: timestamp('cleanup_locked_at', { withTimezone: true }),
+  cleanupLastError: text('cleanup_last_error'),
+  claimedAt: timestamp('claimed_at', { withTimezone: true }),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
+}, t => [
+  check('attachment_assets_owner_ck', sql`num_nonnulls(${t.uploaderUserId}, ${t.visitorRef}) = 1`),
+  check('attachment_assets_scope_ck', sql`(${t.kind} = 'message' and ${t.workspaceId} is not null) or (${t.kind} = 'logo' and ${t.uploaderUserId} is not null and ${t.visitorRef} is null)`),
+  check('attachment_assets_size_ck', sql`${t.byteSize} >= 0 and ${t.byteSize} <= 1048576`),
+  check('attachment_assets_attempts_ck', sql`${t.cleanupAttempts} >= 0 and ${t.cleanupAttempts} <= 5`),
+  index('attachment_assets_workspace_state_idx').on(t.workspaceId, t.state),
+  index('attachment_assets_cleanup_due_idx').on(t.state, t.cleanupNextAttemptAt),
+  index('attachment_assets_pending_age_idx').on(t.state, t.createdAt)
+])
+
 export const workspaces = pgTable('workspaces', {
   id: uuid('id').defaultRandom().primaryKey(),
   name: text('name').notNull(),
   siteId: text('site_id').notNull().unique(),
   // branding shown in the visitor widget
   logoUrl: text('logo_url'),
+  logoAssetId: uuid('logo_asset_id').references(() => attachmentAssets.id, { onDelete: 'set null' }),
   widgetPrimaryColor: text('widget_primary_color').default('#f59e0b').notNull(),
   widgetGreeting: text('widget_greeting').default('Hi there 👋').notNull(),
   widgetIntro: text('widget_intro').default('Tell us a bit about you and how we can help.').notNull(),
@@ -462,6 +509,7 @@ export const messages = pgTable('messages', {
   content: text('content').notNull(),
   attachmentUrl: text('attachment_url'),
   attachmentType: text('attachment_type'),
+  attachmentAssetId: uuid('attachment_asset_id').references(() => attachmentAssets.id, { onDelete: 'set null' }),
   // true = agent-only; the visitor WS pipeline must NEVER receive these (§4)
   isInternalNote: boolean('is_internal_note').default(false).notNull(),
   // Validated workspace member ids selected through the internal-note composer.
@@ -474,7 +522,8 @@ export const messages = pgTable('messages', {
     .where(sql`${t.isInternalNote} = false`),
   index('messages_public_sender_time_conversation_idx')
     .on(t.senderType, t.createdAt, t.conversationId, t.senderId)
-    .where(sql`${t.isInternalNote} = false`)
+    .where(sql`${t.isInternalNote} = false`),
+  uniqueIndex('messages_attachment_asset_uq').on(t.attachmentAssetId).where(sql`${t.attachmentAssetId} is not null`)
 ])
 
 /** Last public message the visitor actually viewed in an open chat surface. */
