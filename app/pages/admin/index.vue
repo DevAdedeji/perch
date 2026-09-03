@@ -415,18 +415,31 @@ async function loadAudit() {
 const deleteWsOpen = ref(false)
 const deleteWsConfirm = ref('')
 const deletingWs = ref(false)
+const deleteWsError = ref('')
+
+watch(deleteWsOpen, (open) => {
+  if (!open) {
+    deleteWsConfirm.value = ''
+    deleteWsError.value = ''
+  }
+})
 
 async function deleteWorkspace() {
   if (deleteWsConfirm.value.trim() !== workspace.value?.name || deletingWs.value) return
   deletingWs.value = true
+  deleteWsError.value = ''
   try {
-    await $fetch(`/api/workspaces/${wid.value}`, { method: 'DELETE' })
+    await $fetch(`/api/workspaces/${wid.value}`, {
+      method: 'DELETE',
+      body: { confirmation: deleteWsConfirm.value.trim() }
+    })
     deleteWsOpen.value = false
     toast.add({ title: 'Workspace deleted', color: 'neutral' })
     await refresh()
     await navigateTo('/dashboard')
   } catch (e) {
-    toast.add({ title: getErrorMessage(e, 'Could not delete workspace'), color: 'error' })
+    deleteWsError.value = getErrorMessage(e, 'Could not delete workspace')
+    toast.add({ title: deleteWsError.value, color: 'error' })
   } finally {
     deletingWs.value = false
   }
@@ -986,23 +999,37 @@ async function deleteWorkspace() {
     <UModal
       v-model:open="deleteWsOpen"
       title="Delete this workspace?"
-      :description="`Every conversation, visitor, and teammate in ${workspace?.name ?? 'this workspace'} will be permanently deleted.`"
+      :description="`Every conversation, visitor, and teammate in ${workspace?.name ?? 'this workspace'} will be permanently deleted. If it has a paid plan, Perch will confirm renewal is canceled first.`"
     >
       <template #body>
-        <UFormField :label="`Type “${workspace?.name}” to confirm`">
-          <UInput
-            v-model="deleteWsConfirm"
-            size="lg"
-            class="w-full"
-            :placeholder="workspace?.name"
+        <div class="space-y-4">
+          <UAlert
+            v-if="deleteWsError"
+            color="error"
+            variant="soft"
+            icon="i-lucide-circle-alert"
+            title="Workspace was not deleted"
+            :description="deleteWsError"
           />
-        </UFormField>
+          <UFormField :label="`Type “${workspace?.name}” to confirm`">
+            <UInput
+              v-model="deleteWsConfirm"
+              size="lg"
+              class="w-full"
+              :placeholder="workspace?.name"
+            />
+          </UFormField>
+          <p class="text-xs text-muted">
+            Keep this page open while Perch checks billing. If cancellation cannot be confirmed, nothing is deleted and you can retry safely.
+          </p>
+        </div>
       </template>
       <template #footer>
         <div class="flex justify-end gap-2 w-full">
           <UButton
             color="neutral"
             variant="ghost"
+            :disabled="deletingWs"
             @click="deleteWsOpen = false"
           >
             Cancel
