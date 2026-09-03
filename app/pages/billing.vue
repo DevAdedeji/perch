@@ -61,6 +61,11 @@ const overview = ref<BillingOverview | null>(null)
 const loading = ref(true)
 const loadError = ref('')
 const checkoutInterval = ref<BillingInterval>('yearly')
+const hasRenewingProviderSubscription = computed(() => Boolean(
+  overview.value?.entitlement.providerSubscriptionConnected
+  && overview.value.entitlement.status !== 'canceled'
+  && !overview.value.entitlement.cancelAtPeriodEnd
+))
 const displayedInterval = computed<BillingInterval>(() => {
   if (overview.value?.entitlement.isPro && overview.value.entitlement.interval) {
     return overview.value.entitlement.interval
@@ -461,7 +466,7 @@ function date(value: string) {
             </ul>
 
             <UButton
-              v-if="!overview.entitlement.isPro && isAdmin"
+              v-if="!overview.entitlement.isPro && isAdmin && !hasRenewingProviderSubscription"
               block
               class="mt-6"
               :loading="checkingOut"
@@ -471,32 +476,42 @@ function date(value: string) {
               Upgrade to Pro
             </UButton>
             <p
-              v-if="!overview.checkoutEnabled && !overview.entitlement.isPro"
+              v-if="hasRenewingProviderSubscription && !overview.entitlement.isPro"
+              class="mt-4 text-center text-xs text-warning"
+            >
+              A Bachs subscription is still connected. Check its latest status or cancel renewal before starting another checkout.
+            </p>
+            <p
+              v-else-if="!overview.checkoutEnabled && !overview.entitlement.isPro"
               class="mt-2 text-center text-xs text-muted"
             >
               Pro upgrades are not open yet. Your workspace will stay on Free until checkout launches.
             </p>
             <div
-              v-if="overview.entitlement.isPro"
+              v-if="overview.entitlement.isPro || overview.entitlement.providerSubscriptionConnected"
               class="mt-6 rounded-xl bg-default p-4 ring-1 ring-default"
             >
               <p class="text-sm font-medium text-highlighted">
                 {{ overview.entitlement.cancelAtPeriodEnd || overview.entitlement.status === 'canceled'
-                  ? 'Ends at the close of this paid period'
+                  ? overview.entitlement.isPro
+                    ? 'Ends at the close of this paid period'
+                    : 'Renewal canceled'
                   : overview.entitlement.status === 'past_due'
                     ? 'Payment needs attention'
-                    : 'Subscription active' }}
+                    : overview.entitlement.isPro
+                      ? 'Subscription active'
+                      : 'Subscription needs attention' }}
               </p>
               <p
                 v-if="overview.entitlement.currentPeriodEnd"
                 class="mt-1 text-xs text-muted"
               >
                 {{ overview.entitlement.cancelAtPeriodEnd || overview.entitlement.status === 'canceled' || overview.entitlement.status === 'past_due'
-                  ? 'Access until'
+                  ? overview.entitlement.isPro ? 'Access until' : 'Provider period ends'
                   : 'Current paid period ends' }} {{ date(overview.entitlement.currentPeriodEnd) }}
               </p>
               <UButton
-                v-if="isAdmin && !overview.entitlement.cancelAtPeriodEnd"
+                v-if="isAdmin && overview.entitlement.status !== 'canceled' && !overview.entitlement.cancelAtPeriodEnd"
                 class="mt-3"
                 size="sm"
                 color="neutral"

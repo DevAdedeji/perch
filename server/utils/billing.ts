@@ -40,7 +40,8 @@ type BillingReconciliationSource = 'manual' | 'sweep' | 'webhook'
 
 export function billingCheckoutEnabled() {
   const config = useRuntimeConfig()
-  return BACHS_RECURRING_RESPONSE_CONTRACT_VERIFIED
+  const environment = String(config.bachsEnvironment || process.env.BACHS_ENV || '')
+  return (BACHS_RECURRING_RESPONSE_CONTRACT_VERIFIED || environment === 'sandbox')
     && (config.billingCheckoutEnabled === true
       || explicitlyEnabled(process.env.PERCH_BILLING_CHECKOUT_ENABLED))
 }
@@ -195,6 +196,12 @@ export async function startWorkspaceCheckout(input: {
     if (subscriptionHasPaidAccess(subscription, paidInvoice?.status === 'paid', now)) {
       throw createError({ statusCode: 409, statusMessage: 'Perch Pro is already active for this workspace.' })
     }
+    if (subscription?.bachsSubscriptionId && subscription.status !== 'canceled') {
+      throw createError({
+        statusCode: 409,
+        statusMessage: 'An existing Bachs subscription must be canceled before starting another checkout.'
+      })
+    }
 
     const openInvoice = await tx.query.workspaceInvoices.findFirst({ where: and(
       eq(workspaceInvoices.workspaceId, input.workspaceId),
@@ -339,21 +346,38 @@ export async function startWorkspaceCheckout(input: {
 }
 
 export async function cancelWorkspacePlan(workspaceId: string) {
+  const db = useDb()
+  const current = await db.query.workspaceSubscriptions.findFirst({
+    where: eq(workspaceSubscriptions.workspaceId, workspaceId)
+  })
+  if (!current?.bachsSubscriptionId) {
+    throw createError({ statusCode: 409, statusMessage: 'No Bachs subscription is connected to this workspace.' })
+  }
+  if (current.status === 'canceled' || current.cancelAtPeriodEnd) {
+    return {
+      cancelAtPeriodEnd: true,
+      currentPeriodEnd: current.currentPeriodEnd?.toISOString() ?? null
+    }
+  }
   const now = new Date()
   const claim = await claimBillingReconciliation(workspaceId, 'manual', now)
   if (!claim) {
     await enqueueBillingReconciliation(workspaceId, now)
     throw createError({ statusCode: 503, statusMessage: 'Billing status is already being checked. Please retry shortly.' })
   }
-  const db = useDb()
   try {
-    const [row, entitlement] = await Promise.all([
-      db.query.workspaceSubscriptions.findFirst({ where: eq(workspaceSubscriptions.workspaceId, workspaceId) }),
-      workspaceEntitlement(workspaceId)
-    ])
-    if (!row || !entitlement.isPro) throw createError({ statusCode: 409, statusMessage: 'Perch Pro is not active.' })
-    if (!row.bachsSubscriptionId) {
+    const row = await db.query.workspaceSubscriptions.findFirst({
+      where: eq(workspaceSubscriptions.workspaceId, workspaceId)
+    })
+    if (!row?.bachsSubscriptionId) {
       throw createError({ statusCode: 409, statusMessage: 'The billing provider subscription could not be confirmed.' })
+    }
+    if (row.status === 'canceled' || row.cancelAtPeriodEnd) {
+      await finishBillingReconciliation(workspaceId, claim.token, null, new Date())
+      return {
+        cancelAtPeriodEnd: true,
+        currentPeriodEnd: row.currentPeriodEnd?.toISOString() ?? null
+      }
     }
     const subscriptionId = row.bachsSubscriptionId
     if (!await renewBillingReconciliationClaim(workspaceId, claim.token)) {

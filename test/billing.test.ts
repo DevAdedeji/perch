@@ -14,7 +14,7 @@ import {
   verifyBachsWebhookSignature
 } from '../server/utils/bachs'
 import { effectiveReminderSettings, reminderIsDue, reminderRetryAt } from '../server/utils/unanswered-reminders'
-import { checkoutMatchesInvoice, checkoutPaymentState, invoiceMatchesPerchPlan, providerAmountCents, providerPaidThroughEnd, providerSubscriptionIdentity, subscriptionHasPaidAccess } from '../server/utils/billing'
+import { billingCheckoutEnabled, checkoutMatchesInvoice, checkoutPaymentState, invoiceMatchesPerchPlan, providerAmountCents, providerPaidThroughEnd, providerSubscriptionIdentity, subscriptionHasPaidAccess } from '../server/utils/billing'
 
 describe('Perch plan pricing', () => {
   it('keeps the yearly plan cheaper than twelve monthly payments', () => {
@@ -31,6 +31,20 @@ describe('Perch plan pricing', () => {
     expect(subscriptionHasPaidAccess({ status: 'canceled', currentPeriodEnd: new Date('2026-09-02T12:00:00.000Z') }, true, now)).toBe(true)
     expect(subscriptionHasPaidAccess({ status: 'past_due', currentPeriodEnd: new Date('2026-09-02T12:00:00.000Z') }, true, now)).toBe(true)
     expect(subscriptionHasPaidAccess({ status: 'canceled', currentPeriodEnd: new Date('2026-08-31T12:00:00.000Z') }, true, now)).toBe(false)
+  })
+
+  it('permits an explicit sandbox checkout gate without opening live checkout', () => {
+    vi.stubEnv('PERCH_BILLING_CHECKOUT_ENABLED', 'true')
+    Object.assign(globalThis, {
+      useRuntimeConfig: () => ({ bachsEnvironment: 'sandbox', billingCheckoutEnabled: false })
+    })
+    expect(billingCheckoutEnabled()).toBe(true)
+
+    Object.assign(globalThis, {
+      useRuntimeConfig: () => ({ bachsEnvironment: 'live', billingCheckoutEnabled: true })
+    })
+    expect(billingCheckoutEnabled()).toBe(false)
+    vi.unstubAllEnvs()
   })
 })
 
@@ -198,6 +212,62 @@ describe('Bachs environment boundary', () => {
 
     await expect(getBachsCheckoutSession('checkout_retry')).resolves.toMatchObject({ checkout_id: 'checkout_retry' })
     expect(provider).toHaveBeenCalledTimes(3)
+    vi.unstubAllGlobals()
+  })
+
+  it('classifies malformed and permanent provider responses without retrying them', async () => {
+    Object.assign(globalThis, {
+      useRuntimeConfig: () => ({
+        bachsEnvironment: 'sandbox',
+        bachsSecretKey: 'sk_sandbox_example',
+        bachsWebhookSecret: 'whsec_example'
+      })
+    })
+    const malformedProvider = vi.fn(async () => new Response(JSON.stringify({ malformed: true }), { status: 200 }))
+    vi.stubGlobal('fetch', malformedProvider)
+
+    await expect(getBachsCheckoutSession('checkout_malformed')).rejects.toMatchObject({
+      statusCode: 502,
+      statusMessage: 'Bachs returned an invalid checkout session.'
+    })
+    expect(malformedProvider).toHaveBeenCalledTimes(1)
+
+    const permanentFailure = vi.fn(async () => new Response(JSON.stringify({ error: 'invalid request' }), { status: 422 }))
+    vi.stubGlobal('fetch', permanentFailure)
+    await expect(getBachsCheckoutSession('checkout_invalid')).rejects.toMatchObject({
+      statusCode: 502,
+      statusMessage: 'Billing provider request failed. Please try again.'
+    })
+    expect(permanentFailure).toHaveBeenCalledTimes(1)
+    vi.unstubAllGlobals()
+  })
+
+  it('bounds retryable provider failures and reports timeouts as temporary', async () => {
+    Object.assign(globalThis, {
+      useRuntimeConfig: () => ({
+        bachsEnvironment: 'sandbox',
+        bachsSecretKey: 'sk_sandbox_example',
+        bachsWebhookSecret: 'whsec_example'
+      })
+    })
+    const unavailableProvider = vi.fn(async () => new Response('{}', { status: 503 }))
+    vi.stubGlobal('fetch', unavailableProvider)
+
+    await expect(getBachsCheckoutSession('checkout_unavailable')).rejects.toMatchObject({
+      statusCode: 503,
+      statusMessage: 'Billing provider request failed. Please try again.'
+    })
+    expect(unavailableProvider).toHaveBeenCalledTimes(3)
+
+    const timeoutProvider = vi.fn(async () => {
+      throw Object.assign(new Error('aborted'), { name: 'AbortError' })
+    })
+    vi.stubGlobal('fetch', timeoutProvider)
+    await expect(getBachsCheckoutSession('checkout_timeout')).rejects.toMatchObject({
+      statusCode: 503,
+      statusMessage: 'Bachs took too long to respond. Please try again.'
+    })
+    expect(timeoutProvider).toHaveBeenCalledTimes(3)
     vi.unstubAllGlobals()
   })
 

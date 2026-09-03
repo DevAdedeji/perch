@@ -140,11 +140,12 @@ export function productionConfigErrors(environment: LaunchEnvironment): string[]
     && (!value(environment.BACHS_ENV) || !value(environment.BACHS_SECRET_KEY) || !value(environment.BACHS_WEBHOOK_SECRET))) {
     errors.push('PERCH_BILLING_CHECKOUT_ENABLED=true requires complete Bachs configuration')
   }
-  if (explicitlyEnabled(environment.PERCH_BILLING_CHECKOUT_ENABLED)
-    && !BACHS_RECURRING_RESPONSE_CONTRACT_VERIFIED) {
-    errors.push('PERCH_BILLING_CHECKOUT_ENABLED=true requires an authoritative Bachs recurring-response contract')
-  }
   const bachsEnvironment = value(environment.BACHS_ENV)
+  if (explicitlyEnabled(environment.PERCH_BILLING_CHECKOUT_ENABLED)
+    && bachsEnvironment === 'live'
+    && !BACHS_RECURRING_RESPONSE_CONTRACT_VERIFIED) {
+    errors.push('Live Bachs checkout requires an authoritative recurring-response contract')
+  }
   if (bachsEnvironment && bachsEnvironment !== 'sandbox' && bachsEnvironment !== 'live') {
     errors.push('BACHS_ENV must be sandbox or live')
   }

@@ -214,6 +214,9 @@ describe.skipIf(!databaseUrl)('billing reconciliation database integration', () 
   })
 
   it('requires the paying admin email to be verified before checkout', async () => {
+    await expect(workspaceBillingCustomer(workspaceId, randomUUID())).rejects.toThrow(
+      'Workspace membership required'
+    )
     const userId = randomUUID()
     await db.insert(schema.users).values({
       id: userId,
@@ -246,6 +249,16 @@ describe.skipIf(!databaseUrl)('billing reconciliation database integration', () 
     expect(await db.query.billingReconciliationJobs.findFirst({
       where: eq(schema.billingReconciliationJobs.workspaceId, workspaceId)
     })).toMatchObject({ status: 'idle', attempts: 0 })
+  })
+
+  it('rejects cancellation without a provider subscription without creating a failed job', async () => {
+    await expect(cancelWorkspacePlan(workspaceId)).rejects.toThrow(
+      'No Bachs subscription is connected'
+    )
+    expect(await db.query.billingReconciliationJobs.findFirst({
+      where: eq(schema.billingReconciliationJobs.workspaceId, workspaceId)
+    })).toBeUndefined()
+    expect(providerRequests).toHaveLength(0)
   })
 
   it('recovers a failed checkout that later becomes paid when its webhook was missed', async () => {
@@ -446,6 +459,54 @@ describe.skipIf(!databaseUrl)('billing reconciliation database integration', () 
     })
     expect(row?.currentPeriodEnd?.toISOString()).toBe(periodEnd.toISOString())
     expect(providerRequests).toHaveLength(0)
+  })
+
+  it('blocks a second checkout while an unpaid provider subscription still needs cancellation', async () => {
+    await insertInvoice('failed')
+    await db.update(schema.workspaceInvoices).set({
+      checkoutClosedAt: new Date('2026-09-01T00:00:00Z')
+    }).where(eq(schema.workspaceInvoices.reference, reference))
+    await db.insert(schema.workspaceSubscriptions).values({
+      workspaceId,
+      status: 'unpaid',
+      interval: 'monthly',
+      currentPeriodEnd: new Date('2026-09-01T00:00:00Z'),
+      bachsSubscriptionId: subscriptionId,
+      lastInvoiceReference: reference
+    })
+
+    await expect(startWorkspaceCheckout({
+      workspaceId,
+      interval: 'monthly',
+      requestId: randomUUID(),
+      customer: { email: 'billing@example.com', name: 'Billing Admin' },
+      origin: 'https://staging.useperch.xyz'
+    })).rejects.toThrow('must be canceled before starting another checkout')
+    expect(providerRequests).toHaveLength(0)
+    expect(await db.query.workspaceInvoices.findMany({
+      where: eq(schema.workspaceInvoices.workspaceId, workspaceId)
+    })).toHaveLength(1)
+  })
+
+  it('allows cancellation when a connected subscription no longer grants Pro access', async () => {
+    await insertInvoice('failed')
+    await db.insert(schema.workspaceSubscriptions).values({
+      workspaceId,
+      status: 'active',
+      interval: 'monthly',
+      currentPeriodEnd: new Date('2026-10-01T00:00:00Z'),
+      bachsSubscriptionId: subscriptionId,
+      lastInvoiceReference: reference
+    })
+
+    await expect(cancelWorkspacePlan(workspaceId)).resolves.toMatchObject({
+      cancelAtPeriodEnd: true,
+      currentPeriodEnd: '2026-10-01T00:00:00.000Z'
+    })
+    expect(await db.query.workspaceSubscriptions.findFirst({
+      where: eq(schema.workspaceSubscriptions.workspaceId, workspaceId)
+    })).toMatchObject({ status: 'active', cancelAtPeriodEnd: true })
+    expect(providerRequests.filter(url => url.includes(`/subscriptions/${subscriptionId}`))).toHaveLength(1)
   })
 
   it('rejects cancellation metadata for a different workspace without changing local renewal', async () => {
@@ -767,6 +828,21 @@ describe.skipIf(!databaseUrl)('billing reconciliation database integration', () 
     expect(await db.query.billingWebhookDeliveries.findFirst({
       where: eq(schema.billingWebhookDeliveries.id, first.delivery.id)
     })).toMatchObject({ status: 'completed', attempts: 2, claimToken: null, lastError: null })
+    await db.delete(schema.billingWebhookDeliveries).where(eq(schema.billingWebhookDeliveries.id, first.delivery.id))
+  })
+
+  it('deduplicates a completed provider event without consuming another attempt', async () => {
+    const providerEventId = `event_${randomUUID()}`
+    const first = await claimBillingWebhook(providerEventId, 'invoice.paid')
+    expect(first.shouldProcess).toBe(true)
+    expect(await finishBillingWebhook(first.delivery.id, first.claimToken!, 'completed')).toBe(true)
+
+    const duplicate = await claimBillingWebhook(providerEventId, 'invoice.paid')
+    expect(duplicate).toMatchObject({
+      shouldProcess: false,
+      claimToken: null,
+      delivery: { status: 'completed', attempts: 1, claimToken: null }
+    })
     await db.delete(schema.billingWebhookDeliveries).where(eq(schema.billingWebhookDeliveries.id, first.delivery.id))
   })
 

@@ -29,6 +29,8 @@ describe('billing reconciliation surface', () => {
     expect(page).toContain('Pro remains off')
     expect(page).not.toContain('Nothing was changed')
     expect(page).toContain('waiting for the signed subscription confirmation')
+    expect(page).toContain('cancel renewal before starting another checkout')
+    expect(billing).toContain('must be canceled before starting another checkout')
     expect(page).not.toContain('setTimeout(() => pollForPaymentConfirmation')
     expect(checkout).toContain('billingCheckoutEnabled()')
     expect(checkout.indexOf('billingCheckoutEnabled()')).toBeLessThan(checkout.indexOf('readValidatedBody'))
