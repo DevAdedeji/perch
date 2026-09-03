@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   assertProductionConfig,
+  BACHS_RECURRING_RESPONSE_CONTRACT_VERIFIED,
   normalizeLaunchOrigin,
   productionConfigErrors,
   type LaunchEnvironment
@@ -69,16 +70,25 @@ describe('launch configuration', () => {
     expect(productionConfigErrors({ ...validEnvironment, BACHS_ENV: 'preview' })).toContain('BACHS_ENV must be sandbox or live')
   })
 
-  it('keeps checkout fail-closed and validates the explicit launch gate', () => {
+  it('allows explicit sandbox verification but keeps live checkout fail-closed', () => {
     expect(productionConfigErrors({
       ...validEnvironment,
       PERCH_BILLING_CHECKOUT_ENABLED: 'sometimes'
     })).toContain('PERCH_BILLING_CHECKOUT_ENABLED must be true or false')
 
-    expect(productionConfigErrors({
+    const completeProviderErrors = productionConfigErrors({
       ...validEnvironment,
       PERCH_BILLING_CHECKOUT_ENABLED: 'true'
-    })).toEqual([])
+    })
+    expect(BACHS_RECURRING_RESPONSE_CONTRACT_VERIFIED).toBe(false)
+    expect(completeProviderErrors).toEqual([])
+
+    expect(productionConfigErrors({
+      ...validEnvironment,
+      BACHS_ENV: 'live',
+      BACHS_SECRET_KEY: 'sk_live_example',
+      PERCH_BILLING_CHECKOUT_ENABLED: 'true'
+    })).toContain('Live Bachs checkout requires an authoritative recurring-response contract')
 
     expect(productionConfigErrors({
       ...validEnvironment,

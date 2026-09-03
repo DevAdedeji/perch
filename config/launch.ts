@@ -1,5 +1,11 @@
 const MIN_SECRET_LENGTH = 32
 
+// Bachs' public API reference does not currently document the canonical
+// subscription/product response fields needed to prove recurring price terms.
+// Keep new checkouts closed until the provider contract has been verified from
+// an authoritative response fixture or provider documentation.
+export const BACHS_RECURRING_RESPONSE_CONTRACT_VERIFIED = false
+
 export interface LaunchEnvironment {
   [key: string]: string | undefined
   NODE_ENV?: string
@@ -135,6 +141,11 @@ export function productionConfigErrors(environment: LaunchEnvironment): string[]
     errors.push('PERCH_BILLING_CHECKOUT_ENABLED=true requires complete Bachs configuration')
   }
   const bachsEnvironment = value(environment.BACHS_ENV)
+  if (explicitlyEnabled(environment.PERCH_BILLING_CHECKOUT_ENABLED)
+    && bachsEnvironment === 'live'
+    && !BACHS_RECURRING_RESPONSE_CONTRACT_VERIFIED) {
+    errors.push('Live Bachs checkout requires an authoritative recurring-response contract')
+  }
   if (bachsEnvironment && bachsEnvironment !== 'sandbox' && bachsEnvironment !== 'live') {
     errors.push('BACHS_ENV must be sandbox or live')
   }

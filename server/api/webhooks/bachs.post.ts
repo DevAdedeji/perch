@@ -47,11 +47,7 @@ export default defineEventHandler(async (event) => {
   try {
     let result: Record<string, unknown>
     if (SUBSCRIPTION_EVENTS.has(eventType) && payload.data?.id) {
-      const subscription = await getBachsSubscription(payload.data.id)
-      if (subscription.id !== payload.data.id) {
-        throw createError({ statusCode: 502, statusMessage: 'Bachs returned a different subscription.' })
-      }
-      const applied = await applyWorkspaceSubscriptionState(subscription)
+      const applied = await reconcileWorkspaceSubscriptionEvent(payload.data.id)
       result = { received: true, ...applied }
     } else if (PAID_EVENTS.has(eventType)) {
       const applied = await confirmWorkspaceInvoiceFromCheckout({
@@ -63,15 +59,22 @@ export default defineEventHandler(async (event) => {
       }
       result = { received: true, ...applied }
     } else if (payload.data?.reference && FAILED_EVENTS.has(eventType)) {
-      const applied = await markWorkspaceInvoiceFailed(payload.data.reference, eventType)
-      result = { received: true, applied }
+      const applied = await confirmWorkspaceInvoiceFromCheckout({ reference: payload.data.reference })
+      if (!applied.applied && applied.reason === 'provider-pending') {
+        throw createError({ statusCode: 503, statusMessage: 'Payment state is still pending.' })
+      }
+      result = { received: true, ...applied }
     } else {
       result = { received: true, ignored: eventType }
     }
-    await finishBillingWebhook(claim.delivery.id, 'ignored' in result ? 'ignored' : 'completed')
+    await requireBillingWebhookFinish(
+      claim.delivery.id,
+      claim.claimToken!,
+      'ignored' in result ? 'ignored' : 'completed'
+    )
     return result
   } catch (error) {
-    await failBillingWebhook(claim.delivery.id, error)
+    await failBillingWebhook(claim.delivery.id, claim.claimToken!, error)
     throw createError({ statusCode: 500, statusMessage: 'Webhook processing failed' })
   }
 })
