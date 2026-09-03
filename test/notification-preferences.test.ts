@@ -10,7 +10,8 @@ import {
   notificationAlertsReady,
   notificationPreferenceScope,
   queuePendingReminder,
-  replacedPreferenceEntry
+  replacedPreferenceEntry,
+  updatedNotificationPreferences
 } from '../app/composables/usePersonalNotificationPreferences'
 
 describe('personal notification preferences', () => {
@@ -89,6 +90,15 @@ describe('personal notification preferences', () => {
     expect(entry.preferences.find(row => row.category === 'mention')?.in_app_enabled).toBe(false)
   })
 
+  it('serializes an explicit false switch value without mutating the loaded preferences', () => {
+    const loaded = defaultNotificationPreferences()
+    const edited = updatedNotificationPreferences(loaded, 'assignment', 'in_app_enabled', false)
+
+    expect(edited.find(row => row.category === 'assignment')?.in_app_enabled).toBe(false)
+    expect(loaded.find(row => row.category === 'assignment')?.in_app_enabled).toBe(true)
+    expect(edited.find(row => row.category === 'mention')).toBe(loaded.find(row => row.category === 'mention'))
+  })
+
   it('fails closed while saved opt-outs are still loading', () => {
     expect(notificationAlertsReady(undefined)).toBe(false)
     expect(notificationAlertsReady({
@@ -113,6 +123,8 @@ describe('personal notification preferences', () => {
     const settings = readFileSync(new URL('../app/pages/settings.vue', import.meta.url), 'utf8')
     expect(composable.match(/Notification\.requestPermission\(\)/g)).toHaveLength(1)
     expect(settings).toContain('@update:model-value="setBrowserPreference')
+    expect(settings).toContain('@update:model-value="setPersonalPreference(item.category, \'in_app_enabled\', $event)"')
+    expect(settings).not.toContain('v-model="personalPreference(')
     expect(settings).not.toContain('onMounted(requestPermission)')
   })
 

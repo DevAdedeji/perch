@@ -1,5 +1,7 @@
 import { defaultNotificationPreferences } from '@perch/shared'
-import type { NotificationPreference } from '@perch/shared'
+import type { NotificationCategory, NotificationPreference } from '@perch/shared'
+
+export type NotificationPreferenceChannel = Exclude<keyof NotificationPreference, 'category'>
 
 export interface PersonalNotificationPreferenceEntry {
   preferences: NotificationPreference[]
@@ -44,6 +46,17 @@ export function replacedPreferenceEntry(
     loading: false,
     generation: nextPreferenceGeneration(entry)
   }
+}
+
+export function updatedNotificationPreferences(
+  preferences: NotificationPreference[],
+  category: NotificationCategory,
+  channel: NotificationPreferenceChannel,
+  enabled: boolean
+): NotificationPreference[] {
+  return preferences.map(preference => preference.category === category
+    ? { ...preference, [channel]: enabled }
+    : preference)
 }
 
 export function usePersonalNotificationPreferences() {

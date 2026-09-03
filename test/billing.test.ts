@@ -10,6 +10,7 @@ import {
   cancelBachsSubscription,
   ensurePerchProProduct,
   getBachsCheckoutSession,
+  inspectBachsCheckoutUrl,
   isApprovedBachsCheckoutUrl,
   verifyBachsWebhookSignature
 } from '../server/utils/bachs'
@@ -185,6 +186,32 @@ describe('Bachs environment boundary', () => {
     expect(isApprovedBachsCheckoutUrl('https://checkout.bachs.io/session/123')).toBe(true)
     expect(isApprovedBachsCheckoutUrl('http://checkout.bachs.io/session/123')).toBe(false)
     expect(isApprovedBachsCheckoutUrl('https://checkout.bachs.io.evil.example/session/123')).toBe(false)
+  })
+
+  it('diagnoses rejected checkout URLs without retaining paths, credentials, or query values', () => {
+    expect(inspectBachsCheckoutUrl(undefined)).toEqual({ approved: false, reason: 'missing' })
+    expect(inspectBachsCheckoutUrl('not a url')).toEqual({ approved: false, reason: 'malformed' })
+    expect(inspectBachsCheckoutUrl('http://checkout.bachs.io/c/private-token')).toEqual({
+      approved: false,
+      reason: 'non_https',
+      hostname: 'checkout.bachs.io'
+    })
+
+    const untrusted = inspectBachsCheckoutUrl(
+      'https://CHECKOUT.BACHS.IO.evil.example/c/private-token?email=customer@example.com'
+    )
+    expect(untrusted).toEqual({
+      approved: false,
+      reason: 'untrusted_hostname',
+      hostname: 'checkout.bachs.io.evil.example'
+    })
+    expect(JSON.stringify(untrusted)).not.toMatch(/private-token|customer@example|secret/)
+
+    expect(inspectBachsCheckoutUrl('https://customer:secret@checkout.bachs.io/c/private-token')).toEqual({
+      approved: false,
+      reason: 'embedded_credentials',
+      hostname: 'checkout.bachs.io'
+    })
   })
 
   it('retries only bounded canonical reads after transient provider failures', async () => {
