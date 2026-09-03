@@ -283,6 +283,19 @@ function personalPreference(category: NotificationCategory) {
   return personalNotifications.value.find(item => item.category === category)!
 }
 
+function setPersonalPreference(
+  category: NotificationCategory,
+  channel: NotificationPreferenceChannel,
+  enabled: boolean
+) {
+  personalNotifications.value = updatedNotificationPreferences(
+    personalNotifications.value,
+    category,
+    channel,
+    enabled
+  )
+}
+
 async function loadPersonalNotifications() {
   const workspaceId = wid.value
   const scope = personalNotificationScope.value
@@ -303,14 +316,14 @@ async function loadPersonalNotifications() {
   }
 }
 
-async function setBrowserPreference(preference: NotificationPreference, enabled: boolean) {
+async function setBrowserPreference(category: NotificationCategory, enabled: boolean) {
   if (!enabled) {
-    preference.browser_enabled = false
+    setPersonalPreference(category, 'browser_enabled', false)
     return
   }
   const permission = await browserNotifications.requestPermission()
   if (permission === 'granted') {
-    preference.browser_enabled = true
+    setPersonalPreference(category, 'browser_enabled', true)
     return
   }
   toast.add({
@@ -327,10 +340,11 @@ async function savePersonalNotifications() {
   const scope = personalNotificationScope.value
   if (!workspaceId || !scope || notificationsSaving.value) return
   notificationsSaving.value = true
+  const preferences = personalNotifications.value.map(preference => ({ ...preference }))
   try {
     const result = await $fetch<{ preferences: NotificationPreference[] }>(
       `/api/workspaces/${workspaceId}/notification-preferences`,
-      { method: 'PATCH', body: { preferences: personalNotifications.value } }
+      { method: 'PATCH', body: { preferences } }
     )
     personalNotificationStore.replace(scope, result.preferences)
     if (personalNotificationScope.value === scope) {
@@ -871,8 +885,9 @@ async function removeLogo() {
                 <label class="flex min-h-11 items-center justify-between gap-3 rounded-lg bg-elevated/50 px-3 py-2">
                   <span class="text-sm text-highlighted">In-app pop-up</span>
                   <USwitch
-                    v-model="personalPreference(item.category).in_app_enabled"
+                    :model-value="personalPreference(item.category).in_app_enabled"
                     :aria-label="`Show ${item.title.toLowerCase()} as in-app pop-ups`"
+                    @update:model-value="setPersonalPreference(item.category, 'in_app_enabled', $event)"
                   />
                 </label>
                 <label class="flex min-h-11 items-center justify-between gap-3 rounded-lg bg-elevated/50 px-3 py-2">
@@ -880,7 +895,7 @@ async function removeLogo() {
                   <USwitch
                     :model-value="personalPreference(item.category).browser_enabled"
                     :aria-label="`Show ${item.title.toLowerCase()} as browser notifications`"
-                    @update:model-value="setBrowserPreference(personalPreference(item.category), $event)"
+                    @update:model-value="setBrowserPreference(item.category, $event)"
                   />
                 </label>
                 <label
@@ -889,8 +904,9 @@ async function removeLogo() {
                 >
                   <span class="text-sm text-highlighted">Email</span>
                   <USwitch
-                    v-model="personalPreference(item.category).email_enabled"
+                    :model-value="personalPreference(item.category).email_enabled"
                     aria-label="Email me unanswered-message reminders"
+                    @update:model-value="setPersonalPreference(item.category, 'email_enabled', $event)"
                   />
                 </label>
               </div>
