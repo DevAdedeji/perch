@@ -114,7 +114,24 @@ describe.skipIf(!databaseUrl)('billing-safe deletion database integration', () =
     })).toMatchObject({
       deletionKind: 'workspace',
       bachsSubscriptionId: null,
-      providerStatus: 'not_applicable'
+      providerStatus: 'not_applicable',
+      deletedAt: expect.any(Date)
+    })
+
+    // A stale duplicate may finish provider confirmation after the first
+    // request deleted the workspace. It must not rewrite completed evidence.
+    await recordBillingDeletionConfirmation({
+      workspaceId,
+      subscriptionId: null,
+      providerStatus: 'not_applicable',
+      cancelAtPeriodEnd: null,
+      providerConfirmedAt: null
+    }, 'account')
+    expect(await db.query.billingDeletionReceipts.findFirst({
+      where: eq(schema.billingDeletionReceipts.workspaceId, workspaceId)
+    })).toMatchObject({
+      deletionKind: 'workspace',
+      deletedAt: expect.any(Date)
     })
   })
 
@@ -199,6 +216,28 @@ describe.skipIf(!databaseUrl)('billing-safe deletion database integration', () =
     await db.insert(schema.workspaceMembers).values({ workspaceId, userId: outsiderId, role: 'agent' })
     await expect(prepareWorkspaceDeletion({ workspaceId, userId: outsiderId, confirmation: 'Delete Me' }))
       .rejects.toMatchObject({ statusCode: 403 })
+    expect(await db.query.workspaces.findFirst({ where: eq(schema.workspaces.id, workspaceId) }))
+      .toMatchObject({ deletionRequestedAt: null })
+  })
+
+  it('fails closed when a paid invoice has no provider subscription mapping', async () => {
+    const userId = await createUser()
+    const workspaceId = await createWorkspace(userId)
+    await db.insert(schema.workspaceInvoices).values({
+      workspaceId,
+      reference: `paid_without_subscription_${randomUUID()}`,
+      status: 'paid',
+      interval: 'monthly',
+      amountCents: 900,
+      periodStart: new Date('2026-09-01T00:00:00.000Z'),
+      periodEnd: new Date('2026-10-01T00:00:00.000Z')
+    })
+
+    await expect(prepareWorkspaceDeletion({ workspaceId, userId, confirmation: 'Delete Me' }))
+      .rejects.toMatchObject({
+        statusCode: 409,
+        statusMessage: 'Perch cannot confirm the billing-provider subscription. Nothing was deleted; contact support or try again after billing syncs.'
+      })
     expect(await db.query.workspaces.findFirst({ where: eq(schema.workspaces.id, workspaceId) }))
       .toMatchObject({ deletionRequestedAt: null })
   })

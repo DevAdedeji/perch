@@ -4,6 +4,7 @@ import {
   count,
   eq,
   inArray,
+  isNull,
   sessions,
   sql,
   users,
@@ -104,25 +105,29 @@ async function localBillingRequirement(tx: Transaction, workspaceId: string): Pr
     conflict('This workspace has an unfinished checkout. Finish it or let it expire, then try deletion again.')
   }
 
-  const subscription = await tx.query.workspaceSubscriptions.findFirst({
-    where: eq(workspaceSubscriptions.workspaceId, workspaceId)
-  })
-  if (!subscription) return { workspaceId, subscriptionId: null }
+  const [subscription, anyPaidInvoice] = await Promise.all([
+    tx.query.workspaceSubscriptions.findFirst({
+      where: eq(workspaceSubscriptions.workspaceId, workspaceId)
+    }),
+    tx.query.workspaceInvoices.findFirst({
+      where: and(
+        eq(workspaceInvoices.workspaceId, workspaceId),
+        eq(workspaceInvoices.status, 'paid')
+      ),
+      columns: { id: true }
+    })
+  ])
+  if (!subscription) {
+    if (anyPaidInvoice) {
+      conflict('Perch cannot confirm the billing-provider subscription. Nothing was deleted; contact support or try again after billing syncs.')
+    }
+    return { workspaceId, subscriptionId: null }
+  }
   if (subscription.bachsSubscriptionId) {
     return { workspaceId, subscriptionId: subscription.bachsSubscriptionId }
   }
 
-  const paidInvoice = subscription.lastInvoiceReference
-    ? await tx.query.workspaceInvoices.findFirst({
-        where: and(
-          eq(workspaceInvoices.workspaceId, workspaceId),
-          eq(workspaceInvoices.reference, subscription.lastInvoiceReference),
-          eq(workspaceInvoices.status, 'paid')
-        ),
-        columns: { id: true }
-      })
-    : undefined
-  if (paidInvoice || subscription.status !== 'canceled') {
+  if (anyPaidInvoice || subscription.status !== 'canceled') {
     conflict('Perch cannot confirm the billing-provider subscription. Nothing was deleted; contact support or try again after billing syncs.')
   }
   return { workspaceId, subscriptionId: null }
@@ -188,8 +193,11 @@ async function persistReceipt(
       providerStatus: confirmation.providerStatus,
       cancelAtPeriodEnd: confirmation.cancelAtPeriodEnd,
       providerConfirmedAt: confirmation.providerConfirmedAt,
-      deletedAt: deleted ? sql`now()` : null
-    }
+      deletedAt: deleted ? sql`now()` : billingDeletionReceipts.deletedAt
+    },
+    // A completed receipt is immutable audit evidence. In particular, a
+    // slower duplicate request must not clear or rewrite it after deletion.
+    setWhere: isNull(billingDeletionReceipts.deletedAt)
   })
 }
 
@@ -287,6 +295,13 @@ export async function finalizeAccountDeletion(input: {
   billingConfirmations: BillingDeletionConfirmation[]
 }) {
   return useDb().transaction(async (tx) => {
+    // Serialize with workspace creation and invite acceptance. Their membership
+    // inserts take a foreign-key key-share lock on this user, so neither can
+    // appear after the membership plan below and leave an orphaned workspace.
+    const userRows = await tx.select({ id: users.id }).from(users)
+      .where(eq(users.id, input.userId)).limit(1).for('update')
+    if (!userRows[0]) return { revokedSessionIds: [], soloWorkspaceIds: [] }
+
     const plan = await accountWorkspacePlan(tx, input.userId)
     const prepared = new Set(input.preparedWorkspaceIds)
     if (plan.workspaceIds.some(id => !prepared.has(id))) {
