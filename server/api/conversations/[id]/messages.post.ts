@@ -49,6 +49,7 @@ export default defineEventHandler(async (event) => {
     conversationId,
     workspaceId: conversation.workspaceId,
     senderMemberId: member.id,
+    uploaderUserId: user.id,
     content: result.data.content,
     attachmentUrl: result.data.attachment_url ?? null,
     attachmentType: result.data.attachment_url ? (result.data.attachment_type ?? 'image/*') : null,

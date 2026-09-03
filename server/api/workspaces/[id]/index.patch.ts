@@ -85,9 +85,39 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Pick a timezone for your business hours' })
   }
 
-  const [workspace] = Object.keys(patch).length
-    ? await db.update(workspaces).set(patch).where(eq(workspaces.id, workspaceId)).returning()
-    : [await db.query.workspaces.findFirst({ where: eq(workspaces.id, workspaceId) })]
+  const workspace = Object.keys(patch).length
+    ? await db.transaction(async (tx) => {
+        const [lockedWorkspace] = await tx.select().from(workspaces)
+          .where(eq(workspaces.id, workspaceId)).for('update')
+        if (!lockedWorkspace) throw createError({ statusCode: 404, statusMessage: 'Workspace not found' })
+        const updatePatch: typeof patch & { logoAssetId?: string | null } = { ...patch }
+        if (patch.logoUrl !== undefined && patch.logoUrl !== lockedWorkspace.logoUrl) {
+          if (patch.logoUrl) {
+            const asset = await claimLogoAttachment(tx, {
+              workspaceId,
+              secureUrl: patch.logoUrl,
+              uploaderUserId: user.id
+            })
+            updatePatch.logoAssetId = asset.id
+          } else {
+            updatePatch.logoAssetId = null
+          }
+          if (lockedWorkspace.logoAssetId) {
+            await queueAssetCleanup(tx, lockedWorkspace.logoAssetId, patch.logoUrl ? 'logo_replaced' : 'logo_removed')
+          } else if (lockedWorkspace.logoUrl) {
+            await queueLegacyLogoCleanup(tx, {
+              workspaceId,
+              uploaderUserId: user.id,
+              secureUrl: lockedWorkspace.logoUrl,
+              reason: patch.logoUrl ? 'logo_replaced' : 'logo_removed'
+            })
+          }
+        }
+        const [updated] = await tx.update(workspaces).set(updatePatch)
+          .where(eq(workspaces.id, workspaceId)).returning()
+        return updated!
+      })
+    : await db.query.workspaces.findFirst({ where: eq(workspaces.id, workspaceId) })
 
   if (Object.keys(patch).length) {
     logAudit(workspaceId, user, 'settings.updated', { changed: Object.keys(patch) })

@@ -69,7 +69,18 @@ export default defineEventHandler(async (event) => {
     const activeSessions = await tx.query.sessions.findMany({
       where: eq(sessions.userId, user.id), columns: { id: true }
     })
-    if (soloWorkspaceIds.length) await tx.delete(workspaces).where(inArray(workspaces.id, soloWorkspaceIds))
+    if (soloWorkspaceIds.length) {
+      const soloWorkspaces = await tx.query.workspaces.findMany({ where: inArray(workspaces.id, soloWorkspaceIds) })
+      for (const workspace of soloWorkspaces) {
+        await queueWorkspaceAttachmentCleanup(tx, {
+          workspaceId: workspace.id,
+          uploaderUserId: user.id,
+          legacyLogoUrl: workspace.logoAssetId ? null : workspace.logoUrl
+        })
+      }
+      await tx.delete(workspaces).where(inArray(workspaces.id, soloWorkspaceIds))
+    }
+    await queueUnattachedUserUploads(tx, user.id)
     await tx.delete(users).where(eq(users.id, user.id))
     return {
       revokedSessionIds: activeSessions.map(row => row.id),

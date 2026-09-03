@@ -1,4 +1,4 @@
-import { conversations, messages, sql, users, workspaces } from '@perch/db'
+import { attachmentAssets, conversations, messages, sql, users, workspaces } from '@perch/db'
 
 /**
  * Instance-level product metrics for the operator (gated by PERCH_ADMIN_EMAILS).
@@ -6,17 +6,12 @@ import { conversations, messages, sql, users, workspaces } from '@perch/db'
  * 14-day signups/messages series.
  */
 export default defineEventHandler(async (event) => {
-  const user = await requireUser(event)
-  const allowed = (useRuntimeConfig(event).adminEmails || process.env.PERCH_ADMIN_EMAILS || '')
-    .split(',').map((e: string) => e.trim().toLowerCase()).filter(Boolean)
-  if (!allowed.includes(user.email.toLowerCase())) {
-    throw createError({ statusCode: 404, statusMessage: 'Not found' }) // don't advertise the panel
-  }
+  await requirePlatformAdmin(event)
 
   const db = useDb()
   const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
 
-  const [totals, active, series] = await Promise.all([
+  const [totals, active, series, attachmentCleanup] = await Promise.all([
     db.execute(sql`
       select
         (select count(*) from ${users}) as users,
@@ -41,6 +36,13 @@ export default defineEventHandler(async (event) => {
         (select count(*) from ${messages} m
           where m.created_at::date = days.day and m.is_internal_note = false) as messages
       from days order by days.day
+    `),
+    db.execute(sql`
+      select
+        count(*) filter (where ${attachmentAssets.state} in ('pending', 'retrying', 'processing')) as outstanding,
+        count(*) filter (where ${attachmentAssets.state} = 'dead_letter') as failed,
+        min(${attachmentAssets.createdAt}) filter (where ${attachmentAssets.state} in ('pending', 'retrying', 'processing')) as oldest_outstanding_at
+      from ${attachmentAssets}
     `)
   ])
 
@@ -48,6 +50,7 @@ export default defineEventHandler(async (event) => {
   return {
     totals: totals[0],
     last_7d: active[0],
-    daily: [...series]
+    daily: [...series],
+    attachment_cleanup: attachmentCleanup[0]
   }
 })

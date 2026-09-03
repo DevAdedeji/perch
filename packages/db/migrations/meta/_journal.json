@@ -204,6 +204,13 @@
       "when": 1788310931291,
       "tag": "0028_notification-preferences",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1788400800000,
+      "tag": "0030_attachment-lifecycle",
+      "breakpoints": true
     }
   ]
 }
