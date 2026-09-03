@@ -12,6 +12,7 @@ export interface LaunchEnvironment {
   NUXT_OAUTH_GOOGLE_REDIRECT_URL?: string
   RESEND_API_KEY?: string
   RESEND_FROM?: string
+  RESEND_WEBHOOK_SECRET?: string
   BACHS_ENV?: string
   PERCH_BILLING_CHECKOUT_ENABLED?: string
   VISITOR_REPLY_SECRET?: string
@@ -124,6 +125,9 @@ export function productionConfigErrors(environment: LaunchEnvironment): string[]
     if (!isStrongSecret(environment.VISITOR_EMAIL_HASH_SECRET)) {
       errors.push('VISITOR_EMAIL_HASH_SECRET must be a non-placeholder secret of at least 32 characters when visitor reply email is enabled')
     }
+  }
+  if (visitorReplyDeliveryEnabled && !isStrongSecret(environment.RESEND_WEBHOOK_SECRET)) {
+    errors.push('RESEND_WEBHOOK_SECRET must be a non-placeholder secret of at least 32 characters when visitor reply email delivery is enabled')
   }
   requireCompleteGroup(errors, environment, ['BACHS_ENV', 'BACHS_SECRET_KEY', 'BACHS_WEBHOOK_SECRET'])
   const billingCheckoutFlag = value(environment.PERCH_BILLING_CHECKOUT_ENABLED)

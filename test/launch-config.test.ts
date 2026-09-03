@@ -133,6 +133,29 @@ describe('launch configuration', () => {
     })).toEqual([])
   })
 
+  it('requires a strong Resend webhook secret before visitor reply delivery is enabled', () => {
+    const errors = productionConfigErrors({
+      ...validEnvironment,
+      VISITOR_REPLY_EMAIL_FEATURE_ENABLED: 'true',
+      VISITOR_REPLY_EMAIL_DELIVERY_ENABLED: 'true',
+      VISITOR_REPLY_SECRET: 'strong-reply-link-secret-value-849201',
+      VISITOR_EMAIL_HASH_SECRET: 'strong-email-hash-secret-value-572940',
+      RESEND_WEBHOOK_SECRET: 'short'
+    })
+    expect(errors).toContain(
+      'RESEND_WEBHOOK_SECRET must be a non-placeholder secret of at least 32 characters when visitor reply email delivery is enabled'
+    )
+
+    expect(productionConfigErrors({
+      ...validEnvironment,
+      VISITOR_REPLY_EMAIL_FEATURE_ENABLED: 'true',
+      VISITOR_REPLY_EMAIL_DELIVERY_ENABLED: 'true',
+      VISITOR_REPLY_SECRET: 'strong-reply-link-secret-value-849201',
+      VISITOR_EMAIL_HASH_SECRET: 'strong-email-hash-secret-value-572940',
+      RESEND_WEBHOOK_SECRET: 'whsec_strong-resend-webhook-secret-638105'
+    })).toEqual([])
+  })
+
   it('does not allow delivery to be enabled while feature exposure is off', () => {
     const errors = productionConfigErrors({
       ...validEnvironment,
