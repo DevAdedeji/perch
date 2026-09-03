@@ -213,6 +213,74 @@ describe.skipIf(!databaseUrl)('billing reconciliation database integration', () 
     })).toHaveLength(1)
   })
 
+  it('replaces an unusable provider checkout once without sending its expired URL', async () => {
+    let checkoutPosts = 0
+    const references: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input)
+      providerRequests.push(url)
+      if (url.includes('/products')) {
+        return new Response(JSON.stringify({
+          items: [{ id: 'product_monthly', price: { currency: 'USD', price_type: 'fixed' as const, amount: '9.00' }, billing_cycle: { interval: 'month' as const, frequency: 1 }, metadata: { perch_plan: 'workspace_pro_monthly' } }]
+        }), { status: 200 })
+      }
+      if (url.endsWith('/checkout-sessions') && init?.method === 'POST') {
+        checkoutPosts++
+        const body = JSON.parse(String(init.body)) as { reference: string }
+        references.push(body.reference)
+        return new Response(JSON.stringify({
+          checkout_id: checkoutPosts === 1 ? 'checkout_expired' : 'checkout_fresh',
+          checkout_url: `https://sandbox-checkout.bachs.io/session/${checkoutPosts}`,
+          reference: body.reference
+        }), { status: 200 })
+      }
+      const expired = url.endsWith('/checkout_expired')
+      const checkoutReference = references[expired ? 0 : 1]
+      return new Response(JSON.stringify({
+        checkout_id: expired ? 'checkout_expired' : 'checkout_fresh',
+        status: expired ? 'expired' : 'open',
+        payment_status: expired ? 'failed' : 'requires_payment_method',
+        amount: '9.00',
+        currency: 'USD',
+        reference: checkoutReference,
+        subscription_id: null,
+        charge: {
+          payment_id: expired ? 'payment_expired' : 'payment_fresh',
+          status: expired ? 'cancelled' : 'created',
+          amount: '9.00',
+          amount_paid: '0.00',
+          currency: 'USD'
+        }
+      }), { status: 200 })
+    }))
+
+    await expect(startWorkspaceCheckout({
+      workspaceId,
+      interval: 'monthly',
+      requestId: randomUUID(),
+      customer: { email: 'verified@example.com', name: 'Verified Admin' },
+      origin: 'https://staging.useperch.xyz'
+    })).resolves.toMatchObject({
+      checkoutUrl: 'https://sandbox-checkout.bachs.io/session/2'
+    })
+
+    expect(checkoutPosts).toBe(2)
+    expect(references[0]).not.toBe(references[1])
+    const invoices = await db.query.workspaceInvoices.findMany({
+      where: eq(schema.workspaceInvoices.workspaceId, workspaceId)
+    })
+    expect(invoices).toHaveLength(2)
+    expect(invoices.find(invoice => invoice.bachsCheckoutId === 'checkout_expired')).toMatchObject({
+      status: 'failed',
+      checkoutClosedAt: expect.any(Date)
+    })
+    expect(invoices.find(invoice => invoice.bachsCheckoutId === 'checkout_fresh')).toMatchObject({
+      status: 'pending',
+      checkoutClosedAt: null,
+      checkoutUrl: 'https://sandbox-checkout.bachs.io/session/2'
+    })
+  })
+
   it('requires the paying admin email to be verified before checkout', async () => {
     await expect(workspaceBillingCustomer(workspaceId, randomUUID())).rejects.toThrow(
       'Workspace membership required'
