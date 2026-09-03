@@ -182,8 +182,18 @@ describe('Bachs environment boundary', () => {
     expect(bachsConfigured()).toBe(true)
   })
 
-  it('only permits Bachs HTTPS checkout URLs', () => {
+  it('only permits Bachs HTTPS checkout URLs for the configured environment', () => {
+    Object.assign(globalThis, {
+      useRuntimeConfig: () => ({ bachsEnvironment: 'sandbox' })
+    })
+    expect(isApprovedBachsCheckoutUrl('https://sandbox-checkout.bachs.io/session/123')).toBe(true)
+    expect(isApprovedBachsCheckoutUrl('https://checkout.bachs.io/session/123')).toBe(false)
+
+    Object.assign(globalThis, {
+      useRuntimeConfig: () => ({ bachsEnvironment: 'live' })
+    })
     expect(isApprovedBachsCheckoutUrl('https://checkout.bachs.io/session/123')).toBe(true)
+    expect(isApprovedBachsCheckoutUrl('https://sandbox-checkout.bachs.io/session/123')).toBe(false)
     expect(isApprovedBachsCheckoutUrl('http://checkout.bachs.io/session/123')).toBe(false)
     expect(isApprovedBachsCheckoutUrl('https://checkout.bachs.io.evil.example/session/123')).toBe(false)
   })
