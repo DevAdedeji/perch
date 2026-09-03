@@ -389,6 +389,9 @@ describe.skipIf(!databaseUrl)('billing reconciliation database integration', () 
   it('confirms payment but keeps Pro off when the provider subscription identity is unavailable', async () => {
     checkoutSubscriptionId = null
     await insertInvoice()
+    await db.update(schema.workspaceInvoices).set({
+      reconcileUntil: new Date('2026-09-03T00:00:00Z')
+    }).where(eq(schema.workspaceInvoices.reference, reference))
     await db.insert(schema.workspaceSubscriptions).values({
       workspaceId,
       status: 'canceled',
@@ -396,13 +399,107 @@ describe.skipIf(!databaseUrl)('billing reconciliation database integration', () 
       lastInvoiceReference: reference
     })
 
-    const result = await reconcileWorkspaceBilling(workspaceId)
+    const result = await reconcileWorkspaceBilling(workspaceId, {
+      now: new Date('2026-09-02T00:00:00Z')
+    })
     expect(result.awaitingSubscription).toBe(true)
+    expect(result.nextCheckAt).toBe('2026-09-02T00:02:00.000Z')
     expect(result.providerResourcesChecked).toBe(1)
     expect(result.providerRequestCap).toBe(3)
     expect(providerRequests).toHaveLength(1)
     expect((await workspaceEntitlement(workspaceId)).isPro).toBe(false)
     expect((await db.query.workspaceInvoices.findFirst({ where: eq(schema.workspaceInvoices.reference, reference) }))?.status).toBe('paid')
+  })
+
+  it('does not attach an older local subscription to a newer paid checkout that lacks its exact subscription id', async () => {
+    const oldReference = `old_${randomUUID()}`
+    const oldSubscriptionId = `old_subscription_${randomUUID()}`
+    await db.insert(schema.workspaceInvoices).values({
+      workspaceId,
+      reference: oldReference,
+      status: 'paid',
+      interval: 'monthly',
+      amountCents: 900,
+      currency: 'USD',
+      bachsCheckoutId: `old_checkout_${randomUUID()}`,
+      bachsProductId: 'product_monthly',
+      checkoutClosedAt: new Date('2026-08-01T00:00:00Z'),
+      paidAt: new Date('2026-07-01T00:00:00Z'),
+      periodStart: new Date('2026-07-01T00:00:00Z'),
+      periodEnd: new Date('2026-08-01T00:00:00Z'),
+      createdAt: new Date('2026-07-01T00:00:00Z')
+    })
+    await insertInvoice()
+    await db.update(schema.workspaceInvoices).set({
+      reconcileUntil: new Date('2026-09-03T00:00:00Z')
+    }).where(eq(schema.workspaceInvoices.reference, reference))
+    await db.insert(schema.workspaceSubscriptions).values({
+      workspaceId,
+      status: 'canceled',
+      interval: 'monthly',
+      currentPeriodEnd: new Date('2026-08-01T00:00:00Z'),
+      bachsSubscriptionId: oldSubscriptionId,
+      lastInvoiceReference: oldReference
+    })
+    checkoutSubscriptionId = null
+
+    const result = await reconcileWorkspaceBilling(workspaceId, {
+      now: new Date('2026-09-02T00:00:00Z')
+    })
+    expect(result).toMatchObject({
+      invoicesChanged: 1,
+      subscriptionChecked: false,
+      awaitingSubscription: true,
+      nextCheckAt: '2026-09-02T00:02:00.000Z'
+    })
+    expect(providerRequests).toHaveLength(1)
+    expect(providerRequests.some(url => url.endsWith(`/subscriptions/${oldSubscriptionId}`))).toBe(false)
+    expect(await db.query.workspaceSubscriptions.findFirst({
+      where: eq(schema.workspaceSubscriptions.workspaceId, workspaceId)
+    })).toMatchObject({
+      bachsSubscriptionId: oldSubscriptionId,
+      lastInvoiceReference: oldReference
+    })
+    expect((await workspaceEntitlement(workspaceId)).isPro).toBe(false)
+  })
+
+  it('accepts an exact signed subscription snapshot when the paid checkout omits its optional subscription link', async () => {
+    checkoutSubscriptionId = null
+    await insertInvoice('paid')
+
+    await expect(reconcileWorkspaceSubscriptionEvent(subscriptionId)).resolves.toMatchObject({
+      applied: true,
+      workspaceId
+    })
+    expect(providerRequests).toHaveLength(2)
+    expect(await db.query.workspaceSubscriptions.findFirst({
+      where: eq(schema.workspaceSubscriptions.workspaceId, workspaceId)
+    })).toMatchObject({
+      status: 'active',
+      bachsSubscriptionId: subscriptionId,
+      lastInvoiceReference: reference
+    })
+    expect((await workspaceEntitlement(workspaceId)).isPro).toBe(true)
+  })
+
+  it('dead-letters a paid checkout whose subscription never appears inside the recovery window', async () => {
+    checkoutSubscriptionId = null
+    await insertInvoice()
+    await db.update(schema.workspaceInvoices).set({
+      reconcileUntil: new Date('2026-09-02T01:00:00Z')
+    }).where(eq(schema.workspaceInvoices.reference, reference))
+
+    await expect(reconcileWorkspaceBilling(workspaceId, {
+      now: new Date('2026-09-02T01:00:01Z')
+    })).rejects.toThrow('still missing its subscription')
+    expect(await db.query.billingReconciliationJobs.findFirst({
+      where: eq(schema.billingReconciliationJobs.workspaceId, workspaceId)
+    })).toMatchObject({
+      status: 'failed',
+      attempts: 6,
+      nextAttemptAt: null,
+      lastError: expect.stringContaining('operator review is required')
+    })
   })
 
   it('does not mutate local billing when canonical amount validation fails', async () => {

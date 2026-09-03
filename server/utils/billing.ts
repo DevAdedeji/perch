@@ -425,6 +425,7 @@ export async function cancelWorkspacePlan(workspaceId: string) {
     }
     await finishBillingReconciliation(workspaceId, claim.token, nextSuccessfulBillingCheck({
       pendingCheckout: false,
+      awaitingSubscription: false,
       subscription,
       now
     }), new Date())
@@ -527,6 +528,8 @@ async function applyCanonicalBillingSnapshot(input: {
     } = { applied: false, reason: 'unknown-checkout', workspaceId: input.workspaceId }
     let pendingCheckout = false
     let pendingRecoveryUntil: Date | null = null
+    let awaitingSubscription = false
+    let awaitingSubscriptionUntil: Date | null = null
     let terminalRecoveryUntil: Date | null = null
     if (input.checkout && invoice) {
       const state = checkoutPaymentState(input.checkout)
@@ -552,6 +555,8 @@ async function applyCanonicalBillingSnapshot(input: {
         }
         invoiceOutcome = { applied: changed, reason: 'provider-failed', workspaceId: input.workspaceId }
       } else {
+        awaitingSubscription = !input.subscription
+        awaitingSubscriptionUntil = awaitingSubscription ? invoice.reconcileUntil : null
         const changed = invoice.status !== 'paid'
           || invoice.bachsChargeId !== (input.checkout.charge?.payment_id ?? invoice.bachsChargeId)
         if (changed) {
@@ -702,6 +707,8 @@ async function applyCanonicalBillingSnapshot(input: {
       conflictingInvoiceReference,
       pendingCheckout,
       pendingRecoveryUntil,
+      awaitingSubscription,
+      awaitingSubscriptionUntil,
       terminalRecoveryUntil
     }
   })
@@ -791,6 +798,8 @@ function billingReconciliationRetryAt(attempts: number, now: Date) {
 function nextSuccessfulBillingCheck(input: {
   pendingCheckout: boolean
   pendingRecoveryUntil?: Date | null
+  awaitingSubscription: boolean
+  awaitingSubscriptionUntil?: Date | null
   terminalRecoveryUntil?: Date | null
   subscription: BachsSubscription | null
   now: Date
@@ -799,6 +808,12 @@ function nextSuccessfulBillingCheck(input: {
     return new Date(Math.min(
       input.now.getTime() + RECONCILIATION_POLL_MS,
       input.pendingRecoveryUntil.getTime()
+    ))
+  }
+  if (input.awaitingSubscription && input.awaitingSubscriptionUntil && input.awaitingSubscriptionUntil > input.now) {
+    return new Date(Math.min(
+      input.now.getTime() + RECONCILIATION_POLL_MS,
+      input.awaitingSubscriptionUntil.getTime()
     ))
   }
   if (input.terminalRecoveryUntil && input.terminalRecoveryUntil > input.now) {
@@ -992,11 +1007,18 @@ async function reconcileWorkspaceBillingUnderClaim(
   const checkoutSubscriptionId = canonicalCheckoutState === 'paid'
     ? canonicalCheckout?.subscription_id ?? null
     : null
+  // A subscription stored for an older invoice lineage is not evidence that
+  // the current paid checkout created that same subscription. Wait for the
+  // exact checkout-linked ID or a signed subscription event instead.
+  const currentLineageSubscriptionId = subscriptionRow
+    && subscriptionRow.lastInvoiceReference === invoice?.reference
+    ? subscriptionRow.bachsSubscriptionId
+    : null
   const subscriptionId = canonicalCheckoutState && canonicalCheckoutState !== 'paid'
     ? options.subscriptionSnapshot ? options.subscriptionId ?? null : null
     : checkoutSubscriptionId
       ?? options.subscriptionId
-      ?? subscriptionRow?.bachsSubscriptionId
+      ?? currentLineageSubscriptionId
       ?? null
   if (options.subscriptionSnapshot && options.subscriptionSnapshot.id !== subscriptionId) {
     throw createError({
@@ -1013,7 +1035,7 @@ async function reconcileWorkspaceBillingUnderClaim(
   if (canonicalSubscription && (!subscriptionIdentity || subscriptionIdentity.workspaceId !== workspaceId)) {
     throw createError({ statusCode: 502, statusMessage: 'Bachs subscription did not match this workspace.' })
   }
-  if (canonicalCheckout && canonicalSubscription
+  if (canonicalSubscription && canonicalCheckout?.subscription_id
     && canonicalCheckout.subscription_id !== canonicalSubscription.id) {
     throw createError({
       statusCode: 502,
@@ -1078,6 +1100,8 @@ async function reconcileWorkspaceBillingUnderClaim(
     subscriptionIgnored: applied.subscriptionIgnored,
     pendingCheckout: applied.pendingCheckout,
     pendingRecoveryUntil: applied.pendingRecoveryUntil,
+    awaitingSubscription: applied.awaitingSubscription,
+    awaitingSubscriptionUntil: applied.awaitingSubscriptionUntil,
     terminalRecoveryUntil: applied.terminalRecoveryUntil,
     canonicalSubscription,
     providerResourcesChecked
@@ -1102,9 +1126,18 @@ export async function reconcileWorkspaceBilling(workspaceId: string, options: Re
         statusMessage: 'A Bachs checkout is still pending after its bounded verification window. Automatic checks stopped and operator review is required.'
       })
     }
+    if (result.awaitingSubscription
+      && (!result.awaitingSubscriptionUntil || result.awaitingSubscriptionUntil <= now)) {
+      throw createError({
+        statusCode: 409,
+        statusMessage: 'A paid Bachs checkout is still missing its subscription after the bounded verification window. Automatic checks stopped and operator review is required.'
+      })
+    }
     const nextAttemptAt = nextSuccessfulBillingCheck({
       pendingCheckout: result.pendingCheckout,
       pendingRecoveryUntil: result.pendingRecoveryUntil,
+      awaitingSubscription: result.awaitingSubscription,
+      awaitingSubscriptionUntil: result.awaitingSubscriptionUntil,
       terminalRecoveryUntil: result.terminalRecoveryUntil,
       subscription: result.canonicalSubscription,
       now
@@ -1133,9 +1166,11 @@ export async function reconcileWorkspaceBilling(workspaceId: string, options: Re
       await finishBillingReconciliation(workspaceId, claim.token, null, new Date())
       throw error
     }
-    const agedPendingCheckout = String((error as { statusMessage?: string })?.statusMessage)
-      .startsWith('A Bachs checkout is still pending after its bounded verification window')
-    await failBillingReconciliation(workspaceId, claim.token, error, now, { terminal: agedPendingCheckout })
+    const terminalUnresolvedCheckout = [
+      'A Bachs checkout is still pending after its bounded verification window',
+      'A paid Bachs checkout is still missing its subscription after the bounded verification window'
+    ].some(message => String((error as { statusMessage?: string })?.statusMessage).startsWith(message))
+    await failBillingReconciliation(workspaceId, claim.token, error, now, { terminal: terminalUnresolvedCheckout })
     throw error
   }
 }
