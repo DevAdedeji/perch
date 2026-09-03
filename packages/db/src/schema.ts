@@ -99,6 +99,9 @@ export const workspaces = pgTable('workspaces', {
   unansweredReminderDelayMinutes: integer('unanswered_reminder_delay_minutes').default(15).notNull(),
   unansweredReminderBusinessHoursOnly: boolean('unanswered_reminder_business_hours_only').default(false).notNull(),
   visitorReplyEmailEnabled: boolean('visitor_reply_email_enabled').default(false).notNull(),
+  // Set before any provider cancellation begins. Billing checkout locks the
+  // workspace row and refuses new checkout work once deletion has started.
+  deletionRequestedAt: timestamp('deletion_requested_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull()
 }, t => [
   check('workspaces_unanswered_reminder_delay_ck', sql`${t.unansweredReminderDelayMinutes} between 5 and 1440`)
@@ -149,6 +152,26 @@ export const billingWebhookDeliveries = pgTable('billing_webhook_deliveries', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
 }, t => [
   index('billing_webhook_deliveries_status_updated_idx').on(t.status, t.updatedAt)
+])
+
+/**
+ * Minimal financial evidence that intentionally survives workspace deletion.
+ * It contains no workspace name, customer email, actor identity, or payment
+ * amount — only the internal workspace identifier and provider cancellation
+ * facts needed to investigate an accidental post-deletion renewal.
+ */
+export const billingDeletionReceipts = pgTable('billing_deletion_receipts', {
+  workspaceId: uuid('workspace_id').primaryKey(),
+  deletionKind: text('deletion_kind', { enum: ['workspace', 'account'] }).notNull(),
+  bachsSubscriptionId: text('bachs_subscription_id'),
+  providerStatus: text('provider_status'),
+  cancelAtPeriodEnd: boolean('cancel_at_period_end'),
+  providerConfirmedAt: timestamp('provider_confirmed_at', { withTimezone: true }),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull()
+}, t => [
+  check('billing_deletion_receipts_kind_ck', sql`${t.deletionKind} in ('workspace', 'account')`),
+  index('billing_deletion_receipts_subscription_idx').on(t.bachsSubscriptionId)
 ])
 
 export const widgetInstallationSignals = pgTable('widget_installation_signals', {

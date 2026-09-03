@@ -1,4 +1,4 @@
-import { and, billingWebhookDeliveries, desc, eq, lt, or, sql, users, workspaceInvoices, workspaceMembers, workspaceSubscriptions } from '@perch/db'
+import { and, billingWebhookDeliveries, desc, eq, lt, or, sql, users, workspaceInvoices, workspaceMembers, workspaces, workspaceSubscriptions } from '@perch/db'
 import type { BillingInterval, SubscriptionStatus } from '@perch/shared'
 import { PERCH_PRO_PLAN, proPriceCents } from '@perch/shared'
 import type { BachsCheckoutSession, BachsSubscription } from './bachs'
@@ -130,7 +130,36 @@ export async function startWorkspaceCheckout(input: {
 
   const db = useDb()
   const reference = `perch-workspace-${input.workspaceId}-${input.requestId}`
-  const existing = await db.query.workspaceInvoices.findFirst({ where: eq(workspaceInvoices.reference, reference) })
+  const prepared = await db.transaction(async (tx) => {
+    const workspaceRows = await tx.select({
+      id: workspaces.id,
+      deletionRequestedAt: workspaces.deletionRequestedAt
+    }).from(workspaces).where(eq(workspaces.id, input.workspaceId)).limit(1).for('update')
+    const workspace = workspaceRows[0]
+    if (!workspace) throw createError({ statusCode: 404, statusMessage: 'Workspace not found.' })
+    if (workspace.deletionRequestedAt) {
+      throw createError({
+        statusCode: 409,
+        statusMessage: 'Workspace deletion has started, so a new paid checkout cannot be created.'
+      })
+    }
+    const existing = await tx.query.workspaceInvoices.findFirst({ where: eq(workspaceInvoices.reference, reference) })
+    if (existing) return { existing, invoice: null }
+
+    const start = new Date()
+    const end = periodEnd(start, input.interval)
+    const [invoice] = await tx.insert(workspaceInvoices).values({
+      workspaceId: input.workspaceId,
+      reference,
+      interval: input.interval,
+      amountCents: proPriceCents(input.interval),
+      periodStart: start,
+      periodEnd: end
+    }).returning()
+    return { existing: null, invoice: invoice! }
+  })
+
+  const existing = prepared.existing
   if (existing?.status === 'pending' && existing.checkoutUrl && existing.bachsCheckoutId) {
     const canonicalCheckout = await getBachsCheckoutSession(existing.bachsCheckoutId)
     if (isApprovedBachsCheckoutUrl(existing.checkoutUrl)
@@ -141,17 +170,7 @@ export async function startWorkspaceCheckout(input: {
     throw createError({ statusCode: 409, statusMessage: 'That checkout attempt can no longer be resumed.' })
   }
   if (existing) throw createError({ statusCode: 409, statusMessage: 'That checkout attempt has already finished.' })
-
-  const start = new Date()
-  const end = periodEnd(start, input.interval)
-  const [invoice] = await db.insert(workspaceInvoices).values({
-    workspaceId: input.workspaceId,
-    reference,
-    interval: input.interval,
-    amountCents: proPriceCents(input.interval),
-    periodStart: start,
-    periodEnd: end
-  }).returning()
+  const invoice = prepared.invoice!
 
   try {
     const productId = await ensurePerchProProduct(input.interval)
@@ -172,7 +191,7 @@ export async function startWorkspaceCheckout(input: {
       throw createError({ statusCode: 502, statusMessage: 'Bachs did not return a trusted checkout URL.' })
     }
     const canonicalCheckout = await getBachsCheckoutSession(checkout.checkout_id)
-    const expectedInvoice = { ...invoice!, bachsCheckoutId: checkout.checkout_id }
+    const expectedInvoice = { ...invoice, bachsCheckoutId: checkout.checkout_id }
     if (!checkoutMatchesInvoice(canonicalCheckout, expectedInvoice)) {
       throw createError({ statusCode: 502, statusMessage: 'Bachs checkout did not match the expected plan.' })
     }
@@ -181,7 +200,7 @@ export async function startWorkspaceCheckout(input: {
         bachsCheckoutId: checkout.checkout_id,
         checkoutUrl: checkout.checkout_url,
         updatedAt: sql`now()`
-      }).where(eq(workspaceInvoices.id, invoice!.id))
+      }).where(eq(workspaceInvoices.id, invoice.id))
       await tx.insert(workspaceSubscriptions).values({
         workspaceId: input.workspaceId,
         interval: input.interval,
@@ -197,7 +216,7 @@ export async function startWorkspaceCheckout(input: {
       status: 'failed',
       lastError: String((error as { statusMessage?: string })?.statusMessage ?? error).slice(0, 1000),
       updatedAt: sql`now()`
-    }).where(eq(workspaceInvoices.id, invoice!.id))
+    }).where(eq(workspaceInvoices.id, invoice.id))
     throw error
   }
 }

@@ -293,9 +293,10 @@ export async function getBachsSubscription(subscriptionId: string) {
   )
 }
 
-export async function cancelBachsSubscription(subscriptionId: string) {
+export async function cancelBachsSubscription(subscriptionId: string, idempotencyKey?: string) {
   return parseProviderResponse(bachsSubscriptionSchema, await bachsFetch<unknown>(`/subscriptions/${encodeURIComponent(subscriptionId)}`, {
     method: 'DELETE',
-    body: { cancel_at_period_end: true }
+    body: { cancel_at_period_end: true },
+    idempotencyKey
   }), 'subscription')
 }
