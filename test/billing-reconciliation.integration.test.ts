@@ -173,7 +173,7 @@ describe.skipIf(!databaseUrl)('billing reconciliation database integration', () 
         await released
         return new Response(JSON.stringify({
           checkout_id: checkoutId,
-          checkout_url: 'https://checkout.bachs.io/session/serialized',
+          checkout_url: 'https://sandbox-checkout.bachs.io/session/serialized',
           reference
         }), { status: 200 })
       }
@@ -205,7 +205,7 @@ describe.skipIf(!databaseUrl)('billing reconciliation database integration', () 
     expect(checkoutPosts).toBe(1)
     releaseCheckout()
     await expect(first).resolves.toMatchObject({
-      checkoutUrl: 'https://checkout.bachs.io/session/serialized'
+      checkoutUrl: 'https://sandbox-checkout.bachs.io/session/serialized'
     })
     expect(checkoutPosts).toBe(1)
     expect(await db.query.workspaceInvoices.findMany({
