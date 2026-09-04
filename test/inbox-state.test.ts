@@ -166,6 +166,86 @@ describe('inbox request ownership', () => {
     expect(h.inbox.messages.value.map(item => item.id)).toEqual(['sent-a'])
   })
 
+  it('treats a websocket acknowledgment as delivered even if the HTTP response is lost', async () => {
+    const h = harness()
+    h.mount()
+    const response = deferred<{ message: MessageDTO }>()
+    h.handlers.set('POST /api/conversations/a/messages', () => response.promise)
+    await h.inbox.select('a')
+    const sending = h.inbox.sendReply('Hello')
+    await settle()
+    const pending = h.inbox.messages.value[0]!
+    const delivered = { ...message('saved'), client_message_id: pending.client_message_id }
+    h.emit({ type: 'message.new', payload: delivered })
+    expect(h.inbox.messages.value).toEqual([delivered])
+    response.reject(new Error('Response lost'))
+    await sending
+    expect(h.inbox.messages.value).toEqual([delivered])
+    expect(inboxOutboxFor(h.app).pending('a')).toEqual([])
+    await h.inbox.retrySend(pending.id)
+    expect(h.fetch.mock.calls.filter(([url, options]) => url.endsWith('/a/messages') && options?.method === 'POST')).toHaveLength(1)
+  })
+
+  it('acknowledges the matching request only when two pending messages have identical text', async () => {
+    const h = harness()
+    h.mount()
+    const firstResponse = deferred<{ message: MessageDTO }>()
+    const secondResponse = deferred<{ message: MessageDTO }>()
+    let requests = 0
+    h.handlers.set('POST /api/conversations/a/messages', () => ++requests === 1 ? firstResponse.promise : secondResponse.promise)
+    await h.inbox.select('a')
+    const firstSend = h.inbox.sendReply('Hello')
+    const secondSend = h.inbox.sendReply('Hello')
+    await settle()
+    const [first, second] = h.inbox.messages.value
+    expect(first!.client_message_id).not.toBe(second!.client_message_id)
+    h.emit({ type: 'message.new', payload: { ...message('second-saved'), client_message_id: second!.client_message_id } })
+    expect(h.inbox.messages.value.map(item => item.id)).toEqual(['second-saved', first!.id])
+    h.emit({ type: 'message.new', payload: { ...message('first-saved'), client_message_id: first!.client_message_id } })
+    firstResponse.reject(new Error('Response lost'))
+    secondResponse.reject(new Error('Response lost'))
+    await Promise.all([firstSend, secondSend])
+    expect(h.inbox.messages.value.map(item => item.id)).toEqual(['second-saved', 'first-saved'])
+    expect(h.inbox.messages.value.every(item => !item.failed && !item.pending)).toBe(true)
+  })
+
+  it('reconciles a failed response with the saved request id returned by a refreshed thread', async () => {
+    const h = harness()
+    h.handlers.set('POST /api/conversations/a/messages', () => {
+      throw new Error('Saved but response lost')
+    })
+    await h.inbox.select('a')
+    await h.inbox.sendReply('Hello')
+    const pending = h.inbox.messages.value[0]!
+    expect(pending.failed).toBe(true)
+    const delivered = { ...message('saved'), client_message_id: pending.client_message_id }
+    h.handlers.set('GET /api/conversations/a/messages', () => ({ items: [delivered], has_more: false }))
+    await h.inbox.select('a', { force: true })
+    expect(h.inbox.messages.value).toEqual([delivered])
+    expect(inboxOutboxFor(h.app).pending('a')).toEqual([])
+  })
+
+  it('preserves an acknowledged reply when an older REST snapshot completes afterward', async () => {
+    const h = harness()
+    h.mount()
+    await h.inbox.select('a')
+    const snapshot = deferred<{ items: MessageDTO[], has_more: boolean }>()
+    const response = deferred<{ message: MessageDTO }>()
+    h.handlers.set('GET /api/conversations/a/messages', () => snapshot.promise)
+    h.handlers.set('POST /api/conversations/a/messages', () => response.promise)
+    h.reconnect()
+    const sending = h.inbox.sendReply('Hello')
+    await settle()
+    const clientMessageId = h.inbox.messages.value[0]!.client_message_id
+    const delivered = { ...message('saved'), client_message_id: clientMessageId }
+    h.emit({ type: 'message.new', payload: delivered })
+    snapshot.resolve({ items: [], has_more: false })
+    response.reject(new Error('Response lost'))
+    await sending
+    await settle()
+    expect(h.inbox.messages.value).toEqual([delivered])
+  })
+
   it('shares concurrent retries and retains the original idempotency key and mentions', async () => {
     const h = harness()
     const retry = deferred<{ message: MessageDTO }>()
@@ -390,6 +470,19 @@ describe('inbox request ownership', () => {
 })
 
 describe('inbox image outbox', () => {
+  it('requires matching conversation and sender when acknowledging a request id', () => {
+    const outbox = new InboxOutbox()
+    outbox.setScope('user:workspace:member')
+    const id = outbox.add({ conversationId: 'a', memberId: 'member-a', content: 'Hello', internalNote: false })
+    const clientMessageId = outbox.pending('a')[0]!.client_message_id
+    expect(outbox.acknowledge({ ...message('saved', 'b'), client_message_id: clientMessageId })).toBe(false)
+    expect(outbox.acknowledge({ ...message('saved'), sender_id: 'other-agent', client_message_id: clientMessageId })).toBe(false)
+    expect(outbox.acknowledge({ ...message('saved'), sender_type: 'visitor', client_message_id: clientMessageId })).toBe(false)
+    expect(outbox.pending('a')[0]?.id).toBe(id)
+    expect(outbox.acknowledge({ ...message('saved'), client_message_id: clientMessageId })).toBe(true)
+    expect(outbox.pending('a')).toEqual([])
+  })
+
   it('preserves a failed upload for navigation retries and releases the preview once uploaded', async () => {
     const outbox = new InboxOutbox()
     outbox.setScope('user:workspace:member')

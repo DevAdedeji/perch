@@ -36,6 +36,18 @@ export class InboxOutbox {
       .map(entry => ({ ...entry.message }))
   }
 
+  acknowledge(message: MessageDTO): boolean {
+    if (!message.client_message_id) return false
+    const id = `temp-${message.client_message_id}`
+    const entry = this.entries.get(id)
+    if (!entry || entry.message.conversation_id !== message.conversation_id
+      || entry.message.sender_type !== message.sender_type || entry.message.sender_id !== message.sender_id) return false
+    this.releasePreview(entry)
+    this.entries.delete(id)
+    this.notify(message.conversation_id, { temporaryId: id, message })
+    return true
+  }
+
   discardConversation(conversationId: string) {
     for (const [id, entry] of this.entries) {
       if (entry.message.conversation_id !== conversationId) continue
@@ -58,6 +70,7 @@ export class InboxOutbox {
     const id = `temp-${clientMessageId}`
     const message: InboxMessage = {
       id,
+      client_message_id: clientMessageId,
       conversation_id: input.conversationId,
       sender_type: 'agent',
       sender_id: input.memberId,

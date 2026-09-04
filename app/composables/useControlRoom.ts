@@ -183,6 +183,14 @@ export function useControlRoom() {
   }
   const offOutbox = outbox.subscribe(syncPending)
 
+  function applyThreadPage(items: MessageDTO[], id: string, existingIds: Set<string>) {
+    // A REST snapshot may predate a reply acknowledged while it was loading.
+    const arrivedDuringLoad = messages.value.filter(message => !message.pending && !message.failed && !existingIds.has(message.id))
+    for (const message of items) outbox.acknowledge(message)
+    const known = new Set(items.map(message => message.id))
+    messages.value = [...items, ...arrivedDuringLoad.filter(message => !known.has(message.id)), ...outbox.pending(id)]
+  }
+
   function threadCurrent(id: string): () => boolean {
     const current = requests.capture()
     const seq = threadSeq
@@ -355,11 +363,12 @@ export function useControlRoom() {
 
     const current = threadCurrent(id)
     const request = requests.start('thread')
+    const existingIds = new Set(messages.value.map(message => message.id))
     void loadContext(id)
     try {
       const data = await $fetch<{ items: MessageDTO[], has_more: boolean }>(`/api/conversations/${id}/messages`, { signal: request.signal })
       if (!request.current() || !current()) return
-      messages.value = [...data.items, ...outbox.pending(id)]
+      applyThreadPage(data.items, id, existingIds)
       hasMoreMessages.value = data.has_more
       await $fetch(`/api/conversations/${id}/read`, { method: 'POST' }).catch(() => {})
       if (!request.current() || !current()) return
@@ -384,8 +393,9 @@ export function useControlRoom() {
         `/api/conversations/${conversationId}/messages?before=${oldest.id}`, { signal: request.signal }
       )
       if (!request.current() || !current()) return
-      const known = new Set(messages.value.map(m => m.id))
-      messages.value.unshift(...data.items.filter(m => !known.has(m.id)))
+      for (const message of data.items) outbox.acknowledge(message)
+      const olderIds = new Set(data.items.map(message => message.id))
+      messages.value = [...data.items, ...messages.value.filter(message => !olderIds.has(message.id))]
       hasMoreMessages.value = data.has_more
     } catch (error) {
       if (request.current() && current() && !dropInaccessibleThread(error, conversationId)) throw error
@@ -611,6 +621,7 @@ export function useControlRoom() {
       }
       case 'message.new': {
         const m = ev.payload
+        outbox.acknowledge(m)
         const c = conversations.value.find(x => x.id === m.conversation_id)
         if (c) {
           if (!m.is_internal_note) c.preview = m.content
@@ -661,10 +672,11 @@ export function useControlRoom() {
     if (!id) return
     const current = threadCurrent(id)
     const request = requests.start('thread')
+    const existingIds = new Set(messages.value.map(message => message.id))
     try {
       const data = await $fetch<{ items: MessageDTO[], has_more: boolean }>(`/api/conversations/${id}/messages`, { signal: request.signal })
       if (!request.current() || !current()) return
-      messages.value = [...data.items, ...outbox.pending(id)]
+      applyThreadPage(data.items, id, existingIds)
       hasMoreMessages.value = data.has_more
     } catch (error) {
       if (request.current() && current()) dropInaccessibleThread(error, id)
