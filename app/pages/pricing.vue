@@ -69,8 +69,6 @@ const plans = [
         </p>
       </div>
 
-      <SandboxPaymentNotice class="mx-auto mt-8 max-w-5xl" />
-
       <div class="mx-auto mt-12 grid max-w-5xl gap-6 lg:grid-cols-2">
         <section
           v-for="plan in plans"
