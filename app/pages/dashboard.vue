@@ -1,11 +1,13 @@
 <script setup lang="ts">
+import { MAX_BULK_CONVERSATIONS } from '@perch/shared'
 import type { ConversationPriority } from '@perch/shared'
-import type { InboxFilter, InboxSavedView } from '~/composables/useControlRoom'
+import type { BulkConversationInput, InboxFilter, InboxSavedView } from '~/composables/useControlRoom'
 
 definePageMeta({ layout: 'dashboard' })
 useHead({ title: 'Inbox · Perch' })
 
 const toast = useToast()
+const route = useRoute()
 const cr = useControlRoom()
 const { currentWorkspace } = useAuth()
 const { enabled: soundEnabled, toggle: toggleSound } = useNotificationSound()
@@ -15,12 +17,15 @@ const newViewName = ref('')
 const savingView = ref(false)
 const snoozeOpen = ref(false)
 const customSnooze = ref('')
+const slaNow = ref(new Date())
+let slaClock: ReturnType<typeof setInterval> | undefined
 
 const filters: { label: string, value: InboxFilter }[] = [
   { label: 'All', value: 'all' },
   { label: 'Unassigned', value: 'unassigned' },
   { label: 'Open', value: 'open' },
-  { label: 'Resolved', value: 'resolved' }
+  { label: 'Resolved', value: 'resolved' },
+  { label: 'Spam', value: 'spam' }
 ]
 
 const priorities: { value: ConversationPriority, label: string, icon: string }[] = [
@@ -45,6 +50,16 @@ const activeAdvancedFilters = computed(() =>
   + cr.tagFilters.value.length
   + (cr.snoozedFilter.value !== 'exclude' ? 1 : 0)
 )
+const emptyInboxIsFiltered = computed(() =>
+  cr.filter.value !== 'all'
+  || activeAdvancedFilters.value > 0
+  || cr.responseFilter.value !== 'all'
+)
+
+function resetInboxFilters() {
+  cr.filter.value = 'all'
+  clearAdvancedFilters()
+}
 
 function togglePriorityFilter(priority: ConversationPriority) {
   cr.priorityFilters.value = cr.priorityFilters.value.includes(priority)
@@ -63,7 +78,17 @@ function clearAdvancedFilters() {
   cr.priorityFilters.value = []
   cr.tagFilters.value = []
   cr.snoozedFilter.value = 'exclude'
+  cr.responseFilter.value = 'all'
 }
+
+onMounted(() => {
+  slaClock = setInterval(() => {
+    slaNow.value = new Date()
+  }, 30_000)
+})
+onBeforeUnmount(() => {
+  if (slaClock) clearInterval(slaClock)
+})
 
 function applySavedView(view: InboxSavedView) {
   cr.applySavedView(view)
@@ -100,6 +125,143 @@ const {
   searching,
   active: searchActive
 } = useConversationSearch(() => currentWorkspace.value?.workspaceId)
+
+const selectionMode = ref(false)
+const selectedIds = ref<Set<string>>(new Set())
+const bulkWorking = ref(false)
+const bulkTagOpen = ref(false)
+const bulkAssignOpen = ref(false)
+const bulkTagMode = ref<'add_tag' | 'remove_tag'>('add_tag')
+const pendingBulkAction = ref<{
+  input: BulkConversationInput
+  title: string
+  description: string
+  confirmLabel: string
+} | null>(null)
+
+const selectedCount = computed(() => selectedIds.value.size)
+const pageConversationIds = computed(() => cr.conversations.value.map(conversation => conversation.id))
+const selectablePageIds = computed(() => cr.conversations.value
+  .filter(conversation => !conversation.isSpam)
+  .slice(0, MAX_BULK_CONVERSATIONS)
+  .map(conversation => conversation.id))
+const allPageSelected = computed(() => selectablePageIds.value.length > 0 && selectablePageIds.value.every(id => selectedIds.value.has(id)))
+const somePageSelected = computed(() => !allPageSelected.value && selectablePageIds.value.some(id => selectedIds.value.has(id)))
+const selectedConversations = computed(() => cr.conversations.value.filter(conversation => selectedIds.value.has(conversation.id)))
+
+const bulkTagOptions = computed(() => bulkTagMode.value === 'add_tag'
+  ? cr.workspaceTags.value
+  : cr.workspaceTags.value.filter(tag => selectedConversations.value.some(conversation => conversation.tags.some(applied => applied.id === tag.id))))
+
+function setSelectionMode(enabled: boolean) {
+  selectionMode.value = enabled
+  selectedIds.value = new Set()
+  bulkTagOpen.value = false
+  bulkAssignOpen.value = false
+}
+
+function toggleConversationSelection(id: string) {
+  if (cr.conversations.value.find(conversation => conversation.id === id)?.isSpam) {
+    toast.add({
+      title: 'Restore spam conversations individually',
+      description: 'This keeps visitor unblocking explicit and prevents accidental bulk changes.',
+      color: 'neutral'
+    })
+    return
+  }
+  const next = new Set(selectedIds.value)
+  if (next.has(id)) next.delete(id)
+  else if (next.size < MAX_BULK_CONVERSATIONS) next.add(id)
+  else {
+    toast.add({ title: `You can update up to ${MAX_BULK_CONVERSATIONS} conversations at once`, color: 'neutral' })
+  }
+  selectedIds.value = next
+}
+
+function toggleCurrentPage() {
+  selectedIds.value = allPageSelected.value ? new Set() : new Set(selectablePageIds.value)
+  if (pageConversationIds.value.length > MAX_BULK_CONVERSATIONS) {
+    toast.add({
+      title: `Selected the first ${MAX_BULK_CONVERSATIONS} conversations`,
+      description: 'Finish this batch, then select the remaining conversations.',
+      color: 'neutral'
+    })
+  }
+}
+
+watch(pageConversationIds, (ids) => {
+  const visible = new Set(ids)
+  selectedIds.value = new Set([...selectedIds.value].filter(id => visible.has(id)))
+})
+watch(searchActive, (active) => {
+  if (active) setSelectionMode(false)
+})
+watch(() => cr.filter.value, (filter) => {
+  if (filter === 'spam') setSelectionMode(false)
+})
+
+async function runBulkAction(input: BulkConversationInput, successLabel: string) {
+  if (!selectedCount.value || bulkWorking.value) return
+  bulkWorking.value = true
+  try {
+    const result = await cr.bulkUpdate(input)
+    const unchanged = result.unchanged_count
+      ? `${result.unchanged_count} already matched and needed no change.`
+      : undefined
+    toast.add({
+      title: result.changed_count
+        ? `${successLabel} ${result.changed_count} conversation${result.changed_count === 1 ? '' : 's'}`
+        : 'No changes needed',
+      description: unchanged,
+      color: 'success',
+      icon: 'i-lucide-check-check'
+    })
+    setSelectionMode(false)
+  } catch (error) {
+    toast.add({
+      title: getErrorMessage(error, 'Could not update the selected conversations'),
+      description: 'Nothing was changed. Refresh the inbox and try again.',
+      color: 'error'
+    })
+  } finally {
+    bulkWorking.value = false
+  }
+}
+
+function queueBulkAssign(memberId: string, memberName: string) {
+  bulkAssignOpen.value = false
+  pendingBulkAction.value = {
+    input: { action: 'assign', conversation_ids: [...selectedIds.value], member_id: memberId },
+    title: `Assign ${selectedCount.value} conversation${selectedCount.value === 1 ? '' : 's'} to ${memberName}?`,
+    description: 'Resolved conversations will be reopened and snoozed conversations will return to the inbox.',
+    confirmLabel: `Assign to ${memberName}`
+  }
+}
+
+function queueBulkResolve() {
+  pendingBulkAction.value = {
+    input: { action: 'resolve', conversation_ids: [...selectedIds.value] },
+    title: `Resolve ${selectedCount.value} conversation${selectedCount.value === 1 ? '' : 's'}?`,
+    description: 'Visitors can still reply later. A new reply will return the conversation to the inbox.',
+    confirmLabel: 'Resolve selected'
+  }
+}
+
+async function confirmBulkAction() {
+  const pending = pendingBulkAction.value
+  if (!pending) return
+  await runBulkAction(pending.input, pending.input.action === 'assign' ? 'Assigned' : 'Resolved')
+  if (!bulkWorking.value) pendingBulkAction.value = null
+}
+
+function applyBulkTag(tagId: string) {
+  bulkTagOpen.value = false
+  runBulkAction({ action: bulkTagMode.value, conversation_ids: [...selectedIds.value], tag_id: tagId }, bulkTagMode.value === 'add_tag' ? 'Tagged' : 'Updated')
+}
+
+function reopenSelected() {
+  runBulkAction({ action: 'reopen', conversation_ids: [...selectedIds.value] }, 'Reopened')
+}
 
 function openSearchResult(id: string) {
   cr.select(id, { force: true })
@@ -170,6 +332,44 @@ async function onAssign(memberId: string, memberName: string) {
   }
 }
 
+const spamConfirmOpen = ref(false)
+const spamSaving = ref(false)
+
+function openSpamConfirmation() {
+  if (!cr.activeConversation.value) return
+  spamConfirmOpen.value = true
+}
+
+async function confirmSpamAction() {
+  const active = cr.activeConversation.value
+  if (!active || spamSaving.value) return
+  spamSaving.value = true
+  try {
+    if (active.isSpam) {
+      const result = await cr.restoreSpam(active.id)
+      toast.add({
+        title: 'Conversation restored',
+        description: result.visitor_blocked
+          ? 'This visitor stays blocked because another conversation is still marked as spam.'
+          : 'The visitor can send messages again.',
+        color: 'success'
+      })
+    } else {
+      await cr.markSpam(active.id)
+      toast.add({
+        title: 'Marked as spam',
+        description: 'The visitor can no longer send messages to this workspace.',
+        color: 'success'
+      })
+    }
+    spamConfirmOpen.value = false
+  } catch (error) {
+    toast.add({ title: getErrorMessage(error, 'Could not update spam status'), color: 'error' })
+  } finally {
+    spamSaving.value = false
+  }
+}
+
 const priorityMenuItems = computed(() => [priorities.map(priority => ({
   label: priority.label,
   icon: priority.icon,
@@ -223,6 +423,10 @@ function snoozedLabel(value: string) {
 
 // a mention toast (from the layout) asked us to open a specific conversation
 const pendingSelect = useState<string | null>('inbox:pendingSelect', () => null)
+onMounted(() => {
+  const conversationId = route.query.conversation
+  if (typeof conversationId === 'string') pendingSelect.value = conversationId
+})
 watch(pendingSelect, async (id) => {
   if (id) {
     // A notification is an explicit request to open one conversation. Clear
@@ -235,6 +439,7 @@ watch(pendingSelect, async (id) => {
     await cr.reload()
     await cr.select(id, { force: true })
     pendingSelect.value = null
+    if (route.query.conversation === id) await navigateTo('/dashboard', { replace: true })
   }
 }, { immediate: true })
 
@@ -300,6 +505,17 @@ const statusBadge = {
             Inbox
           </h1>
           <div class="flex items-center gap-1.5">
+            <UButton
+              v-if="!searchActive && cr.filter.value !== 'spam'"
+              :icon="selectionMode ? 'i-lucide-x' : 'i-lucide-list-checks'"
+              color="neutral"
+              :variant="selectionMode ? 'subtle' : 'ghost'"
+              size="xs"
+              :aria-label="selectionMode ? 'Cancel conversation selection' : 'Select conversations on this page'"
+              @click="setSelectionMode(!selectionMode)"
+            >
+              <span class="hidden lg:inline">{{ selectionMode ? 'Cancel' : 'Select' }}</span>
+            </UButton>
             <UPopover
               v-model:open="savedViewsOpen"
               :content="{ align: 'end' }"
@@ -492,6 +708,22 @@ const statusBadge = {
                 : cr.filter.value === f.value ? 'bg-primary-500/15 text-primary-700 dark:text-primary-400' : 'bg-elevated text-dimmed'"
             >{{ tabCount(f.value) }}</span>
           </button>
+          <button
+            class="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-medium whitespace-nowrap transition-colors"
+            :class="cr.responseFilter.value === 'breached'
+              ? 'bg-red-500/12 text-red-700 dark:text-red-400'
+              : 'text-muted hover:text-highlighted'"
+            :aria-pressed="cr.responseFilter.value === 'breached'"
+            @click="cr.responseFilter.value = cr.responseFilter.value === 'breached' ? 'all' : 'breached'"
+          >
+            Overdue
+            <span
+              class="rounded-full px-1.5 text-xs font-semibold tabular-nums"
+              :class="cr.counts.value.breached > 0
+                ? 'bg-red-500/15 text-red-700 dark:text-red-400'
+                : 'bg-elevated text-dimmed'"
+            >{{ cr.counts.value.breached }}</span>
+          </button>
         </div>
 
         <!-- search: name, email, or anything anyone said -->
@@ -539,6 +771,167 @@ const statusBadge = {
             Clear
           </button>
         </div>
+      </div>
+
+      <div
+        v-if="selectionMode"
+        class="shrink-0 border-b border-default bg-elevated/35 px-3 py-2"
+      >
+        <div class="flex items-center gap-2">
+          <label class="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-xs font-medium text-highlighted">
+            <input
+              type="checkbox"
+              class="size-4 shrink-0 rounded border-default accent-primary-500"
+              :checked="allPageSelected"
+              :indeterminate="somePageSelected"
+              :aria-label="`Select up to ${MAX_BULK_CONVERSATIONS} conversations from the current page`"
+              @change="toggleCurrentPage"
+            >
+            <span class="truncate">{{ selectedCount ? `${selectedCount} selected` : 'Select current page' }}</span>
+          </label>
+          <span class="shrink-0 text-[10px] text-dimmed">This page · max {{ MAX_BULK_CONVERSATIONS }}</span>
+        </div>
+
+        <div
+          v-if="selectedCount"
+          class="mt-2 flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-none"
+          role="toolbar"
+          aria-label="Bulk conversation actions"
+        >
+          <UPopover
+            v-model:open="bulkAssignOpen"
+            :content="{ align: 'start' }"
+          >
+            <UButton
+              size="xs"
+              color="neutral"
+              variant="subtle"
+              icon="i-lucide-user-round-check"
+              :disabled="bulkWorking"
+            >
+              Assign
+            </UButton>
+            <template #content>
+              <div class="w-64 max-w-[90vw] p-2">
+                <p class="px-2 pb-1 text-xs font-medium text-muted">
+                  Assign selected to
+                </p>
+                <ul class="max-h-56 overflow-y-auto">
+                  <li
+                    v-for="member in cr.members.value"
+                    :key="member.id"
+                  >
+                    <button
+                      type="button"
+                      class="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm text-muted hover:bg-elevated hover:text-highlighted"
+                      @click="queueBulkAssign(member.id, member.name)"
+                    >
+                      <span
+                        class="size-2 rounded-full"
+                        :class="presenceDot(member.presence)"
+                      />
+                      <span class="min-w-0 flex-1 truncate">{{ member.name }}</span>
+                      <span class="text-[10px] capitalize text-dimmed">{{ member.presence }}</span>
+                    </button>
+                  </li>
+                </ul>
+                <p
+                  v-if="currentWorkspace?.role === 'agent'"
+                  class="border-t border-default px-2 pt-2 text-[11px] leading-4 text-dimmed"
+                >
+                  You can claim unassigned chats for yourself or transfer chats already assigned to you.
+                </p>
+              </div>
+            </template>
+          </UPopover>
+
+          <UPopover
+            v-model:open="bulkTagOpen"
+            :content="{ align: 'start' }"
+          >
+            <UButton
+              size="xs"
+              color="neutral"
+              variant="subtle"
+              icon="i-lucide-tags"
+              :disabled="bulkWorking"
+            >
+              Tags
+            </UButton>
+            <template #content>
+              <div class="w-60 max-w-[90vw] p-2">
+                <div class="grid grid-cols-2 gap-1 rounded-lg bg-elevated p-1">
+                  <button
+                    type="button"
+                    class="rounded-md px-2 py-1.5 text-xs font-medium"
+                    :class="bulkTagMode === 'add_tag' ? 'bg-default text-highlighted shadow-sm' : 'text-muted'"
+                    @click="bulkTagMode = 'add_tag'"
+                  >
+                    Add tag
+                  </button>
+                  <button
+                    type="button"
+                    class="rounded-md px-2 py-1.5 text-xs font-medium"
+                    :class="bulkTagMode === 'remove_tag' ? 'bg-default text-highlighted shadow-sm' : 'text-muted'"
+                    @click="bulkTagMode = 'remove_tag'"
+                  >
+                    Remove tag
+                  </button>
+                </div>
+                <p
+                  v-if="!bulkTagOptions.length"
+                  class="px-2 py-4 text-center text-xs text-dimmed"
+                >
+                  {{ bulkTagMode === 'remove_tag' ? 'None of the selected conversations have a tag to remove.' : 'Create a tag from an open conversation first.' }}
+                </p>
+                <ul
+                  v-else
+                  class="mt-1 max-h-52 overflow-y-auto"
+                >
+                  <li
+                    v-for="tag in bulkTagOptions"
+                    :key="tag.id"
+                  >
+                    <button
+                      type="button"
+                      class="w-full rounded-lg px-2 py-2 text-left font-mono text-xs text-muted hover:bg-elevated hover:text-highlighted"
+                      @click="applyBulkTag(tag.id)"
+                    >
+                      #{{ tag.name }}
+                    </button>
+                  </li>
+                </ul>
+              </div>
+            </template>
+          </UPopover>
+
+          <UButton
+            size="xs"
+            color="neutral"
+            variant="subtle"
+            icon="i-lucide-rotate-ccw"
+            :disabled="bulkWorking"
+            @click="reopenSelected"
+          >
+            Reopen
+          </UButton>
+          <UButton
+            size="xs"
+            color="neutral"
+            variant="subtle"
+            icon="i-lucide-check-check"
+            :disabled="bulkWorking"
+            @click="queueBulkResolve"
+          >
+            Resolve
+          </UButton>
+        </div>
+        <p
+          v-else-if="!selectablePageIds.length"
+          class="mt-2 text-[11px] leading-4 text-dimmed"
+        >
+          Spam conversations must be restored individually so visitor access is never changed by accident.
+        </p>
       </div>
 
       <div class="flex-1 overflow-y-auto">
@@ -603,11 +996,34 @@ const statusBadge = {
               />
             </div>
             <p class="mt-3 text-sm font-medium text-highlighted">
-              No conversations yet
+              {{ emptyInboxIsFiltered ? 'No conversations match these filters' : 'Your inbox is ready' }}
             </p>
             <p class="mt-1 text-xs text-muted">
-              New chats from your widget will appear here in real time.
+              {{ emptyInboxIsFiltered
+                ? 'Clear or adjust the current filters to see other conversations.'
+                : 'Install the widget or send a test message to start your first conversation.' }}
             </p>
+            <UButton
+              v-if="emptyInboxIsFiltered"
+              class="mt-4"
+              size="sm"
+              color="neutral"
+              variant="outline"
+              icon="i-lucide-list-filter-x"
+              @click="resetInboxFilters"
+            >
+              Clear filters
+            </UButton>
+            <UButton
+              v-else-if="currentWorkspace?.role === 'admin'"
+              to="/installation"
+              class="mt-4"
+              size="sm"
+              color="primary"
+              icon="i-lucide-code-xml"
+            >
+              Install or test Perch
+            </UButton>
           </div>
 
           <ul
@@ -617,12 +1033,27 @@ const statusBadge = {
             <li
               v-for="c in cr.conversations.value"
               :key="c.id"
-              class="group relative"
+              class="group relative flex items-stretch"
+              :class="selectedIds.has(c.id) && 'bg-primary-500/6'"
             >
+              <label
+                v-if="selectionMode"
+                class="flex shrink-0 items-start py-4 pl-3"
+                :class="c.isSpam ? 'cursor-not-allowed opacity-45' : 'cursor-pointer'"
+                :aria-label="c.isSpam ? 'Spam conversations must be restored individually' : `Select conversation with ${c.visitor.name ?? 'Visitor'}`"
+              >
+                <input
+                  type="checkbox"
+                  class="size-4 rounded border-default accent-primary-500"
+                  :checked="selectedIds.has(c.id)"
+                  :disabled="c.isSpam"
+                  @change="toggleConversationSelection(c.id)"
+                >
+              </label>
               <button
-                class="relative w-full flex gap-3 px-4 py-3 text-left transition-colors"
-                :class="cr.activeId.value === c.id ? 'bg-primary-500/6' : 'hover:bg-elevated/50'"
-                @click="cr.select(c.id)"
+                class="relative min-w-0 flex-1 flex gap-3 px-4 py-3 text-left transition-colors"
+                :class="cr.activeId.value === c.id || selectedIds.has(c.id) ? 'bg-primary-500/6' : 'hover:bg-elevated/50'"
+                @click="selectionMode && !c.isSpam ? toggleConversationSelection(c.id) : cr.select(c.id)"
               >
                 <span
                   v-if="cr.activeId.value === c.id"
@@ -645,7 +1076,7 @@ const statusBadge = {
                   >
                     {{ c.preview || '—' }}
                   </p>
-                  <div class="mt-1.5 flex items-center gap-1.5">
+                  <div class="mt-1.5 flex flex-wrap items-center gap-1.5">
                     <span
                       v-if="c.priority !== 'normal'"
                       class="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-semibold capitalize"
@@ -658,6 +1089,16 @@ const statusBadge = {
                       {{ c.priority }}
                     </span>
                     <UBadge
+                      v-if="c.isSpam"
+                      color="error"
+                      variant="subtle"
+                      icon="i-lucide-shield-ban"
+                      size="sm"
+                    >
+                      Spam
+                    </UBadge>
+                    <UBadge
+                      v-else
                       :color="statusBadge[c.status].color"
                       variant="subtle"
                       :icon="statusBadge[c.status].icon"
@@ -665,6 +1106,10 @@ const statusBadge = {
                     >
                       {{ statusBadge[c.status].label }}
                     </UBadge>
+                    <ResponseSlaBadge
+                      :sla="c.responseSla"
+                      :now="slaNow"
+                    />
                     <span
                       v-if="c.assignedAgentId"
                       class="ml-auto flex items-center gap-1.5 shrink-0 rounded-full bg-elevated/70 ring-1 ring-default pl-2 pr-2.5 py-0.5"
@@ -696,7 +1141,7 @@ const statusBadge = {
               </button>
               <!-- quick claim straight from the list -->
               <UButton
-                v-if="c.status === 'unassigned'"
+                v-if="c.status === 'unassigned' && !selectionMode"
                 class="absolute right-3 bottom-2.5"
                 size="xs"
                 color="primary"
@@ -774,6 +1219,21 @@ const statusBadge = {
               {{ cr.activeConversation.value.visitor.email ?? cr.activeConversation.value.visitor.visitorId }}
             </p>
           </div>
+
+          <ResponseSlaBadge
+            :sla="cr.activeConversation.value.responseSla"
+            :now="slaNow"
+          />
+
+          <UBadge
+            v-if="cr.activeConversation.value.isSpam"
+            class="hidden sm:inline-flex"
+            color="error"
+            variant="subtle"
+            icon="i-lucide-shield-ban"
+          >
+            Spam
+          </UBadge>
 
           <div class="flex items-center gap-1 sm:gap-2 shrink-0">
             <UDropdownMenu
@@ -939,7 +1399,7 @@ const statusBadge = {
             </UButton>
 
             <UButton
-              v-if="cr.activeConversation.value.status === 'resolved'"
+              v-if="cr.activeConversation.value.status === 'resolved' && !cr.activeConversation.value.isSpam"
               size="sm"
               color="neutral"
               variant="subtle"
@@ -949,7 +1409,7 @@ const statusBadge = {
               <span class="hidden sm:inline">Reopen</span>
             </UButton>
             <UButton
-              v-else
+              v-else-if="!cr.activeConversation.value.isSpam"
               size="sm"
               color="neutral"
               variant="subtle"
@@ -958,6 +1418,16 @@ const statusBadge = {
             >
               <span class="hidden sm:inline">Resolve</span>
             </UButton>
+
+            <UButton
+              size="sm"
+              color="neutral"
+              variant="ghost"
+              :icon="cr.activeConversation.value.isSpam ? 'i-lucide-rotate-ccw' : 'i-lucide-shield-ban'"
+              :aria-label="cr.activeConversation.value.isSpam ? 'Restore spam conversation' : 'Mark conversation as spam'"
+              :title="cr.activeConversation.value.isSpam ? 'Restore spam conversation' : 'Mark conversation as spam'"
+              @click="openSpamConfirmation"
+            />
 
             <!-- visitor context (slideover below xl; static panel on xl+) -->
             <UButton
@@ -1057,11 +1527,14 @@ const statusBadge = {
 
             <ConversationComposer
               :key="cr.activeConversation.value.id"
+              :workspace-id="currentWorkspace?.workspaceId ?? null"
               :members="cr.members.value"
               :current-member-id="currentWorkspace?.memberId ?? null"
               :canned-responses="cr.canned.value"
               :send-reply="cr.sendReply"
               :send-attachment="cr.sendAttachment"
+              :attachments-available="currentWorkspace?.attachmentsAvailable ?? false"
+              :public-reply-disabled="cr.activeConversation.value.isSpam"
             />
           </div>
 
@@ -1070,6 +1543,8 @@ const statusBadge = {
             <VisitorContextPanel
               :context="cr.context.value"
               :fallback-name="cr.activeConversation.value.visitor.name"
+              :available-tags="cr.workspaceTags.value"
+              :save-profile="cr.updateCustomerProfile"
             />
           </aside>
         </div>
@@ -1085,10 +1560,80 @@ const statusBadge = {
             <VisitorContextPanel
               :context="cr.context.value"
               :fallback-name="cr.activeConversation.value?.visitor.name ?? null"
+              :available-tags="cr.workspaceTags.value"
+              :save-profile="cr.updateCustomerProfile"
             />
           </template>
         </USlideover>
       </template>
     </div>
+
+    <UModal
+      :open="!!pendingBulkAction"
+      :title="pendingBulkAction?.title"
+      :description="pendingBulkAction?.description"
+      @update:open="(open: boolean) => { if (!open && !bulkWorking) pendingBulkAction = null }"
+    >
+      <template #footer>
+        <div class="flex w-full flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <UButton
+            color="neutral"
+            variant="ghost"
+            :disabled="bulkWorking"
+            @click="pendingBulkAction = null"
+          >
+            Cancel
+          </UButton>
+          <UButton
+            color="primary"
+            :loading="bulkWorking"
+            icon="i-lucide-check-check"
+            @click="confirmBulkAction"
+          >
+            {{ pendingBulkAction?.confirmLabel }}
+          </UButton>
+        </div>
+      </template>
+    </UModal>
+
+    <UModal
+      v-model:open="spamConfirmOpen"
+      :title="cr.activeConversation.value?.isSpam ? 'Restore this conversation?' : 'Mark as spam and block visitor?'"
+      :description="cr.activeConversation.value?.isSpam
+        ? 'The conversation returns to the regular inbox. The visitor is unblocked unless another conversation from them is still marked as spam.'
+        : 'The conversation moves to Spam and closes. This visitor will not be able to send new messages to this workspace.'"
+    >
+      <template #body>
+        <div class="rounded-xl bg-elevated/60 p-3 text-sm text-muted ring-1 ring-default">
+          <p v-if="cr.activeConversation.value?.isSpam">
+            Existing messages stay in the conversation history. Restoring does not reopen the conversation until the visitor sends another message.
+          </p>
+          <p v-else>
+            This does not delete any history. Anonymous visitors are blocked for this browser session; verified signed-in identities stay blocked across new sessions.
+          </p>
+        </div>
+      </template>
+      <template #footer>
+        <div class="flex w-full flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <UButton
+            color="neutral"
+            variant="ghost"
+            class="justify-center"
+            @click="spamConfirmOpen = false"
+          >
+            Cancel
+          </UButton>
+          <UButton
+            :color="cr.activeConversation.value?.isSpam ? 'primary' : 'error'"
+            :icon="cr.activeConversation.value?.isSpam ? 'i-lucide-rotate-ccw' : 'i-lucide-shield-ban'"
+            :loading="spamSaving"
+            class="justify-center"
+            @click="confirmSpamAction"
+          >
+            {{ cr.activeConversation.value?.isSpam ? 'Restore and unblock' : 'Mark as spam' }}
+          </UButton>
+        </div>
+      </template>
+    </UModal>
   </div>
 </template>

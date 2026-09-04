@@ -20,7 +20,7 @@ import {
   uuid
 } from 'drizzle-orm/pg-core'
 import { sql } from 'drizzle-orm'
-import type { AutomationRuleConfig, BusinessHours, SavedInboxFilters, VisitorMetadata } from '@perch/shared'
+import type { AutomationRuleConfig, BusinessHours, NotificationCategory, SavedInboxFilters, VisitorMetadata } from '@perch/shared'
 
 /* Enums (mirror @perch/shared) */
 
@@ -34,6 +34,32 @@ export const automationRuleTypeEnum = pgEnum('automation_rule_type', [
   'round_robin', 'page_assignment', 'vip_tagging', 'inactivity_reminder', 'auto_close'
 ])
 export const supportOutcomeEventTypeEnum = pgEnum('support_outcome_event_type', ['resolution', 'csat'])
+export const reminderDeliveryStatusEnum = pgEnum('reminder_delivery_status', ['pending', 'processing', 'sent', 'failed', 'canceled'])
+export const notificationCategoryEnum = pgEnum('notification_category', ['assignment', 'mention', 'unanswered_reminder'])
+export const visitorEmailSourceEnum = pgEnum('visitor_email_source', ['prechat', 'unsigned_identify', 'host_asserted'])
+export const visitorEmailSuppressionReasonEnum = pgEnum('visitor_email_suppression_reason', ['unsubscribe', 'bounce', 'complaint'])
+export const webhookJobStatusEnum = pgEnum('webhook_job_status', [
+  'pending',
+  'processing',
+  'retrying',
+  'succeeded',
+  'dead_letter',
+  'canceled'
+])
+export const billingIntervalEnum = pgEnum('billing_interval', ['monthly', 'yearly'])
+export const subscriptionStatusEnum = pgEnum('subscription_status', ['trialing', 'active', 'past_due', 'unpaid', 'paused', 'canceled'])
+export const invoiceStatusEnum = pgEnum('invoice_status', ['pending', 'paid', 'failed'])
+export const billingWebhookStatusEnum = pgEnum('billing_webhook_status', ['processing', 'completed', 'ignored', 'failed'])
+export const billingReconciliationStatusEnum = pgEnum('billing_reconciliation_status', ['pending', 'processing', 'retrying', 'idle', 'failed'])
+export const attachmentKindEnum = pgEnum('attachment_kind', ['message', 'logo'])
+export const attachmentStateEnum = pgEnum('attachment_state', [
+  'pending',
+  'claimed',
+  'processing',
+  'retrying',
+  'deleted',
+  'dead_letter'
+])
 
 /* Tables */
 
@@ -53,12 +79,50 @@ export const users = pgTable('users', {
   uniqueIndex('users_google_id_uq').on(t.googleId)
 ])
 
+/**
+ * Every Cloudinary upload Perch creates is registered before its URL is
+ * accepted anywhere else. workspaceId intentionally has no foreign key: the
+ * row is also the durable deletion job after a workspace has been removed.
+ */
+export const attachmentAssets = pgTable('attachment_assets', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  workspaceId: uuid('workspace_id'),
+  // Snapshot identifiers deliberately survive account/workspace deletion until
+  // Cloudinary confirms deletion. They contain no email, name, or session data.
+  uploaderUserId: uuid('uploader_user_id'),
+  visitorRef: uuid('visitor_ref'),
+  kind: attachmentKindEnum('kind').notNull(),
+  publicId: text('public_id').notNull().unique(),
+  secureUrl: text('secure_url').notNull().unique(),
+  mimeType: text('mime_type').notNull(),
+  byteSize: integer('byte_size').notNull(),
+  state: attachmentStateEnum('state').default('pending').notNull(),
+  cleanupReason: text('cleanup_reason'),
+  cleanupAttempts: integer('cleanup_attempts').default(0).notNull(),
+  cleanupNextAttemptAt: timestamp('cleanup_next_attempt_at', { withTimezone: true }),
+  cleanupLockedAt: timestamp('cleanup_locked_at', { withTimezone: true }),
+  cleanupLastError: text('cleanup_last_error'),
+  claimedAt: timestamp('claimed_at', { withTimezone: true }),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
+}, t => [
+  check('attachment_assets_owner_ck', sql`num_nonnulls(${t.uploaderUserId}, ${t.visitorRef}) = 1`),
+  check('attachment_assets_scope_ck', sql`(${t.kind} = 'message' and ${t.workspaceId} is not null) or (${t.kind} = 'logo' and ${t.uploaderUserId} is not null and ${t.visitorRef} is null)`),
+  check('attachment_assets_size_ck', sql`${t.byteSize} >= 0 and ${t.byteSize} <= 1048576`),
+  check('attachment_assets_attempts_ck', sql`${t.cleanupAttempts} >= 0 and ${t.cleanupAttempts} <= 5`),
+  index('attachment_assets_workspace_state_idx').on(t.workspaceId, t.state),
+  index('attachment_assets_cleanup_due_idx').on(t.state, t.cleanupNextAttemptAt),
+  index('attachment_assets_pending_age_idx').on(t.state, t.createdAt)
+])
+
 export const workspaces = pgTable('workspaces', {
   id: uuid('id').defaultRandom().primaryKey(),
   name: text('name').notNull(),
   siteId: text('site_id').notNull().unique(),
   // branding shown in the visitor widget
   logoUrl: text('logo_url'),
+  logoAssetId: uuid('logo_asset_id').references(() => attachmentAssets.id, { onDelete: 'set null' }),
   widgetPrimaryColor: text('widget_primary_color').default('#f59e0b').notNull(),
   widgetGreeting: text('widget_greeting').default('Hi there 👋').notNull(),
   widgetIntro: text('widget_intro').default('Tell us a bit about you and how we can help.').notNull(),
@@ -79,8 +143,134 @@ export const workspaces = pgTable('workspaces', {
   businessHours: jsonb('business_hours').$type<BusinessHours>(),
   // IANA timezone the schedule is evaluated in (required when hours are set)
   timezone: text('timezone'),
+  unansweredReminderEnabled: boolean('unanswered_reminder_enabled').default(false).notNull(),
+  unansweredReminderDelayMinutes: integer('unanswered_reminder_delay_minutes').default(15).notNull(),
+  unansweredReminderBusinessHoursOnly: boolean('unanswered_reminder_business_hours_only').default(false).notNull(),
+  visitorReplyEmailEnabled: boolean('visitor_reply_email_enabled').default(false).notNull(),
+  // Set before any provider cancellation begins. Billing checkout locks the
+  // workspace row and refuses new checkout work once deletion has started.
+  deletionRequestedAt: timestamp('deletion_requested_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull()
+}, t => [
+  check('workspaces_unanswered_reminder_delay_ck', sql`${t.unansweredReminderDelayMinutes} between 5 and 1440`)
+])
+
+export const workspaceSubscriptions = pgTable('workspace_subscriptions', {
+  workspaceId: uuid('workspace_id').primaryKey().references(() => workspaces.id, { onDelete: 'cascade' }),
+  status: subscriptionStatusEnum('status').default('canceled').notNull(),
+  interval: billingIntervalEnum('interval').default('monthly').notNull(),
+  currentPeriodEnd: timestamp('current_period_end', { withTimezone: true }),
+  cancelAtPeriodEnd: boolean('cancel_at_period_end').default(false).notNull(),
+  bachsSubscriptionId: text('bachs_subscription_id').unique(),
+  lastInvoiceReference: text('last_invoice_reference'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
 })
+
+export const workspaceInvoices = pgTable('workspace_invoices', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  reference: text('reference').notNull().unique(),
+  status: invoiceStatusEnum('status').default('pending').notNull(),
+  interval: billingIntervalEnum('interval').notNull(),
+  amountCents: integer('amount_cents').notNull(),
+  currency: text('currency').default('USD').notNull(),
+  periodStart: timestamp('period_start', { withTimezone: true }).notNull(),
+  periodEnd: timestamp('period_end', { withTimezone: true }).notNull(),
+  bachsCheckoutId: text('bachs_checkout_id'),
+  bachsProductId: text('bachs_product_id'),
+  checkoutUrl: text('checkout_url'),
+  bachsChargeId: text('bachs_charge_id'),
+  checkoutClaimToken: text('checkout_claim_token'),
+  checkoutClaimedAt: timestamp('checkout_claimed_at', { withTimezone: true }),
+  reconcileUntil: timestamp('reconcile_until', { withTimezone: true }),
+  checkoutClosedAt: timestamp('checkout_closed_at', { withTimezone: true }),
+  lastError: text('last_error'),
+  paidAt: timestamp('paid_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
+}, t => [
+  check('workspace_invoices_amount_ck', sql`${t.amountCents} > 0`),
+  uniqueIndex('workspace_invoices_open_checkout_uq').on(t.workspaceId).where(sql`${t.checkoutClosedAt} is null`),
+  index('workspace_invoices_workspace_created_idx').on(t.workspaceId, t.createdAt)
+])
+
+export const billingWebhookDeliveries = pgTable('billing_webhook_deliveries', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  providerEventId: text('provider_event_id').notNull().unique(),
+  eventType: text('event_type').notNull(),
+  status: billingWebhookStatusEnum('status').default('processing').notNull(),
+  attempts: integer('attempts').default(1).notNull(),
+  claimToken: text('claim_token'),
+  lastError: text('last_error'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
+}, t => [
+  index('billing_webhook_deliveries_status_updated_idx').on(t.status, t.updatedAt)
+])
+
+export const billingReconciliationJobs = pgTable('billing_reconciliation_jobs', {
+  workspaceId: uuid('workspace_id').primaryKey().references(() => workspaces.id, { onDelete: 'cascade' }),
+  status: billingReconciliationStatusEnum('status').default('pending').notNull(),
+  attempts: integer('attempts').default(0).notNull(),
+  claimToken: text('claim_token'),
+  claimedAt: timestamp('claimed_at', { withTimezone: true }),
+  requestedAt: timestamp('requested_at', { withTimezone: true }),
+  nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).defaultNow(),
+  lastCheckedAt: timestamp('last_checked_at', { withTimezone: true }),
+  lastError: text('last_error'),
+  correlationId: text('correlation_id'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
+}, t => [
+  check('billing_reconciliation_jobs_attempts_ck', sql`${t.attempts} between 0 and 6`),
+  index('billing_reconciliation_jobs_due_idx').on(t.status, t.nextAttemptAt)
+])
+
+export const billingFinancialConflicts = pgTable('billing_financial_conflicts', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  kind: text('kind').default('duplicate_subscription').notNull(),
+  status: text('status').default('open').notNull(),
+  canonicalSubscriptionId: text('canonical_subscription_id'),
+  conflictingSubscriptionId: text('conflicting_subscription_id').notNull(),
+  invoiceReference: text('invoice_reference'),
+  amountCents: integer('amount_cents'),
+  currency: text('currency'),
+  providerChargeId: text('provider_charge_id'),
+  attempts: integer('attempts').default(0).notNull(),
+  correlationId: text('correlation_id'),
+  lastError: text('last_error'),
+  resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
+}, t => [
+  uniqueIndex('billing_financial_conflicts_subscription_uq').on(t.conflictingSubscriptionId),
+  index('billing_financial_conflicts_status_updated_idx').on(t.status, t.updatedAt),
+  check('billing_financial_conflicts_kind_ck', sql`${t.kind} = 'duplicate_subscription'`),
+  check('billing_financial_conflicts_status_ck', sql`${t.status} in ('open', 'resolved')`),
+  check('billing_financial_conflicts_attempts_ck', sql`${t.attempts} >= 0`)
+])
+
+/**
+ * Minimal financial evidence that intentionally survives workspace deletion.
+ * It contains no workspace name, customer email, actor identity, or payment
+ * amount — only the internal workspace identifier and provider cancellation
+ * facts needed to investigate an accidental post-deletion renewal.
+ */
+export const billingDeletionReceipts = pgTable('billing_deletion_receipts', {
+  workspaceId: uuid('workspace_id').primaryKey(),
+  deletionKind: text('deletion_kind', { enum: ['workspace', 'account'] }).notNull(),
+  bachsSubscriptionId: text('bachs_subscription_id'),
+  providerStatus: text('provider_status'),
+  cancelAtPeriodEnd: boolean('cancel_at_period_end'),
+  providerConfirmedAt: timestamp('provider_confirmed_at', { withTimezone: true }),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull()
+}, t => [
+  check('billing_deletion_receipts_kind_ck', sql`${t.deletionKind} in ('workspace', 'account')`),
+  index('billing_deletion_receipts_subscription_idx').on(t.bachsSubscriptionId)
+])
 
 export const widgetInstallationSignals = pgTable('widget_installation_signals', {
   id: uuid('id').defaultRandom().primaryKey(),
@@ -125,6 +315,18 @@ export const visitors = pgTable('visitors', {
   visitorId: text('visitor_id').notNull(),
   name: text('name'),
   email: text('email'),
+  emailSource: visitorEmailSourceEnum('email_source'),
+  emailUpdatedAt: timestamp('email_updated_at', { withTimezone: true }),
+  replyEmailEnabled: boolean('reply_email_enabled').default(false).notNull(),
+  replyEmailConsentAt: timestamp('reply_email_consent_at', { withTimezone: true }),
+  // Agent-maintained overrides stay separate from visitor-supplied identity.
+  // This prevents an internal edit from being presented as HMAC-verified data.
+  profileName: text('profile_name'),
+  profileEmail: text('profile_email'),
+  company: text('company'),
+  jobTitle: text('job_title'),
+  internalNote: text('internal_note'),
+  profileVersion: integer('profile_version').default(1).notNull(),
   // the host platform's own user id (via Perch.identify)
   externalId: text('external_id'),
   // true when the identify payload carried a valid HMAC signature
@@ -150,6 +352,9 @@ export const conversations = pgTable('conversations', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+  isSpam: boolean('is_spam').default(false).notNull(),
+  spamMarkedAt: timestamp('spam_marked_at', { withTimezone: true }),
+  spamMarkedByMemberId: uuid('spam_marked_by_member_id').references(() => workspaceMembers.id, { onDelete: 'set null' }),
   // CSAT: the visitor's post-resolve rating (one per conversation, overwritable)
   csatRating: text('csat_rating', { enum: ['good', 'bad'] }),
   csatComment: text('csat_comment'),
@@ -162,7 +367,36 @@ export const conversations = pgTable('conversations', {
   // Defense in depth for concurrent widget and agent-initiated starts.
   uniqueIndex('conversations_visitor_active_uq')
     .on(t.visitorRef)
-    .where(sql`${t.status} in ('unassigned', 'open')`)
+    .where(sql`${t.status} in ('unassigned', 'open')`),
+  index('conversations_workspace_spam_recency_idx').on(t.workspaceId, t.isSpam, t.lastMessageAt),
+  check(
+    'conversations_spam_state_ck',
+    sql`(${t.isSpam} = true and ${t.spamMarkedAt} is not null) or (${t.isSpam} = false and ${t.spamMarkedAt} is null)`
+  )
+])
+
+/** Reversible workspace-local messaging blocks. The target row keeps PII out of block records. */
+export const visitorBlocks = pgTable('visitor_blocks', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  visitorRef: uuid('visitor_ref').notNull().references(() => visitors.id, { onDelete: 'cascade' }),
+  sourceConversationId: uuid('source_conversation_id').references(() => conversations.id, { onDelete: 'set null' }),
+  blockedByMemberId: uuid('blocked_by_member_id').references(() => workspaceMembers.id, { onDelete: 'set null' }),
+  blockedAt: timestamp('blocked_at', { withTimezone: true }).defaultNow().notNull(),
+  unblockedByMemberId: uuid('unblocked_by_member_id').references(() => workspaceMembers.id, { onDelete: 'set null' }),
+  unblockedAt: timestamp('unblocked_at', { withTimezone: true })
+}, t => [
+  uniqueIndex('visitor_blocks_active_visitor_uq')
+    .on(t.visitorRef)
+    .where(sql`${t.unblockedAt} is null`),
+  index('visitor_blocks_workspace_recency_idx').on(t.workspaceId, t.blockedAt),
+  index('visitor_blocks_workspace_active_idx')
+    .on(t.workspaceId, t.visitorRef)
+    .where(sql`${t.unblockedAt} is null`),
+  check(
+    'visitor_blocks_unblocked_state_ck',
+    sql`${t.unblockedAt} is not null or ${t.unblockedByMemberId} is null`
+  )
 ])
 
 /** Saved inbox filters are private to one workspace membership. */
@@ -268,15 +502,27 @@ export const conversationTags = pgTable('conversation_tags', {
   index('conversation_tags_tag_idx').on(t.tagId)
 ])
 
+/** Reusable workspace tags attached to a customer across every conversation. */
+export const visitorTags = pgTable('visitor_tags', {
+  visitorId: uuid('visitor_id').notNull().references(() => visitors.id, { onDelete: 'cascade' }),
+  tagId: uuid('tag_id').notNull().references(() => tags.id, { onDelete: 'cascade' })
+}, t => [
+  uniqueIndex('visitor_tags_uq').on(t.visitorId, t.tagId),
+  index('visitor_tags_tag_idx').on(t.tagId)
+])
+
 /** The team lounge: one internal chat room per workspace (agents only, never visitors). */
 export const teamMessages = pgTable('team_messages', {
   id: uuid('id').defaultRandom().primaryKey(),
   workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
   memberId: uuid('member_id').notNull().references(() => workspaceMembers.id, { onDelete: 'cascade' }),
   content: text('content').notNull(),
+  clientMessageId: uuid('client_message_id'),
+  requestFingerprint: text('request_fingerprint'),
   mentionedMemberIds: uuid('mentioned_member_ids').array().default([]).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull()
 }, t => [
+  uniqueIndex('team_messages_client_request_uq').on(t.workspaceId, t.memberId, t.clientMessageId),
   index('team_messages_workspace_recency_idx').on(t.workspaceId, t.createdAt)
 ])
 
@@ -287,21 +533,116 @@ export const messages = pgTable('messages', {
   // null when the sender is the visitor or the system
   senderId: uuid('sender_id').references(() => workspaceMembers.id, { onDelete: 'set null' }),
   content: text('content').notNull(),
+  clientMessageId: uuid('client_message_id'),
+  requestFingerprint: text('request_fingerprint'),
   attachmentUrl: text('attachment_url'),
   attachmentType: text('attachment_type'),
+  attachmentAssetId: uuid('attachment_asset_id').references(() => attachmentAssets.id, { onDelete: 'set null' }),
   // true = agent-only; the visitor WS pipeline must NEVER receive these (§4)
   isInternalNote: boolean('is_internal_note').default(false).notNull(),
   // Validated workspace member ids selected through the internal-note composer.
   mentionedMemberIds: uuid('mentioned_member_ids').array().default([]).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull()
 }, t => [
+  uniqueIndex('messages_client_request_uq').on(t.conversationId, t.clientMessageId),
   index('messages_conversation_created_idx').on(t.conversationId, t.createdAt),
   index('messages_public_conversation_sender_time_idx')
     .on(t.conversationId, t.senderType, t.createdAt)
     .where(sql`${t.isInternalNote} = false`),
   index('messages_public_sender_time_conversation_idx')
     .on(t.senderType, t.createdAt, t.conversationId, t.senderId)
-    .where(sql`${t.isInternalNote} = false`)
+    .where(sql`${t.isInternalNote} = false`),
+  uniqueIndex('messages_attachment_asset_uq').on(t.attachmentAssetId).where(sql`${t.attachmentAssetId} is not null`)
+])
+
+/** Last public message the visitor actually viewed in an open chat surface. */
+export const visitorConversationReads = pgTable('visitor_conversation_reads', {
+  conversationId: uuid('conversation_id').primaryKey().references(() => conversations.id, { onDelete: 'cascade' }),
+  visitorRef: uuid('visitor_ref').notNull().references(() => visitors.id, { onDelete: 'cascade' }),
+  lastMessageId: uuid('last_message_id').notNull().references(() => messages.id, { onDelete: 'cascade' }),
+  readAt: timestamp('read_at', { withTimezone: true }).defaultNow().notNull()
+}, t => [
+  index('visitor_conversation_reads_visitor_idx').on(t.visitorRef, t.readAt)
+])
+
+/** Signed provider abuse events retained until their sent delivery is visible. */
+export const resendSuppressionEvents = pgTable('resend_suppression_events', {
+  providerMessageId: text('provider_message_id').primaryKey(),
+  reason: text('reason', { enum: ['bounce', 'complaint'] }).notNull(),
+  status: text('status', { enum: ['pending', 'processed', 'dead_letter'] }).default('pending').notNull(),
+  attempts: integer('attempts').default(0).notNull(),
+  nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).defaultNow().notNull(),
+  processedAt: timestamp('processed_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
+}, t => [
+  check('resend_suppression_events_reason_ck', sql`${t.reason} in ('bounce', 'complaint')`),
+  check('resend_suppression_events_status_ck', sql`${t.status} in ('pending', 'processed', 'dead_letter')`),
+  check('resend_suppression_events_attempts_ck', sql`${t.attempts} between 0 and 6`),
+  index('resend_suppression_events_due_idx').on(t.status, t.nextAttemptAt)
+])
+
+/** Workspace-scoped reply-email opt-outs and provider abuse suppressions. */
+export const visitorEmailSuppressions = pgTable('visitor_email_suppressions', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  emailHash: text('email_hash').notNull(),
+  reason: visitorEmailSuppressionReasonEnum('reason').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull()
+}, t => [
+  uniqueIndex('visitor_email_suppressions_workspace_email_uq').on(t.workspaceId, t.emailHash),
+  index('visitor_email_suppressions_workspace_created_idx').on(t.workspaceId, t.createdAt)
+])
+
+/** Durable visitor reply-email outbox, deduplicated to one email per visitor turn. */
+export const visitorReplyDeliveries = pgTable('visitor_reply_deliveries', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  conversationId: uuid('conversation_id').notNull().references(() => conversations.id, { onDelete: 'cascade' }),
+  visitorRef: uuid('visitor_ref').notNull().references(() => visitors.id, { onDelete: 'cascade' }),
+  visitorMessageId: uuid('visitor_message_id').notNull().references(() => messages.id, { onDelete: 'cascade' }),
+  agentMessageId: uuid('agent_message_id').notNull().references(() => messages.id, { onDelete: 'cascade' }),
+  recipientEmailHash: text('recipient_email_hash').notNull(),
+  status: reminderDeliveryStatusEnum('status').default('pending').notNull(),
+  attempts: integer('attempts').default(0).notNull(),
+  nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).notNull(),
+  lockedAt: timestamp('locked_at', { withTimezone: true }),
+  sentAt: timestamp('sent_at', { withTimezone: true }),
+  tokenExpiresAt: timestamp('token_expires_at', { withTimezone: true }).notNull(),
+  tokenConsumedAt: timestamp('token_consumed_at', { withTimezone: true }),
+  providerMessageId: text('provider_message_id'),
+  lastError: text('last_error'),
+  cancelReason: text('cancel_reason'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
+}, t => [
+  uniqueIndex('visitor_reply_deliveries_turn_email_uq').on(t.visitorMessageId, t.recipientEmailHash),
+  uniqueIndex('visitor_reply_deliveries_agent_message_uq').on(t.agentMessageId),
+  index('visitor_reply_deliveries_due_idx').on(t.status, t.nextAttemptAt),
+  index('visitor_reply_deliveries_conversation_idx').on(t.conversationId, t.createdAt),
+  index('visitor_reply_deliveries_recipient_idx').on(t.recipientEmailHash, t.createdAt),
+  check('visitor_reply_deliveries_attempts_ck', sql`${t.attempts} between 0 and 5`)
+])
+
+/** Durable email outbox: one reminder per unanswered visitor message and recipient. */
+export const unansweredReminderDeliveries = pgTable('unanswered_reminder_deliveries', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  conversationId: uuid('conversation_id').notNull().references(() => conversations.id, { onDelete: 'cascade' }),
+  visitorMessageId: uuid('visitor_message_id').notNull().references(() => messages.id, { onDelete: 'cascade' }),
+  recipientMemberId: uuid('recipient_member_id').notNull().references(() => workspaceMembers.id, { onDelete: 'cascade' }),
+  status: reminderDeliveryStatusEnum('status').default('pending').notNull(),
+  attempts: integer('attempts').default(0).notNull(),
+  nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).defaultNow().notNull(),
+  lockedAt: timestamp('locked_at', { withTimezone: true }),
+  sentAt: timestamp('sent_at', { withTimezone: true }),
+  lastError: text('last_error'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
+}, t => [
+  uniqueIndex('unanswered_reminder_message_recipient_uq').on(t.visitorMessageId, t.recipientMemberId),
+  index('unanswered_reminder_due_idx').on(t.status, t.nextAttemptAt),
+  index('unanswered_reminder_workspace_idx').on(t.workspaceId, t.createdAt)
 ])
 
 /** Durable in-app delivery for assignments and @mentions. */
@@ -334,6 +675,21 @@ export const memberNotifications = pgTable('member_notifications', {
     .where(sql`${t.teamMessageId} is not null`),
   index('member_notifications_recipient_unread_idx').on(t.recipientMemberId, t.readAt, t.createdAt),
   index('member_notifications_workspace_recency_idx').on(t.workspaceId, t.createdAt)
+])
+
+/** Personal delivery choices for one member in one workspace. */
+export const notificationPreferences = pgTable('notification_preferences', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  memberId: uuid('member_id').notNull().references(() => workspaceMembers.id, { onDelete: 'cascade' }),
+  category: notificationCategoryEnum('category').$type<NotificationCategory>().notNull(),
+  inAppEnabled: boolean('in_app_enabled').default(true).notNull(),
+  browserEnabled: boolean('browser_enabled').default(false).notNull(),
+  emailEnabled: boolean('email_enabled').default(false).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
+}, t => [
+  uniqueIndex('notification_preferences_member_category_uq').on(t.memberId, t.category),
+  index('notification_preferences_member_idx').on(t.memberId)
 ])
 
 /** Per-agent read tracking; unread is derived (last_message_at > last_read_at). */
@@ -491,10 +847,54 @@ export const webhookEndpoints = pgTable('webhook_endpoints', {
   index('webhook_endpoints_workspace_idx').on(t.workspaceId)
 ])
 
-/** Recent delivery attempts per endpoint (capped — pruned on insert). */
+/** Immutable domain events waiting to fan out to the endpoints subscribed at commit time. */
+export const webhookEvents = pgTable('webhook_events', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  event: text('event').notNull(),
+  dedupeKey: text('dedupe_key').notNull(),
+  data: jsonb('data').$type<Record<string, unknown>>(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull()
+}, t => [
+  uniqueIndex('webhook_events_workspace_dedupe_uq').on(t.workspaceId, t.dedupeKey),
+  index('webhook_events_workspace_created_idx').on(t.workspaceId, t.createdAt),
+  check('webhook_events_name_ck', sql`${t.event} in ('conversation.created', 'message.created', 'conversation.resolved')`)
+])
+
+/** One durable job per endpoint/event pair. Endpoint secrets are never copied here. */
+export const webhookJobs = pgTable('webhook_jobs', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  endpointId: uuid('endpoint_id').notNull().references(() => webhookEndpoints.id, { onDelete: 'cascade' }),
+  eventId: uuid('event_id').notNull().references(() => webhookEvents.id, { onDelete: 'cascade' }),
+  status: webhookJobStatusEnum('status').default('pending').notNull(),
+  attempts: integer('attempts').default(0).notNull(),
+  nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).defaultNow(),
+  lockedAt: timestamp('locked_at', { withTimezone: true }),
+  lastAttemptAt: timestamp('last_attempt_at', { withTimezone: true }),
+  deliveredAt: timestamp('delivered_at', { withTimezone: true }),
+  lastHttpStatus: integer('last_http_status'),
+  lastDurationMs: integer('last_duration_ms'),
+  lastError: text('last_error'),
+  cancelReason: text('cancel_reason'),
+  replayCount: integer('replay_count').default(0).notNull(),
+  lastReplayKey: uuid('last_replay_key'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull()
+}, t => [
+  uniqueIndex('webhook_jobs_endpoint_event_uq').on(t.endpointId, t.eventId),
+  index('webhook_jobs_due_idx').on(t.status, t.nextAttemptAt),
+  index('webhook_jobs_endpoint_created_idx').on(t.endpointId, t.createdAt),
+  index('webhook_jobs_workspace_status_idx').on(t.workspaceId, t.status, t.updatedAt),
+  check('webhook_jobs_attempts_ck', sql`${t.attempts} between 0 and 6`),
+  check('webhook_jobs_replay_count_ck', sql`${t.replayCount} >= 0`)
+])
+
+/** Individual HTTP attempts, linked to a durable job when one exists. */
 export const webhookDeliveries = pgTable('webhook_deliveries', {
   id: uuid('id').defaultRandom().primaryKey(),
   endpointId: uuid('endpoint_id').notNull().references(() => webhookEndpoints.id, { onDelete: 'cascade' }),
+  jobId: uuid('job_id').references(() => webhookJobs.id, { onDelete: 'cascade' }),
   event: text('event').notNull(),
   ok: boolean('ok').notNull(),
   httpStatus: integer('http_status'),
@@ -503,7 +903,8 @@ export const webhookDeliveries = pgTable('webhook_deliveries', {
   error: text('error'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull()
 }, t => [
-  index('webhook_deliveries_endpoint_recency_idx').on(t.endpointId, t.createdAt)
+  index('webhook_deliveries_endpoint_recency_idx').on(t.endpointId, t.createdAt),
+  index('webhook_deliveries_job_attempt_idx').on(t.jobId, t.attempt)
 ])
 
 /* Inferred row types */
@@ -522,6 +923,8 @@ export type Visitor = typeof visitors.$inferSelect
 export type NewVisitor = typeof visitors.$inferInsert
 export type Conversation = typeof conversations.$inferSelect
 export type NewConversation = typeof conversations.$inferInsert
+export type VisitorBlock = typeof visitorBlocks.$inferSelect
+export type NewVisitorBlock = typeof visitorBlocks.$inferInsert
 export type InboxSavedView = typeof inboxSavedViews.$inferSelect
 export type NewInboxSavedView = typeof inboxSavedViews.$inferInsert
 export type AutomationRule = typeof automationRules.$inferSelect
@@ -534,8 +937,11 @@ export type Message = typeof messages.$inferSelect
 export type NewMessage = typeof messages.$inferInsert
 export type MemberNotification = typeof memberNotifications.$inferSelect
 export type NewMemberNotification = typeof memberNotifications.$inferInsert
+export type NotificationPreference = typeof notificationPreferences.$inferSelect
 export type ConversationRead = typeof conversationReads.$inferSelect
 export type NewConversationRead = typeof conversationReads.$inferInsert
+export type VisitorConversationRead = typeof visitorConversationReads.$inferSelect
+export type VisitorReplyDelivery = typeof visitorReplyDeliveries.$inferSelect
 export type CannedResponse = typeof cannedResponses.$inferSelect
 export type NewCannedResponse = typeof cannedResponses.$inferInsert
 export type PasswordResetToken = typeof passwordResetTokens.$inferSelect
@@ -546,5 +952,12 @@ export type Trigger = typeof triggers.$inferSelect
 export type NewTrigger = typeof triggers.$inferInsert
 export type WebhookEndpoint = typeof webhookEndpoints.$inferSelect
 export type NewWebhookEndpoint = typeof webhookEndpoints.$inferInsert
+export type WebhookEvent = typeof webhookEvents.$inferSelect
+export type WebhookJob = typeof webhookJobs.$inferSelect
 export type WebhookDelivery = typeof webhookDeliveries.$inferSelect
 export type NewWebhookDelivery = typeof webhookDeliveries.$inferInsert
+export type WorkspaceSubscription = typeof workspaceSubscriptions.$inferSelect
+export type WorkspaceInvoice = typeof workspaceInvoices.$inferSelect
+export type BillingWebhookDelivery = typeof billingWebhookDeliveries.$inferSelect
+export type BillingReconciliationJob = typeof billingReconciliationJobs.$inferSelect
+export type UnansweredReminderDelivery = typeof unansweredReminderDeliveries.$inferSelect

@@ -2,6 +2,7 @@ import { and, eq, visitors } from '@perch/db'
 import { z } from 'zod'
 
 const schema = z.object({
+  client_message_id: z.string().uuid().optional(),
   visitor_ref: z.string().uuid(),
   message: z.string().trim().min(1).max(4000)
 })
@@ -30,6 +31,7 @@ export default defineEventHandler(async (event) => {
   }
 
   const { conversation } = await startAgentConversation({
+    clientMessageId: result.data.client_message_id,
     workspaceId,
     visitorRef: visitor.id,
     memberId: member.id,

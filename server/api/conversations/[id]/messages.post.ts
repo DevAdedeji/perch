@@ -2,6 +2,7 @@ import { and, eq, inArray, workspaceMembers } from '@perch/db'
 import { z } from 'zod'
 
 const bodySchema = z.object({
+  client_message_id: z.string().uuid().optional(),
   content: z.string().trim().max(5000).default(''),
   attachment_url: z.string().url().max(500).optional(),
   attachment_type: z.string().regex(/^image\//).max(100).optional(),
@@ -24,6 +25,9 @@ export default defineEventHandler(async (event) => {
   if (result.data.attachment_url && !isOwnCloudinaryImageUrl(result.data.attachment_url, cloudinaryConfig().cloudName)) {
     throw createError({ statusCode: 400, statusMessage: 'Invalid attachment' })
   }
+  if (conversation.isSpam && !result.data.is_internal_note) {
+    throw createError({ statusCode: 409, statusMessage: 'Restore this conversation before replying' })
+  }
 
   // Mention recipients are deduplicated, cannot include the author, and must
   // belong to the same workspace. The validated ids are persisted with the
@@ -43,9 +47,11 @@ export default defineEventHandler(async (event) => {
   const mentionRecipientIds = targets.map(target => target.id)
 
   const message = await addAgentMessage({
+    clientMessageId: result.data.client_message_id,
     conversationId,
     workspaceId: conversation.workspaceId,
     senderMemberId: member.id,
+    uploaderUserId: user.id,
     content: result.data.content,
     attachmentUrl: result.data.attachment_url ?? null,
     attachmentType: result.data.attachment_url ? (result.data.attachment_type ?? 'image/*') : null,

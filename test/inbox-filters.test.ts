@@ -16,7 +16,9 @@ describe('inbox filters', () => {
       assignee: 'any',
       priorities: [],
       tagIds: [],
-      snoozed: 'exclude'
+      snoozed: 'exclude',
+      response: 'all',
+      spam: 'exclude'
     })
   })
 
@@ -28,12 +30,14 @@ describe('inbox filters', () => {
     expect(result.data.priorities).toEqual(['urgent', 'high'])
     expect(result.data.tagIds).toEqual([tag])
     expect(result.data.snoozed).toBe('only')
+    expect(parseInboxFilters({ response: 'breached' }).success).toBe(true)
   })
 
   it('rejects unknown filter values and malformed ids', () => {
     expect(parseInboxFilters({ priority: 'critical' }).success).toBe(false)
     expect(parseInboxFilters({ tag: 'not-a-uuid' }).success).toBe(false)
     expect(parseInboxFilters({ assignee: 'someone' }).success).toBe(false)
+    expect(parseInboxFilters({ response: 'late' }).success).toBe(false)
   })
 
   it('validates saved views strictly', () => {

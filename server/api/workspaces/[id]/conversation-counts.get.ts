@@ -16,11 +16,21 @@ export default defineEventHandler(async (event) => {
     : undefined
 
   const db = useDb()
+  const workspace = await db.query.workspaces.findFirst({
+    where: (workspaces, { eq }) => eq(workspaces.id, workspaceId),
+    columns: { unansweredReminderDelayMinutes: true }
+  })
+  if (!workspace) throw createError({ statusCode: 404, statusMessage: 'Workspace not found' })
+  const responseTargetMinutes = effectiveResponseTargetMinutes(
+    workspace.unansweredReminderDelayMinutes,
+    (await workspaceEntitlement(workspaceId)).isPro
+  )
   const rows = await db
     .select({ status: conversations.status, total: count() })
     .from(conversations)
     .where(and(
       eq(conversations.workspaceId, workspaceId),
+      eq(conversations.isSpam, false),
       sql`(${conversations.snoozedUntil} is null or ${conversations.snoozedUntil} <= now())`,
       scope
     ))
@@ -28,5 +38,16 @@ export default defineEventHandler(async (event) => {
 
   const result = { unassigned: 0, open: 0, resolved: 0 }
   for (const row of rows) result[row.status] = Number(row.total)
-  return result
+  const [response] = await db.select({ total: count() }).from(conversations).where(and(
+    eq(conversations.workspaceId, workspaceId),
+    eq(conversations.isSpam, false),
+    scope,
+    breachedResponseSlaCondition(responseTargetMinutes)
+  ))
+  const [spam] = await db.select({ total: count() }).from(conversations).where(and(
+    eq(conversations.workspaceId, workspaceId),
+    eq(conversations.isSpam, true),
+    scope
+  ))
+  return { ...result, spam: Number(spam?.total ?? 0), breached: Number(response?.total ?? 0) }
 })

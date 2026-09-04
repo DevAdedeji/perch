@@ -19,12 +19,17 @@ async function getMember(userId: string, workspaceId: string): Promise<Workspace
   })
 }
 
-async function agentConversationMembership(userId: string, conversationId: string): Promise<WorkspaceMember | undefined> {
+async function agentConversationMembership(
+  userId: string,
+  conversationId: string
+): Promise<{ member: WorkspaceMember, workspaceId: string } | undefined> {
   const db = useDb()
   const convo = await db.query.conversations.findFirst({ where: eq(conversations.id, conversationId) })
   if (!convo) return undefined
   const member = await getMember(userId, convo.workspaceId)
-  return member && canMemberAccessConversation(member, convo) ? member : undefined
+  return member && canMemberAccessConversation(member, convo)
+    ? { member, workspaceId: convo.workspaceId }
+    : undefined
 }
 
 async function visitorCanAccessConversation(wid: string, vid: string, conversationId: string): Promise<boolean> {
@@ -51,24 +56,26 @@ async function handleSubscribe(peer: import('crossws').Peer, channel: unknown) {
     if (kind === 'workspace') {
       const member = await getMember(ctx.userId as string, id)
       if (member) {
-        ctx.memberId = member.id
-        ctx.memberRole = member.role
-        ctx.wid = id
+        authorizeAgentWorkspace(ctx, id, { memberId: member.id, memberRole: member.role })
         subscribe(channel, peer)
         peer.send(JSON.stringify({ type: 'subscribed', channel }))
         agentJoined(id, member.id, peer)
         return
       }
     } else if (kind === 'conversation') {
-      const member = await agentConversationMembership(ctx.userId as string, id)
-      allowed = !!member
-      if (member) {
-        ctx.memberId = member.id
-        ctx.memberRole = member.role
+      const authorization = await agentConversationMembership(ctx.userId as string, id)
+      allowed = !!authorization
+      if (authorization) {
+        authorizeAgentConversation(ctx, id, authorization.workspaceId, {
+          memberId: authorization.member.id,
+          memberRole: authorization.member.role
+        })
       }
     } else if (kind === 'visitors') {
       // live-roster deltas — any member of the workspace may watch
-      allowed = !!(await getMember(ctx.userId as string, id))
+      const member = await getMember(ctx.userId as string, id)
+      allowed = !!member
+      if (member) authorizeAgentWorkspace(ctx, id, { memberId: member.id, memberRole: member.role })
     }
   } else if (ctx.role === 'visitor') {
     if (kind === 'conversation') allowed = await visitorCanAccessConversation(ctx.wid as string, ctx.vid as string, id)
@@ -95,8 +102,14 @@ export default defineWebSocketHandler({
       return
     }
     if (subject.role === 'agent') {
+      if (!isSessionAliveForRealtime(subject.sid, subject.uid)) {
+        peer.close(1008, 'unauthorized')
+        return
+      }
       peer.context.role = 'agent'
       peer.context.userId = subject.uid
+      peer.context.sessionId = subject.sid
+      registerPeer(peer)
     } else {
       peer.context.role = 'visitor'
       peer.context.wid = subject.wid
@@ -153,7 +166,11 @@ export default defineWebSocketHandler({
       }
     }
 
-    let msg: { type?: string, channel?: unknown, payload?: { conversation_id?: string, presence?: string } }
+    let msg: {
+      type?: string
+      channel?: unknown
+      payload?: { conversation_id?: string, workspace_id?: string, presence?: string }
+    }
     try {
       msg = JSON.parse(raw)
     } catch {
@@ -170,16 +187,26 @@ export default defineWebSocketHandler({
         break
       case 'unsubscribe': {
         if (typeof msg.channel !== 'string') break
-        unsubscribe(msg.channel, peer)
-        // leaving a workspace channel = going offline there
-        if (ctx.role === 'agent' && ctx.memberId && msg.channel === channels.workspace(ctx.wid as string)) {
-          agentLeft(ctx.wid as string, ctx.memberId as string, peer)
+        const parts = msg.channel.split(':')
+        if (parts.length !== 2 || !parts[0] || !parts[1]) break
+        const [kind, id] = parts
+        if (ctx.role === 'agent' && kind === 'workspace') {
+          const authorization = agentWorkspaceAuthorization(ctx, id)
+          if (authorization) agentLeft(id, authorization.memberId, peer)
+          forgetAgentWorkspace(ctx, id)
+        } else if (ctx.role === 'agent' && kind === 'conversation') {
+          forgetAgentConversation(ctx, id)
         }
+        unsubscribe(msg.channel, peer)
         break
       }
       case 'presence.update':
-        if (ctx.role === 'agent' && ctx.memberId && ctx.wid) {
-          agentSetAway(ctx.wid as string, ctx.memberId as string, msg.payload?.presence === 'away')
+        if (ctx.role === 'agent' && typeof msg.payload?.workspace_id === 'string') {
+          const workspaceId = msg.payload.workspace_id
+          const authorization = agentWorkspaceAuthorization(ctx, workspaceId)
+          if (authorization && isSubscribed(channels.workspace(workspaceId), peer)) {
+            agentSetAway(workspaceId, authorization.memberId, msg.payload?.presence === 'away')
+          }
         }
         break
       case 'visitor.page': {
@@ -221,7 +248,18 @@ export default defineWebSocketHandler({
           : convo.workspaceId === ctx.wid && convo.visitorRef === ctx.vid
         if (!stillAllowed) {
           unsubscribe(channel, peer)
+          if (ctx.role === 'agent') forgetAgentConversation(ctx, conversationId)
           break
+        }
+        if (currentMember) {
+          authorizeAgentConversation(ctx, conversationId, convo.workspaceId, {
+            memberId: currentMember.id,
+            memberRole: currentMember.role
+          })
+        }
+        if (ctx.role === 'visitor') {
+          const visitor = await useDb().query.visitors.findFirst({ where: eq(visitors.id, ctx.vid as string) })
+          if (!visitor || await isVisitorMessagingBlocked(visitor)) break
         }
         // sneak-peek: relay the visitor's draft to agents — WS-only, never stored.
         // strictly one-directional: an agent's draft must never reach the visitor.
@@ -229,7 +267,7 @@ export default defineWebSocketHandler({
         const preview = ctx.role === 'visitor' && msg.type === 'typing.start' && typeof rawPreview === 'string'
           ? rawPreview.slice(0, 500)
           : null
-        publishConversationEvent(channel, {
+        publishConversationEvent(convo.workspaceId, conversationId, {
           type: 'typing',
           payload: {
             conversation_id: conversationId,
@@ -247,11 +285,13 @@ export default defineWebSocketHandler({
     presencePeerGone(peer)
     visitorPeerGone(peer)
     unsubscribeAll(peer)
+    unregisterPeer(peer)
   },
 
   error(peer) {
     presencePeerGone(peer)
     visitorPeerGone(peer)
     unsubscribeAll(peer)
+    unregisterPeer(peer)
   }
 })

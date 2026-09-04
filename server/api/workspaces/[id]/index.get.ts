@@ -25,6 +25,7 @@ export default defineEventHandler(async (event) => {
   return {
     ...serializeWorkspace(workspace),
     role: member.role,
+    entitlement: await workspaceEntitlement(workspaceId),
     identityVerificationEnabled: workspace.identityVerificationEnabled,
     // the secret is for the business's backend — admins only
     identitySecret: member.role === 'admin' ? workspace.identitySecret : null

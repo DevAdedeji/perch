@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { defaultNotificationPreferences, PERCH_PRO_PLAN } from '@perch/shared'
+import type { NotificationCategory, NotificationPreference } from '@perch/shared'
+
 definePageMeta({ layout: 'dashboard' })
 useHead({ title: 'Settings · Perch' })
 
@@ -27,10 +30,20 @@ interface WorkspaceDetail {
   allowedDomains: string[]
   businessHours: BusinessHoursMap | null
   timezone: string | null
+  unansweredReminderEnabled: boolean
+  unansweredReminderDelayMinutes: number
+  unansweredReminderBusinessHoursOnly: boolean
+  visitorReplyEmailAvailable: boolean
+  visitorReplyEmailEnabled: boolean
+  entitlement: {
+    isPro: boolean
+    plan: 'free' | 'pro'
+    features: { customReminderDelay: boolean, businessHoursReminders: boolean, removeBranding: boolean }
+  }
   role: 'admin' | 'agent'
 }
 
-const { currentWorkspace } = useAuth()
+const { user, currentWorkspace } = useAuth()
 const toast = useToast()
 const { copy } = useCopyToClipboard()
 const origin = useRequestURL().origin
@@ -68,7 +81,8 @@ const identifySnippet = `<script>
     user_id: 'user_42',              // your platform's id for them
     name: 'Ada Lovelace',
     email: 'ada@example.com',
-    hash: '<generated on your server>' // required if verification is enforced
+    hash: '<HMAC of user_id>',
+    email_hash: '<HMAC of normalized email>' // proves the address; the visitor still opts in
   }
 
   // or, after a login that happens without a page reload:
@@ -115,6 +129,13 @@ async function togglePrechat(value: boolean) {
     await patchWorkspace({ prechatFormEnabled: value })
   } catch {
     toast.add({ title: 'Could not update', color: 'error' })
+  }
+}
+async function toggleVisitorReplyEmail(value: boolean) {
+  try {
+    await patchWorkspace({ visitorReplyEmailEnabled: value })
+  } catch {
+    toast.add({ title: 'Could not update visitor reply emails', color: 'error' })
   }
 }
 watch(workspace, (w) => {
@@ -189,6 +210,192 @@ async function saveHours() {
     savingHours.value = false
   }
 }
+
+/* response target and unanswered-message email reminders */
+const reminderEnabled = ref(false)
+const reminderDelay = ref(15)
+const reminderBusinessHoursOnly = ref(false)
+const savingReminder = ref(false)
+const reminderOptions = [
+  { label: '5 minutes', value: 5 },
+  { label: '15 minutes', value: 15 },
+  { label: '30 minutes', value: 30 },
+  { label: '1 hour', value: 60 },
+  { label: '4 hours', value: 240 },
+  { label: '24 hours', value: 1440 }
+]
+
+watch(workspace, (w) => {
+  if (!w) return
+  reminderEnabled.value = w.unansweredReminderEnabled
+  reminderDelay.value = w.entitlement.isPro ? w.unansweredReminderDelayMinutes : PERCH_PRO_PLAN.freeReminderMinutes
+  reminderBusinessHoursOnly.value = w.unansweredReminderBusinessHoursOnly
+}, { immediate: true })
+
+async function saveReminder() {
+  if (savingReminder.value || !isAdmin.value) return
+  savingReminder.value = true
+  try {
+    await patchWorkspace({
+      unansweredReminderEnabled: reminderEnabled.value,
+      unansweredReminderDelayMinutes: reminderDelay.value,
+      unansweredReminderBusinessHoursOnly: reminderBusinessHoursOnly.value
+    }, reminderEnabled.value ? 'Email reminders saved' : 'Email reminders turned off')
+  } catch (error) {
+    toast.add({ title: getErrorMessage(error, 'Could not save email reminders'), color: 'error' })
+  } finally {
+    savingReminder.value = false
+  }
+}
+
+/* personal notifications */
+const browserNotifications = useBrowserNotifications()
+const personalNotificationStore = usePersonalNotificationPreferences()
+const personalNotificationScope = computed(() => user.value?.id && wid.value
+  ? notificationPreferenceScope(user.value.id, wid.value)
+  : null)
+const personalNotifications = ref<NotificationPreference[]>(defaultNotificationPreferences())
+const notificationsSaving = ref(false)
+const notificationsDirty = ref(false)
+const personalNotificationEntry = computed(() => personalNotificationStore.entry(personalNotificationScope.value))
+const notificationsLoading = computed(() => !personalNotificationEntry.value || personalNotificationEntry.value.loading)
+const notificationsLoadFailed = computed(() => {
+  const entry = personalNotificationEntry.value
+  return Boolean(entry && !entry.ready && !entry.loading)
+})
+const notificationMeta: Array<{
+  category: NotificationCategory
+  title: string
+  description: string
+}> = [
+  {
+    category: 'assignment',
+    title: 'Assignments',
+    description: 'When a teammate assigns a conversation to you.'
+  },
+  {
+    category: 'mention',
+    title: 'Mentions',
+    description: 'When a teammate mentions you in Nest or an internal note.'
+  },
+  {
+    category: 'unanswered_reminder',
+    title: 'Unanswered-message reminders',
+    description: 'When a conversation passes the workspace response target.'
+  }
+]
+
+function personalPreference(category: NotificationCategory) {
+  return personalNotifications.value.find(item => item.category === category)!
+}
+
+function setPersonalPreference(
+  category: NotificationCategory,
+  channel: NotificationPreferenceChannel,
+  enabled: boolean
+) {
+  if (notificationsSaving.value) return
+  notificationsDirty.value = true
+  personalNotifications.value = updatedNotificationPreferences(
+    personalNotifications.value,
+    category,
+    channel,
+    enabled
+  )
+}
+
+function syncPersonalNotificationsFromStore() {
+  const scope = personalNotificationScope.value
+  if (!scope) return
+  const draft = notificationPreferenceDraft(
+    personalNotificationStore.entry(scope),
+    notificationsDirty.value
+  )
+  if (draft) personalNotifications.value = draft
+}
+
+async function loadPersonalNotifications() {
+  const workspaceId = wid.value
+  const scope = personalNotificationScope.value
+  if (!workspaceId || !scope) return
+  browserNotifications.refreshPermission()
+  try {
+    const preferences = await personalNotificationStore.load(scope, workspaceId)
+    if (personalNotificationScope.value !== scope) return
+    if (preferences && !notificationsDirty.value) {
+      personalNotifications.value = preferences.map(preference => ({ ...preference }))
+    } else {
+      syncPersonalNotificationsFromStore()
+    }
+  } catch (error) {
+    const entry = personalNotificationStore.entry(scope)
+    if (personalNotificationScope.value === scope && !entry?.ready && !notificationsDirty.value) {
+      toast.add({ title: getErrorMessage(error, 'Could not load your notification preferences'), color: 'error' })
+    }
+  }
+}
+
+async function setBrowserPreference(category: NotificationCategory, enabled: boolean) {
+  if (notificationsSaving.value) return
+  if (!enabled) {
+    setPersonalPreference(category, 'browser_enabled', false)
+    return
+  }
+  const permission = await browserNotifications.requestPermission()
+  if (permission === 'granted') {
+    setPersonalPreference(category, 'browser_enabled', true)
+    return
+  }
+  toast.add({
+    title: permission === 'denied' ? 'Browser notifications are blocked' : 'Browser notifications are unavailable',
+    description: permission === 'denied'
+      ? 'Allow notifications for this site in your browser settings, then try again.'
+      : 'Use a secure, supported browser to enable these alerts.',
+    color: 'warning'
+  })
+}
+
+async function savePersonalNotifications() {
+  const workspaceId = wid.value
+  const scope = personalNotificationScope.value
+  if (!workspaceId || !scope || notificationsSaving.value) return
+  notificationsSaving.value = true
+  const preferences = personalNotifications.value.map(preference => ({ ...preference }))
+  try {
+    const result = await $fetch<{ preferences: NotificationPreference[] }>(
+      `/api/workspaces/${workspaceId}/notification-preferences`,
+      { method: 'PATCH', body: { preferences } }
+    )
+    personalNotificationStore.replace(scope, result.preferences)
+    if (personalNotificationScope.value === scope) {
+      personalNotifications.value = result.preferences.map(preference => ({ ...preference }))
+      notificationsDirty.value = false
+    }
+    toast.add({ title: 'Your notification preferences are saved', icon: 'i-lucide-check', color: 'success' })
+  } catch (error) {
+    toast.add({ title: getErrorMessage(error, 'Could not save your notification preferences'), color: 'error' })
+  } finally {
+    notificationsSaving.value = false
+  }
+}
+
+onMounted(loadPersonalNotifications)
+watch(personalNotificationScope, () => {
+  notificationsDirty.value = false
+  personalNotifications.value = defaultNotificationPreferences()
+  syncPersonalNotificationsFromStore()
+  void loadPersonalNotifications()
+})
+// The dashboard shell loads the same shared preferences. Follow whichever
+// request wins, but never replace switches the user has already edited.
+watch(
+  () => {
+    const scope = personalNotificationScope.value
+    const entry = scope ? personalNotificationStore.entry(scope) : undefined
+    return [scope, entry?.generation, entry?.ready, entry?.loading] as const
+  },
+  syncPersonalNotificationsFromStore
+)
 
 /* canned replies */
 interface Canned {
@@ -327,8 +534,10 @@ async function onLogoPicked(e: Event) {
   const file = input.files?.[0]
   input.value = ''
   if (!file) return
+  const workspaceId = wid.value
+  if (!workspaceId) return
   try {
-    const img = await uploadImage(file)
+    const img = await uploadImage(file, { purpose: 'logo', workspace_id: workspaceId })
     await patchWorkspace({ logoUrl: img.url }, 'Logo updated')
   } catch (err) {
     toast.add({ title: getErrorMessage(err, 'Could not upload the logo'), color: 'error' })
@@ -454,7 +663,28 @@ async function removeLogo() {
               <USwitch
                 :model-value="workspace?.prechatFormEnabled"
                 :disabled="!isAdmin"
+                aria-label="Enable pre-chat form"
                 @update:model-value="togglePrechat"
+              />
+            </div>
+
+            <div
+              v-if="workspace?.visitorReplyEmailAvailable"
+              class="flex items-center justify-between gap-4"
+            >
+              <div>
+                <p class="text-sm font-medium text-highlighted">
+                  Email visitors after they leave
+                </p>
+                <p class="text-xs text-muted">
+                  Sends one private return link after the first teammate reply to each customer message. Message text is never included.
+                </p>
+              </div>
+              <USwitch
+                :model-value="workspace?.visitorReplyEmailEnabled"
+                :disabled="!isAdmin"
+                aria-label="Email visitors after they leave"
+                @update:model-value="toggleVisitorReplyEmail"
               />
             </div>
           </div>
@@ -486,6 +716,7 @@ async function removeLogo() {
               v-model="widgetEditor"
               :disabled="!isAdmin"
               :saving="savingWidget"
+              :remove-branding-allowed="workspace?.entitlement.features.removeBranding"
               @save="saveWidgetCustomization"
             />
 
@@ -565,6 +796,7 @@ async function removeLogo() {
             <USwitch
               v-model="hoursEnabled"
               :disabled="!isAdmin"
+              aria-label="Enable business hours"
             />
           </div>
 
@@ -592,6 +824,7 @@ async function removeLogo() {
                   v-model="dayRows[d]!.on"
                   :disabled="!isAdmin"
                   size="sm"
+                  :aria-label="`${DAY_NAMES[d]} business hours`"
                 />
                 <span
                   class="w-24 text-sm"
@@ -631,6 +864,230 @@ async function removeLogo() {
           >
             Save hours
           </UButton>
+        </section>
+
+        <!-- Personal notifications -->
+        <section class="rounded-2xl border-glow bg-elevated/30 p-5 sm:p-6">
+          <div class="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
+            <div>
+              <h2 class="font-display font-semibold text-highlighted">
+                Your notifications
+              </h2>
+              <p class="mt-0.5 text-sm text-muted">
+                Personal choices for {{ workspace?.name }}. They do not change anyone else's alerts.
+              </p>
+            </div>
+            <UBadge
+              color="neutral"
+              variant="subtle"
+              class="mt-2 w-fit sm:mt-0"
+            >
+              Personal
+            </UBadge>
+          </div>
+
+          <div
+            v-if="notificationsLoading"
+            class="mt-5 space-y-3"
+          >
+            <USkeleton
+              v-for="n in 3"
+              :key="n"
+              class="h-24 w-full rounded-xl"
+            />
+          </div>
+
+          <div
+            v-else-if="notificationsLoadFailed"
+            class="mt-5 rounded-xl border border-error/30 bg-error/5 p-4"
+            role="alert"
+          >
+            <p class="text-sm font-medium text-highlighted">
+              We couldn't load your notification choices.
+            </p>
+            <p class="mt-1 text-xs text-muted">
+              Your saved choices have not been changed. Try loading them again.
+            </p>
+            <UButton
+              class="mt-3"
+              color="neutral"
+              size="sm"
+              @click="loadPersonalNotifications"
+            >
+              Retry
+            </UButton>
+          </div>
+
+          <div
+            v-else
+            class="mt-5 space-y-3"
+          >
+            <div
+              v-for="item in notificationMeta"
+              :key="item.category"
+              class="rounded-xl bg-default p-4 ring-1 ring-default"
+            >
+              <div class="min-w-0">
+                <p class="text-sm font-medium text-highlighted">
+                  {{ item.title }}
+                </p>
+                <p class="mt-0.5 text-xs text-muted">
+                  {{ item.description }}
+                </p>
+              </div>
+              <div class="mt-4 grid gap-3 sm:grid-cols-3">
+                <label class="flex min-h-11 items-center justify-between gap-3 rounded-lg bg-elevated/50 px-3 py-2">
+                  <span class="text-sm text-highlighted">In-app pop-up</span>
+                  <USwitch
+                    :model-value="personalPreference(item.category).in_app_enabled"
+                    :aria-label="`Show ${item.title.toLowerCase()} as in-app pop-ups`"
+                    :disabled="notificationsSaving"
+                    @update:model-value="setPersonalPreference(item.category, 'in_app_enabled', $event)"
+                  />
+                </label>
+                <label class="flex min-h-11 items-center justify-between gap-3 rounded-lg bg-elevated/50 px-3 py-2">
+                  <span class="text-sm text-highlighted">Browser</span>
+                  <USwitch
+                    :model-value="personalPreference(item.category).browser_enabled"
+                    :aria-label="`Show ${item.title.toLowerCase()} as browser notifications`"
+                    :disabled="notificationsSaving"
+                    @update:model-value="setBrowserPreference(item.category, $event)"
+                  />
+                </label>
+                <label
+                  v-if="item.category === 'unanswered_reminder'"
+                  class="flex min-h-11 items-center justify-between gap-3 rounded-lg bg-elevated/50 px-3 py-2"
+                >
+                  <span class="text-sm text-highlighted">Email</span>
+                  <USwitch
+                    :model-value="personalPreference(item.category).email_enabled"
+                    aria-label="Email me unanswered-message reminders"
+                    :disabled="notificationsSaving"
+                    @update:model-value="setPersonalPreference(item.category, 'email_enabled', $event)"
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div class="rounded-xl border border-default px-4 py-3 text-xs text-muted">
+              <p>
+                Browser alerts appear while Perch is open in a background tab. Your notification bell and inbox response indicators remain available even when pop-ups are off.
+              </p>
+              <p
+                v-if="browserNotifications.permission.value === 'denied'"
+                class="mt-2 text-warning"
+                role="status"
+              >
+                Browser notifications are blocked for this site. Allow them in your browser settings to turn them on.
+              </p>
+              <p
+                v-else-if="browserNotifications.permission.value === 'unsupported' || browserNotifications.permission.value === 'insecure'"
+                class="mt-2 text-warning"
+                role="status"
+              >
+                Browser notifications are unavailable in this browser or connection.
+              </p>
+            </div>
+
+            <UButton
+              color="neutral"
+              :loading="notificationsSaving"
+              :disabled="notificationsSaving || !notificationsDirty"
+              @click="savePersonalNotifications"
+            >
+              Save my notifications
+            </UButton>
+          </div>
+        </section>
+
+        <!-- Response target and unanswered-message reminders -->
+        <section class="rounded-2xl border-glow bg-elevated/30 p-5 sm:p-6">
+          <div>
+            <div class="flex flex-wrap items-center gap-2">
+              <h2 class="font-display font-semibold text-highlighted">
+                Response target
+              </h2>
+              <UBadge
+                v-if="!workspace?.entitlement.isPro"
+                color="primary"
+                variant="subtle"
+                size="sm"
+              >
+                15 min target on Free
+              </UBadge>
+            </div>
+            <p class="mt-0.5 text-sm text-muted">
+              Keep waiting conversations visible in the inbox, then optionally email the responsible teammate.
+            </p>
+          </div>
+
+          <div class="mt-5 grid gap-5 sm:grid-cols-2">
+            <UFormField
+              label="Reply target"
+              :help="workspace?.entitlement.isPro ? 'A conversation becomes overdue after this time.' : 'Upgrade to Pro to customize the target.'"
+            >
+              <USelect
+                v-model="reminderDelay"
+                :items="reminderOptions"
+                label-key="label"
+                value-key="value"
+                :disabled="!isAdmin || !workspace?.entitlement.features.customReminderDelay"
+                class="w-full"
+              />
+            </UFormField>
+            <div class="flex items-center justify-between gap-4 rounded-xl bg-default px-4 py-3 ring-1 ring-default">
+              <div>
+                <p class="text-sm font-medium text-highlighted">
+                  Email reminders
+                </p>
+                <p class="text-xs text-muted">
+                  Notify the assigned teammate, or admins when unassigned.
+                </p>
+              </div>
+              <USwitch
+                v-model="reminderEnabled"
+                :disabled="!isAdmin"
+                aria-label="Enable unanswered-message email reminders"
+              />
+            </div>
+          </div>
+
+          <div
+            v-if="reminderEnabled"
+            class="mt-4 flex items-center justify-between gap-4 rounded-xl bg-default px-4 py-3 ring-1 ring-default"
+          >
+            <div>
+              <p class="text-sm font-medium text-highlighted">
+                Send emails during business hours only
+              </p>
+              <p class="text-xs text-muted">
+                Email delivery pauses while your team is away. The inbox target timer keeps running.
+              </p>
+            </div>
+            <USwitch
+              v-model="reminderBusinessHoursOnly"
+              :disabled="!isAdmin || !workspace?.entitlement.features.businessHoursReminders"
+              aria-label="Send reminder emails during business hours only"
+            />
+          </div>
+
+          <div class="mt-4 flex flex-wrap items-center gap-3">
+            <UButton
+              v-if="isAdmin"
+              color="neutral"
+              :loading="savingReminder"
+              @click="saveReminder"
+            >
+              Save response settings
+            </UButton>
+            <NuxtLink
+              v-if="!workspace?.entitlement.isPro"
+              to="/billing"
+              class="text-xs font-medium text-primary-600 hover:underline dark:text-primary-400"
+            >
+              See Pro features
+            </NuxtLink>
+          </div>
         </section>
 
         <!-- Canned replies -->

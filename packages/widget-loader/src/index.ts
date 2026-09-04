@@ -11,6 +11,8 @@ interface Identity {
   email?: string
   // HMAC-SHA256 of user_id (or email), computed on the business's server
   hash?: string
+  // Optional HMAC-SHA256 of the normalized email when user_id is the subject.
+  email_hash?: string
 }
 
 interface PerchApi {
@@ -227,8 +229,9 @@ function init() {
       const name = str(traits.name, 100)
       const email = str(traits.email, 200)
       const hash = str(traits.hash, 64)
+      const emailHash = str(traits.email_hash, 64)
       if (!userId && !name && !email) return
-      identity = { user_id: userId, name, email, hash }
+      identity = { user_id: userId, name, email, hash, email_hash: emailHash }
       sendIdentity()
     },
     open: () => void setOpen(true),

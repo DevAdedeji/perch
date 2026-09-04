@@ -15,7 +15,8 @@ const { data: groups, error, status, refresh } = await useFetch<PublicHelpGroup[
   query: computed(() => ({
     site_id: siteId.value,
     ...(submittedSearch.value ? { q: submittedSearch.value } : {})
-  }))
+  })),
+  dedupe: 'cancel'
 })
 
 if (import.meta.server && error.value) {
@@ -40,9 +41,18 @@ useSeoMeta({
   ogUrl: () => `${siteUrl.value}/help/${siteId.value}`
 })
 
+let searchTimer: ReturnType<typeof setTimeout> | undefined
+
 function updateSearchUrl() {
-  const q = search.value.trim()
+  clearTimeout(searchTimer)
+  const q = search.value.trim().slice(0, 80)
+  if (q === submittedSearch.value) return
   void router.replace({ query: q ? { q } : {} })
+}
+
+function scheduleSearch() {
+  clearTimeout(searchTimer)
+  searchTimer = setTimeout(updateSearchUrl, 300)
 }
 
 function retryLoad() {
@@ -52,6 +62,8 @@ function retryLoad() {
 watch(() => route.query.q, (value) => {
   search.value = typeof value === 'string' ? value.slice(0, 80) : ''
 })
+
+onBeforeUnmount(() => clearTimeout(searchTimer))
 </script>
 
 <template>
@@ -85,7 +97,9 @@ watch(() => route.query.q, (value) => {
             placeholder="Search help articles"
             aria-label="Search help articles"
             autocomplete="off"
+            @input="scheduleSearch"
             @blur="updateSearchUrl"
+            @keydown.esc="search = ''; updateSearchUrl()"
           />
         </form>
       </div>

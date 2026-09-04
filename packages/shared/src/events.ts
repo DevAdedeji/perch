@@ -86,6 +86,12 @@ export interface ConversationUpdatedPayload {
   priority: ConversationPriority
   snoozed_until: string | null
   last_message_at: string
+  is_spam: boolean
+}
+
+export interface VisitorMessagingPayload {
+  /** Privacy-safe availability only; no moderation reason crosses into the widget. */
+  available: boolean
 }
 
 export interface ConversationRemovedPayload {
@@ -126,6 +132,7 @@ export interface BusinessPresencePayload {
 }
 
 export interface TeamMessagePayload {
+  client_message_id?: string | null
   id: string
   workspace_id: string
   member_id: string
@@ -156,6 +163,12 @@ export interface ConversationReadReceiptPayload {
 
 export interface AutomationReminderPayload {
   notification_id: string
+  conversation_id: string
+  created_at: string
+}
+
+export interface UnansweredReminderPayload {
+  delivery_id: string
   conversation_id: string
   created_at: string
 }
@@ -203,12 +216,14 @@ export type ServerEvent = | { type: 'message.new', payload: MessageDTO }
   | { type: 'team.message', payload: TeamMessagePayload }
   | { type: 'member.notification', payload: MemberNotificationPayload }
   | { type: 'automation.reminder', payload: AutomationReminderPayload }
+  | { type: 'unanswered.reminder', payload: UnansweredReminderPayload }
   | { type: 'conversation.refresh', payload: ConversationRefreshPayload }
   | { type: 'visitor.online', payload: LiveVisitorDTO }
   | { type: 'visitor.offline', payload: VisitorOfflinePayload }
   | { type: 'visitor.page', payload: VisitorPageChangedPayload }
   | { type: 'trigger.fire', payload: TriggerFirePayload }
   | { type: 'visitor.conversation.started', payload: ConversationStartedPayload }
+  | { type: 'visitor.messaging', payload: VisitorMessagingPayload }
 
 export type ServerEventType = ServerEvent['type']
 

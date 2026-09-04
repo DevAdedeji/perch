@@ -6,27 +6,28 @@ useHead({ title: 'Team · Perch' })
 
 interface Member {
   id: string
-  userId: string
   name: string
-  email: string
+  email?: string
   role: 'admin' | 'agent'
   presence: 'online' | 'away' | 'offline'
-  openCount: number
-  resolvedCount: number
-  csatGood: number
-  csatBad: number
+  openCount?: number
+  resolvedCount?: number
+  csatGood?: number
+  csatBad?: number
 }
 
-const { currentWorkspace, user } = useAuth()
+const { currentWorkspace } = useAuth()
 const toast = useToast()
 const { copy } = useCopyToClipboard()
 const rt = useRealtime()
 
 const wid = computed(() => currentWorkspace.value?.workspaceId ?? null)
 const isAdmin = computed(() => currentWorkspace.value?.role === 'admin')
-// cached across navigation — skeletons only on the first visit of a session
-const members = useState<Member[]>('team:members', () => [])
+const rosters = useState<Record<string, Member[]>>('team:membersByWorkspace', () => ({}))
+const members = computed(() => wid.value ? rosters.value[wid.value] ?? [] : [])
 const loading = ref(false)
+const loadError = ref('')
+let loadSequence = 0
 
 const onlineCount = computed(() => members.value.filter(m => m.presence === 'online').length)
 
@@ -50,13 +51,15 @@ function inviteAnother() {
 }
 async function createInvite() {
   const emailAddr = inviteEmail.value.trim()
-  if (!emailAddr || inviting.value) return
+  const workspaceId = wid.value
+  if (!workspaceId || !emailAddr || inviting.value) return
   inviting.value = true
   try {
-    const res = await $fetch<{ invites: { url: string, emailed: boolean }[] }>(`/api/workspaces/${wid.value}/invites`, {
+    const res = await $fetch<{ invites: { url: string, emailed: boolean }[] }>(`/api/workspaces/${workspaceId}/invites`, {
       method: 'POST',
       body: { invites: [{ email: emailAddr, role: inviteRole.value }] }
     })
+    if (wid.value !== workspaceId) return
     inviteLink.value = res.invites[0]!.url
     inviteEmailed.value = res.invites[0]!.emailed
     inviteEmail.value = ''
@@ -69,13 +72,18 @@ async function createInvite() {
 
 /* data + live presence */
 async function load() {
-  if (!wid.value) return
-  // stale-while-revalidate: render cached members instantly, refresh silently
+  const workspaceId = wid.value
+  if (!workspaceId) return
+  const sequence = ++loadSequence
   if (!members.value.length) loading.value = true
+  loadError.value = ''
   try {
-    members.value = await $fetch<Member[]>(`/api/workspaces/${wid.value}/members`)
+    const roster = await $fetch<Member[]>(`/api/workspaces/${workspaceId}/members`)
+    rosters.value = { ...rosters.value, [workspaceId]: roster }
+  } catch (error) {
+    if (sequence === loadSequence) loadError.value = getErrorMessage(error, 'The team roster could not load')
   } finally {
-    loading.value = false
+    if (sequence === loadSequence) loading.value = false
   }
 }
 
@@ -94,24 +102,50 @@ onMounted(() => {
   load()
 })
 onBeforeUnmount(() => off?.())
-watch(wid, load)
+watch(wid, () => {
+  pendingRemoval.value = null
+  inviteModalOpen.value = false
+  load()
+})
 
 /* actions */
 async function changeRole(m: Member, role: 'admin' | 'agent') {
+  const workspaceId = wid.value
+  if (!workspaceId) return
   try {
-    await $fetch(`/api/workspaces/${wid.value}/members/${m.id}`, { method: 'PATCH', body: { role } })
+    await $fetch(`/api/workspaces/${workspaceId}/members/${m.id}`, { method: 'PATCH', body: { role } })
     m.role = role
   } catch (e) {
     toast.add({ title: getErrorMessage(e, 'Could not change role'), color: 'error' })
   }
 }
 async function removeMember(m: Member) {
+  const workspaceId = wid.value
+  if (!workspaceId) return
   try {
-    await $fetch(`/api/workspaces/${wid.value}/members/${m.id}`, { method: 'DELETE' })
-    members.value = members.value.filter(x => x.id !== m.id)
+    await $fetch(`/api/workspaces/${workspaceId}/members/${m.id}`, { method: 'DELETE' })
+    rosters.value = {
+      ...rosters.value,
+      [workspaceId]: (rosters.value[workspaceId] ?? []).filter(x => x.id !== m.id)
+    }
+    if (wid.value === workspaceId) pendingRemoval.value = null
     toast.add({ title: `Removed ${m.name}`, color: 'neutral' })
   } catch (e) {
     toast.add({ title: getErrorMessage(e, 'Could not remove'), color: 'error' })
+  }
+}
+
+const pendingRemoval = ref<Member | null>(null)
+const removingMember = ref(false)
+
+async function confirmMemberRemoval() {
+  const member = pendingRemoval.value
+  if (!member || removingMember.value) return
+  removingMember.value = true
+  try {
+    await removeMember(member)
+  } finally {
+    removingMember.value = false
   }
 }
 function initials(n: string) {
@@ -127,24 +161,30 @@ function presenceText(p: string) {
     : p === 'away' ? 'text-amber-600 dark:text-amber-400' : 'text-dimmed'
 }
 
+function isSelf(member: Member) {
+  return member.id === currentWorkspace.value?.memberId
+}
+
 // online first, then away, then offline — alphabetical within each group
 const presenceRank = (p: string) => (p === 'online' ? 0 : p === 'away' ? 1 : 2)
 const sortedMembers = computed(() =>
   [...members.value].sort((a, b) => presenceRank(a.presence) - presenceRank(b.presence) || a.name.localeCompare(b.name))
 )
 
-// §3.3 workload view: totals for the at-a-glance strip
-const totalOpen = computed(() => members.value.reduce((n, m) => n + m.openCount, 0))
+// Admin-only workload total for the at-a-glance strip.
+const totalOpen = computed(() => members.value.reduce((total, member) => total + (member.openCount ?? 0), 0))
 
 // §13.0.1 CSAT: percentage of thumbs-up among rated conversations
 function csatLabel(m: Member): string {
-  const total = m.csatGood + m.csatBad
-  return total ? `${Math.round((m.csatGood / total) * 100)}%` : '—'
+  const good = m.csatGood ?? 0
+  const total = good + (m.csatBad ?? 0)
+  return total ? `${Math.round((good / total) * 100)}%` : '—'
 }
 function csatTone(m: Member): string {
-  const total = m.csatGood + m.csatBad
+  const good = m.csatGood ?? 0
+  const total = good + (m.csatBad ?? 0)
   if (!total) return 'text-dimmed'
-  const pct = m.csatGood / total
+  const pct = good / total
   return pct >= 0.8
     ? 'font-semibold text-green-600 dark:text-green-500'
     : pct >= 0.5 ? 'font-semibold text-amber-600 dark:text-amber-400' : 'font-semibold text-red-500'
@@ -160,7 +200,9 @@ function csatTone(m: Member): string {
             Team
           </h1>
           <p class="text-sm text-muted mt-0.5">
-            Who's on support, who's online, and who's carrying the load.
+            {{ isAdmin
+              ? "Who's on support, who's online, and who's carrying the load."
+              : "See who's on support and who's available right now." }}
           </p>
         </div>
         <UButton
@@ -185,9 +227,47 @@ function csatTone(m: Member): string {
         />
       </div>
 
+      <div
+        v-else-if="loadError && !members.length"
+        class="mt-6 rounded-2xl bg-elevated/30 px-6 py-10 text-center ring-1 ring-default"
+        role="alert"
+      >
+        <UIcon
+          name="i-lucide-users-round"
+          class="mx-auto size-8 text-dimmed"
+        />
+        <p class="mt-3 text-sm font-medium text-highlighted">
+          Team roster could not load
+        </p>
+        <p class="mt-1 text-sm text-muted">
+          {{ loadError }}
+        </p>
+        <UButton
+          class="mt-4"
+          color="neutral"
+          variant="outline"
+          icon="i-lucide-refresh-cw"
+          @click="load()"
+        >
+          Try again
+        </UButton>
+      </div>
+
       <template v-else>
+        <UAlert
+          v-if="loadError"
+          class="mt-6"
+          color="warning"
+          variant="subtle"
+          title="Team roster could not refresh"
+          :description="`${loadError} The last loaded roster is shown below.`"
+          icon="i-lucide-cloud-alert"
+        />
         <!-- at-a-glance -->
-        <div class="mt-6 grid grid-cols-3 divide-x divide-default rounded-2xl border-glow bg-elevated/30 overflow-hidden">
+        <div
+          class="mt-6 grid divide-x divide-default rounded-2xl border-glow bg-elevated/30 overflow-hidden"
+          :class="isAdmin ? 'grid-cols-3' : 'grid-cols-2'"
+        >
           <div class="px-5 py-4">
             <p class="font-display text-2xl font-bold text-highlighted tabular-nums">
               {{ members.length }}
@@ -204,7 +284,10 @@ function csatTone(m: Member): string {
               Online now
             </p>
           </div>
-          <div class="px-5 py-4">
+          <div
+            v-if="isAdmin"
+            class="px-5 py-4"
+          >
             <p class="font-display text-2xl font-bold text-highlighted tabular-nums">
               {{ totalOpen }}
             </p>
@@ -226,13 +309,20 @@ function csatTone(m: Member): string {
                   <th class="px-3 py-2.5 text-left font-medium">
                     Status
                   </th>
-                  <th class="px-3 py-2.5 text-center font-medium">
+                  <th
+                    v-if="isAdmin"
+                    class="px-3 py-2.5 text-center font-medium"
+                  >
                     Handling now
                   </th>
-                  <th class="px-3 py-2.5 text-center font-medium">
+                  <th
+                    v-if="isAdmin"
+                    class="px-3 py-2.5 text-center font-medium"
+                  >
                     Resolved
                   </th>
                   <th
+                    v-if="isAdmin"
                     class="px-3 py-2.5 text-center font-medium"
                     title="Thumbs-up share of rated conversations"
                   >
@@ -262,11 +352,14 @@ function csatTone(m: Member): string {
                         <p class="flex items-center gap-1.5 text-sm font-semibold text-highlighted">
                           <span class="truncate">{{ m.name }}</span>
                           <span
-                            v-if="m.userId === user?.id"
+                            v-if="isSelf(m)"
                             class="shrink-0 text-[10px] font-normal text-dimmed"
                           >(you)</span>
                         </p>
-                        <p class="truncate text-xs text-muted">
+                        <p
+                          v-if="isAdmin && m.email"
+                          class="truncate text-xs text-muted"
+                        >
                           {{ m.email }}
                         </p>
                       </div>
@@ -282,24 +375,29 @@ function csatTone(m: Member): string {
                     </span>
                   </td>
                   <td
+                    v-if="isAdmin"
                     class="px-3 py-3 text-center tabular-nums"
-                    :class="m.openCount > 0 ? 'font-semibold text-primary-600 dark:text-primary-400' : 'text-dimmed'"
+                    :class="(m.openCount ?? 0) > 0 ? 'font-semibold text-primary-600 dark:text-primary-400' : 'text-dimmed'"
                   >
                     {{ m.openCount }}
                   </td>
-                  <td class="px-3 py-3 text-center tabular-nums text-muted">
+                  <td
+                    v-if="isAdmin"
+                    class="px-3 py-3 text-center tabular-nums text-muted"
+                  >
                     {{ m.resolvedCount }}
                   </td>
                   <td
+                    v-if="isAdmin"
                     class="px-3 py-3 text-center tabular-nums"
                     :class="csatTone(m)"
-                    :title="`${m.csatGood} 👍 · ${m.csatBad} 👎`"
+                    :title="`${m.csatGood ?? 0} 👍 · ${m.csatBad ?? 0} 👎`"
                   >
                     {{ csatLabel(m) }}
                   </td>
                   <td class="px-3 py-3 whitespace-nowrap">
                     <USelect
-                      v-if="isAdmin && m.userId !== user?.id"
+                      v-if="isAdmin && !isSelf(m)"
                       :model-value="m.role"
                       :items="['agent', 'admin']"
                       size="sm"
@@ -321,14 +419,14 @@ function csatTone(m: Member): string {
                     class="px-3 py-3 text-right"
                   >
                     <UButton
-                      v-if="m.userId !== user?.id"
+                      v-if="!isSelf(m)"
                       color="error"
                       variant="ghost"
                       size="sm"
                       icon="i-lucide-user-minus"
                       square
-                      aria-label="Remove"
-                      @click="removeMember(m)"
+                      :aria-label="`Remove ${m.name}`"
+                      @click="pendingRemoval = m"
                     />
                   </td>
                 </tr>
@@ -368,6 +466,14 @@ function csatTone(m: Member): string {
               size="lg"
               class="w-full"
             />
+            <p
+              class="mt-2 text-xs leading-relaxed"
+              :class="inviteRole === 'admin' ? 'text-amber-700 dark:text-amber-400' : 'text-dimmed'"
+            >
+              {{ inviteRole === 'admin'
+                ? 'Admins can manage billing, installation, teammates, security settings, and workspace deletion.'
+                : 'Agents can reply to customers and collaborate, but cannot manage billing or workspace security.' }}
+            </p>
           </UFormField>
         </div>
 
@@ -437,6 +543,34 @@ function csatTone(m: Member): string {
               Done
             </UButton>
           </template>
+        </div>
+      </template>
+    </UModal>
+
+    <UModal
+      :open="Boolean(pendingRemoval)"
+      :title="`Remove ${pendingRemoval?.name ?? 'this teammate'}?`"
+      :description="`${pendingRemoval?.name ?? 'This teammate'} will immediately lose access to this workspace. Their existing conversation history stays intact.`"
+      @update:open="(open: boolean) => { if (!open && !removingMember) pendingRemoval = null }"
+    >
+      <template #footer>
+        <div class="flex w-full flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <UButton
+            color="neutral"
+            variant="ghost"
+            :disabled="removingMember"
+            @click="pendingRemoval = null"
+          >
+            Keep teammate
+          </UButton>
+          <UButton
+            color="error"
+            icon="i-lucide-user-minus"
+            :loading="removingMember"
+            @click="confirmMemberRemoval"
+          >
+            Remove {{ pendingRemoval?.name }}
+          </UButton>
         </div>
       </template>
     </UModal>

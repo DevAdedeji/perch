@@ -18,6 +18,9 @@ import {
 import type { AutomationRule, Conversation, Visitor } from '@perch/db'
 import type { AutomationRuleConfig } from '@perch/shared'
 import { channels } from '@perch/shared'
+import { enqueueWebhookEvent } from './webhooks'
+import { agentWorkspaceAuthorization } from './realtime'
+import { safeErrorSummary } from './request-security'
 
 type Database = ReturnType<typeof useDb>
 class AutomationSkipped extends Error {}
@@ -173,7 +176,11 @@ export async function runEntryAutomations(conversation: Conversation, visitor: V
         if (matchesVipRule(config, visitor)) tagsChanged = await applyVipTag(rule, current) || tagsChanged
       }
     } catch (error) {
-      console.error('[automation] entry rule failed', { ruleId: rule.id, conversationId: conversation.id, error })
+      console.error('[automation] entry rule failed', {
+        ruleId: rule.id,
+        conversationId: conversation.id,
+        ...safeErrorSummary(error)
+      })
     }
   }
   current = await resolveEntryConversation(current)
@@ -217,7 +224,10 @@ async function runReminder(rule: AutomationRule, candidate: Conversation, now: D
       conversation_id: result.conversationId,
       created_at: result.createdAt.toISOString()
     }
-  }, context => context.role === 'agent' && context.memberId === result.memberId)
+  }, (context) => {
+    const authorization = agentWorkspaceAuthorization(context, candidate.workspaceId)
+    return authorization?.memberId === result.memberId
+  })
 }
 
 async function runAutoClose(rule: AutomationRule, candidate: Conversation, cutoff: Date, now: Date) {
@@ -245,6 +255,9 @@ async function runAutoClose(rule: AutomationRule, candidate: Conversation, cutof
         eventType: 'resolution',
         occurredAt: now
       })
+      await enqueueWebhookEvent(tx, updated.workspaceId, 'conversation.resolved', {
+        conversation: serializeConversation(updated)
+      }, `conversation.resolved:${updated.id}:${updated.updatedAt.toISOString()}`)
     } else {
       await tx.delete(automationExecutions).where(eq(automationExecutions.id, execution.id))
     }
@@ -252,7 +265,6 @@ async function runAutoClose(rule: AutomationRule, candidate: Conversation, cutof
   })
   if (!closed) return
   publishConversationUpdate(closed)
-  dispatchWebhooks(closed.workspaceId, 'conversation.resolved', { conversation: serializeConversation(closed) })
 }
 
 export async function runAutomationSweep(now = new Date()) {
@@ -292,7 +304,11 @@ export async function runAutomationSweep(now = new Date()) {
         if (rule.type === 'inactivity_reminder') await runReminder(rule, conversation, now)
         else await runAutoClose(rule, conversation, cutoff, now)
       } catch (error) {
-        console.error('[automation] inactivity rule failed', { ruleId: rule.id, conversationId: conversation.id, error })
+        console.error('[automation] inactivity rule failed', {
+          ruleId: rule.id,
+          conversationId: conversation.id,
+          ...safeErrorSummary(error)
+        })
       }
     }
   }

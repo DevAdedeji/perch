@@ -1,141 +1,42 @@
 import { createHmac, randomUUID } from 'node:crypto'
-import { lookup } from 'node:dns/promises'
-import { request as httpRequest } from 'node:http'
-import { request as httpsRequest } from 'node:https'
-import { isIP } from 'node:net'
-import { and, desc, eq, sql, webhookDeliveries, webhookEndpoints } from '@perch/db'
-import type { WebhookEndpoint } from '@perch/db'
-
-/**
- * Outbound webhooks: HMAC-signed POSTs to customer endpoints on conversation
- * events. Delivery is fire-and-forget with retries — a customer's slow server
- * must never slow down (or fail) a chat request. Receivers verify with:
- *   HMAC-SHA256(secret, `${t}.${rawBody}`) === v1   (from X-Perch-Signature "t=…,v1=…")
- */
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  inArray,
+  lt,
+  or,
+  sql,
+  webhookDeliveries,
+  webhookEndpoints,
+  webhookEvents,
+  webhookJobs
+} from '@perch/db'
+import type { Database, WebhookEndpoint, WebhookJob } from '@perch/db'
+import { postWebhook, safeWebhookError } from './webhook-security'
 
 export const WEBHOOK_EVENTS = ['conversation.created', 'message.created', 'conversation.resolved'] as const
 export type WebhookEventName = typeof WEBHOOK_EVENTS[number]
 
-const TIMEOUT_MS = 5_000
-// attempt delays: immediate, then 5s and 25s backoff
-const RETRY_DELAYS_MS = [0, 5_000, 25_000]
-const KEEP_DELIVERIES = 50
+export const MAX_WEBHOOK_ATTEMPTS = 6
+const CLAIM_LIMIT = 25
+const CLAIM_STALE_MS = 10 * 60_000
+const HISTORY_RETENTION_MS = 30 * 24 * 60 * 60_000
+const KEEP_STANDALONE_ATTEMPTS = 50
+const RETRY_DELAYS_MS = [10_000, 60_000, 5 * 60_000, 30 * 60_000, 2 * 60 * 60_000]
 
-/* pure helpers (unit-tested in test/webhooks.test.ts) */
+type DbTransaction = Parameters<Parameters<Database['transaction']>[0]>[0]
 
-/** Sign a payload Stripe-style: hex HMAC-SHA256 over `${timestamp}.${body}`. */
-export function signWebhook(secret: string, timestamp: number, body: string): string {
-  return createHmac('sha256', secret).update(`${timestamp}.${body}`).digest('hex')
+export function webhookDeliveryEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.PERCH_WEBHOOK_DELIVERY_ENABLED === 'true'
 }
 
-/**
- * Syntactic SSRF guard. Delivery also resolves and pins the target address.
- */
-export function isSafeWebhookUrl(url: string): boolean {
-  let u: URL
-  try {
-    u = new URL(url)
-  } catch {
-    return false
-  }
-  if (u.protocol !== 'https:' && u.protocol !== 'http:') return false
-  if (u.username || u.password) return false
-  const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, '')
-  if (!host || host === 'localhost') return false
-  if (host.endsWith('.local') || host.endsWith('.internal')) return false
-  if (isIP(host) && !isPublicIp(host)) return false
-  return true
-}
-
-/** Only globally routable unicast addresses may receive webhooks. */
-export function isPublicIp(input: string): boolean {
-  const address = input.toLowerCase().replace(/^\[|\]$/g, '')
-  const version = isIP(address)
-  if (version === 4) {
-    const octets = address.split('.').map(Number)
-    const [a, b] = octets
-    if (a === undefined || b === undefined) return false
-    return !(a === 0 || a === 10 || a === 127 || a >= 224
-      || (a === 100 && b >= 64 && b <= 127)
-      || (a === 169 && b === 254)
-      || (a === 172 && b >= 16 && b <= 31)
-      || (a === 192 && b === 0)
-      || (a === 192 && b === 168)
-      || (a === 198 && (b === 18 || b === 19)))
-  }
-  if (version === 6) {
-    if (address === '::' || address === '::1') return false
-    if (/^f[cd]/.test(address) || /^fe[89ab]/.test(address) || /^ff/.test(address)) return false
-    const mapped = address.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/)
-    if (mapped?.[1]) return isPublicIp(mapped[1])
-    return true
-  }
-  return false
-}
-
-async function resolvePublicTarget(url: string) {
-  if (!isSafeWebhookUrl(url)) throw new Error('Webhook target is not allowed')
-  const parsed = new URL(url)
-  const hostname = parsed.hostname.replace(/^\[|\]$/g, '')
-  const literalVersion = isIP(hostname)
-  const addresses = literalVersion
-    ? [{ address: hostname, family: literalVersion }]
-    : await lookup(hostname, { all: true, verbatim: true })
-  if (!addresses.length || addresses.some(entry => !isPublicIp(entry.address))) {
-    throw new Error('Webhook target resolves to a non-public address')
-  }
-  return { parsed, target: addresses[0]! }
-}
-
-async function postWebhook(url: string, body: string, headers: Record<string, string>): Promise<number> {
-  const { parsed, target } = await resolvePublicTarget(url)
-  return await new Promise<number>((resolve, reject) => {
-    const request = (parsed.protocol === 'https:' ? httpsRequest : httpRequest)(parsed, {
-      method: 'POST',
-      headers: { ...headers, 'content-length': String(Buffer.byteLength(body)) },
-      lookup: (_hostname, _options, callback) => callback(null, target.address, target.family as 4 | 6)
-    }, (response) => {
-      response.resume()
-      response.once('end', () => {
-        clearTimeout(timer)
-        const status = response.statusCode ?? 0
-        if (status >= 200 && status < 300) resolve(status)
-        else reject(Object.assign(new Error(`Webhook returned HTTP ${status}`), { status }))
-      })
-    })
-    const timer = setTimeout(() => request.destroy(new Error('Webhook delivery timed out')), TIMEOUT_MS)
-    request.once('error', (error) => {
-      clearTimeout(timer)
-      reject(error)
-    })
-    request.end(body)
-  })
-}
-
-/* endpoint cache (dispatch runs on hot message paths) */
-
-interface CacheEntry { at: number, endpoints: WebhookEndpoint[] }
-
-const CACHE_TTL = 30_000
-const g = globalThis as unknown as { __perchWebhookCache?: Map<string, CacheEntry> }
-const cache: Map<string, CacheEntry> = (g.__perchWebhookCache ??= new Map())
-
-async function getEndpoints(workspaceId: string): Promise<WebhookEndpoint[]> {
-  const hit = cache.get(workspaceId)
-  if (hit && Date.now() - hit.at < CACHE_TTL) return hit.endpoints
-  const endpoints = await useDb().query.webhookEndpoints.findMany({
-    where: and(eq(webhookEndpoints.workspaceId, workspaceId), eq(webhookEndpoints.enabled, true))
-  })
-  cache.set(workspaceId, { at: Date.now(), endpoints })
-  return endpoints
-}
-
-/** Call after any webhook CRUD so dispatch sees the change immediately. */
-export function invalidateWebhookCache(workspaceId: string) {
-  cache.delete(workspaceId)
-}
-
-/* delivery */
+export type WebhookTransport = (
+  url: string,
+  body: string,
+  headers: Record<string, string>
+) => Promise<number>
 
 export interface DeliveryResult {
   ok: boolean
@@ -144,106 +45,451 @@ export interface DeliveryResult {
   error: string | null
 }
 
-/** One signed POST to one endpoint; records a `webhook_deliveries` row. */
+export function signWebhook(secret: string, timestamp: number, body: string): string {
+  return createHmac('sha256', secret).update(`${timestamp}.${body}`).digest('hex')
+}
+
+export function webhookRetryAt(attempt: number, now = new Date()): Date {
+  const delay = RETRY_DELAYS_MS[Math.max(0, Math.min(RETRY_DELAYS_MS.length - 1, attempt - 1))]!
+  return new Date(now.getTime() + delay)
+}
+
+export function isRetryableWebhookStatus(status: number | null): boolean {
+  return status === null || status === 408 || status === 425 || status === 429 || status >= 500
+}
+
+export function webhookEnvelope(
+  event: string,
+  data: Record<string, unknown>,
+  identity: { id?: string, createdAt?: Date } = {}
+): string {
+  return JSON.stringify({
+    id: identity.id ?? randomUUID(),
+    event,
+    created_at: (identity.createdAt ?? new Date()).toISOString(),
+    data
+  })
+}
+
+export async function enqueueWebhookEvent(
+  tx: DbTransaction,
+  workspaceId: string,
+  event: WebhookEventName,
+  data: Record<string, unknown>,
+  dedupeKey: string,
+  options: { enabled?: boolean } = {}
+) {
+  if (!(options.enabled ?? webhookDeliveryEnabled())) return null
+  const endpoints = await tx.select({ id: webhookEndpoints.id }).from(webhookEndpoints).where(and(
+    eq(webhookEndpoints.workspaceId, workspaceId),
+    eq(webhookEndpoints.enabled, true),
+    sql`${event} = any(${webhookEndpoints.events})`
+  ))
+  if (!endpoints.length) return null
+
+  const [record] = await tx.insert(webhookEvents).values({
+    workspaceId,
+    event,
+    dedupeKey: dedupeKey.slice(0, 300),
+    data
+  }).onConflictDoNothing({
+    target: [webhookEvents.workspaceId, webhookEvents.dedupeKey]
+  }).returning()
+  if (!record) return null
+
+  await tx.insert(webhookJobs).values(endpoints.map(endpoint => ({
+    workspaceId,
+    endpointId: endpoint.id,
+    eventId: record.id
+  }))).onConflictDoNothing()
+  return record.id
+}
+
+async function recordAttempt(input: {
+  db: Database
+  endpointId: string
+  jobId?: string
+  event: string
+  attempt: number
+  result: DeliveryResult
+}) {
+  try {
+    await input.db.insert(webhookDeliveries).values({
+      endpointId: input.endpointId,
+      jobId: input.jobId,
+      event: input.event,
+      ok: input.result.ok,
+      httpStatus: input.result.http_status,
+      durationMs: input.result.duration_ms,
+      attempt: input.attempt,
+      error: input.result.error
+    })
+    if (!input.jobId) {
+      await input.db.execute(sql`
+        delete from webhook_deliveries
+        where endpoint_id = ${input.endpointId}
+          and job_id is null
+          and id not in (
+            select id from webhook_deliveries
+            where endpoint_id = ${input.endpointId} and job_id is null
+            order by created_at desc
+            limit ${KEEP_STANDALONE_ATTEMPTS}
+          )
+      `)
+    }
+  } catch {
+    console.error('[webhooks] could not record delivery attempt', {
+      endpointId: input.endpointId,
+      jobId: input.jobId ?? null,
+      attempt: input.attempt
+    })
+  }
+}
+
 export async function deliverOnce(
   endpoint: WebhookEndpoint,
   event: string,
   body: string,
-  attempt: number
+  attempt: number,
+  options: {
+    db?: Database
+    jobId?: string
+    idempotencyKey?: string
+    transport?: WebhookTransport
+    now?: Date
+  } = {}
 ): Promise<DeliveryResult> {
-  const timestamp = Math.floor(Date.now() / 1000)
+  const db = options.db ?? useDb()
+  const timestamp = Math.floor((options.now ?? new Date()).getTime() / 1000)
   const signature = signWebhook(endpoint.secret, timestamp, body)
   const started = Date.now()
-  let ok = false
-  let httpStatus: number | null
-  let error: string | null = null
+  let result: DeliveryResult
 
   try {
-    httpStatus = await postWebhook(endpoint.url, body, {
+    const httpStatus = await (options.transport ?? postWebhook)(endpoint.url, body, {
       'content-type': 'application/json',
       'x-perch-event': event,
+      'x-perch-idempotency-key': options.idempotencyKey ?? JSON.parse(body).id,
       'x-perch-signature': `t=${timestamp},v1=${signature}`
     })
-    ok = true
-  } catch (e) {
-    const fe = e as { status?: number, message?: string }
-    httpStatus = fe.status ?? null
-    error = (fe.message ?? 'delivery failed').slice(0, 500)
+    if (httpStatus < 200 || httpStatus >= 300) {
+      throw Object.assign(new Error(`Webhook returned HTTP ${httpStatus}`), { status: httpStatus })
+    }
+    result = { ok: true, http_status: httpStatus, duration_ms: Date.now() - started, error: null }
+  } catch (error) {
+    const failure = error as { status?: number }
+    result = {
+      ok: false,
+      http_status: failure.status ?? null,
+      duration_ms: Date.now() - started,
+      error: safeWebhookError(error)
+    }
   }
-  const durationMs = Date.now() - started
-
-  try {
-    const db = useDb()
-    await db.insert(webhookDeliveries).values({
-      endpointId: endpoint.id,
-      event,
-      ok,
-      httpStatus,
-      durationMs,
-      attempt,
-      error
-    })
-    // keep only the newest N rows per endpoint
-    await db.execute(sql`
-      delete from webhook_deliveries
-      where endpoint_id = ${endpoint.id}
-        and id not in (
-          select id from webhook_deliveries
-          where endpoint_id = ${endpoint.id}
-          order by created_at desc
-          limit ${KEEP_DELIVERIES}
-        )
-    `)
-  } catch (e) {
-    console.error('[webhooks] could not record delivery:', e)
-  }
-
-  return { ok, http_status: httpStatus, duration_ms: durationMs, error }
+  await recordAttempt({ db, endpointId: endpoint.id, jobId: options.jobId, event, attempt, result })
+  return result
 }
 
-async function deliverWithRetries(endpoint: WebhookEndpoint, event: string, body: string) {
-  for (let attempt = 1; attempt <= RETRY_DELAYS_MS.length; attempt++) {
-    const delay = RETRY_DELAYS_MS[attempt - 1]!
-    if (delay) await new Promise(resolve => setTimeout(resolve, delay))
-    const result = await deliverOnce(endpoint, event, body, attempt)
-    if (result.ok) return
-  }
-}
+async function claimWebhookJobs(db: Database, now: Date) {
+  return db.transaction(async (tx) => {
+    const stale = new Date(now.getTime() - CLAIM_STALE_MS)
+    const rows = await tx.select().from(webhookJobs).where(or(
+      and(
+        inArray(webhookJobs.status, ['pending', 'retrying']),
+        lt(webhookJobs.attempts, MAX_WEBHOOK_ATTEMPTS),
+        lt(webhookJobs.nextAttemptAt, new Date(now.getTime() + 1))
+      ),
+      and(
+        eq(webhookJobs.status, 'processing'),
+        sql`${webhookJobs.attempts} <= ${MAX_WEBHOOK_ATTEMPTS}`,
+        lt(webhookJobs.lockedAt, stale)
+      )
+    )).orderBy(asc(webhookJobs.nextAttemptAt), asc(webhookJobs.createdAt))
+      .limit(CLAIM_LIMIT)
+      .for('update', { skipLocked: true })
+    if (!rows.length) return []
 
-/** Build the wire envelope (also used by the "Send test" endpoint). */
-export function webhookEnvelope(event: string, data: Record<string, unknown>): string {
-  return JSON.stringify({ id: randomUUID(), event, created_at: new Date().toISOString(), data })
-}
-
-/**
- * Fan an event out to every enabled endpoint subscribed to it. Fire-and-forget:
- * returns immediately, never throws into the caller's request path.
- */
-export function dispatchWebhooks(workspaceId: string, event: WebhookEventName, data: Record<string, unknown>) {
-  void (async () => {
-    const endpoints = (await getEndpoints(workspaceId)).filter(e => e.events.includes(event))
-    if (!endpoints.length) return
-    const body = webhookEnvelope(event, data)
-    await Promise.all(endpoints.map(e => deliverWithRetries(e, event, body)))
-  })().catch(e => console.error('[webhooks] dispatch failed:', e))
-}
-
-/* deliveries listing (admin UI) */
-
-export async function recentDeliveries(endpointId: string, limit = 25) {
-  const rows = await useDb().query.webhookDeliveries.findMany({
-    where: eq(webhookDeliveries.endpointId, endpointId),
-    orderBy: [desc(webhookDeliveries.createdAt)],
-    limit
+    return tx.update(webhookJobs).set({
+      status: 'processing',
+      lockedAt: now,
+      lastAttemptAt: now,
+      attempts: sql`case when ${webhookJobs.status} = 'processing' then ${webhookJobs.attempts} else ${webhookJobs.attempts} + 1 end`,
+      updatedAt: sql`now()`
+    }).where(inArray(webhookJobs.id, rows.map(row => row.id))).returning()
   })
-  return rows.map(d => ({
-    id: d.id,
-    event: d.event,
-    ok: d.ok,
-    http_status: d.httpStatus,
-    duration_ms: d.durationMs,
-    attempt: d.attempt,
-    error: d.error,
-    created_at: d.createdAt.toISOString()
-  }))
+}
+
+async function jobContext(db: Database, job: WebhookJob) {
+  const [context] = await db.select({
+    endpoint: webhookEndpoints,
+    event: webhookEvents
+  }).from(webhookJobs)
+    .innerJoin(webhookEndpoints, eq(webhookEndpoints.id, webhookJobs.endpointId))
+    .innerJoin(webhookEvents, eq(webhookEvents.id, webhookJobs.eventId))
+    .where(and(
+      eq(webhookJobs.id, job.id),
+      eq(webhookJobs.workspaceId, job.workspaceId),
+      eq(webhookEndpoints.workspaceId, job.workspaceId),
+      eq(webhookEvents.workspaceId, job.workspaceId)
+    )).limit(1)
+  return context ?? null
+}
+
+async function cancelProcessingJob(db: Database, jobId: string, reason: string) {
+  await db.update(webhookJobs).set({
+    status: 'canceled',
+    nextAttemptAt: null,
+    lockedAt: null,
+    cancelReason: reason,
+    updatedAt: sql`now()`
+  }).where(and(eq(webhookJobs.id, jobId), eq(webhookJobs.status, 'processing')))
+}
+
+async function redactCompletedEvent(db: Database, eventId: string) {
+  const [remaining] = await db.select({ count: sql<number>`count(*)::int` }).from(webhookJobs).where(and(
+    eq(webhookJobs.eventId, eventId),
+    inArray(webhookJobs.status, ['pending', 'processing', 'retrying', 'dead_letter'])
+  ))
+  if (Number(remaining?.count ?? 0) === 0) {
+    await db.update(webhookEvents).set({ data: null }).where(eq(webhookEvents.id, eventId))
+  }
+}
+
+async function processWebhookJob(
+  db: Database,
+  job: WebhookJob,
+  now: Date,
+  transport?: WebhookTransport
+) {
+  const context = await jobContext(db, job)
+  if (!context) {
+    await cancelProcessingJob(db, job.id, 'missing_context')
+    return
+  }
+  if (!context.endpoint.enabled) {
+    await cancelProcessingJob(db, job.id, 'endpoint_disabled')
+    await redactCompletedEvent(db, job.eventId)
+    return
+  }
+  if (!context.endpoint.events.includes(context.event.event)) {
+    await cancelProcessingJob(db, job.id, 'event_unsubscribed')
+    await redactCompletedEvent(db, job.eventId)
+    return
+  }
+  if (!context.event.data) {
+    await cancelProcessingJob(db, job.id, 'payload_unavailable')
+    return
+  }
+
+  const body = webhookEnvelope(context.event.event, context.event.data, {
+    id: context.event.id,
+    createdAt: context.event.createdAt
+  })
+  const result = await deliverOnce(context.endpoint, context.event.event, body, job.attempts, {
+    db,
+    jobId: job.id,
+    idempotencyKey: context.event.id,
+    transport,
+    now
+  })
+  if (result.ok) {
+    const updated = await db.update(webhookJobs).set({
+      status: 'succeeded',
+      nextAttemptAt: null,
+      lockedAt: null,
+      deliveredAt: now,
+      lastHttpStatus: result.http_status,
+      lastDurationMs: result.duration_ms,
+      lastError: null,
+      cancelReason: null,
+      updatedAt: sql`now()`
+    }).where(and(eq(webhookJobs.id, job.id), eq(webhookJobs.status, 'processing'))).returning({ id: webhookJobs.id })
+    if (updated.length) await redactCompletedEvent(db, job.eventId)
+    return
+  }
+
+  const retryable = isRetryableWebhookStatus(result.http_status) && job.attempts < MAX_WEBHOOK_ATTEMPTS
+  await db.update(webhookJobs).set({
+    status: retryable ? 'retrying' : 'dead_letter',
+    nextAttemptAt: retryable ? webhookRetryAt(job.attempts, now) : null,
+    lockedAt: null,
+    lastHttpStatus: result.http_status,
+    lastDurationMs: result.duration_ms,
+    lastError: result.error,
+    updatedAt: sql`now()`
+  }).where(and(eq(webhookJobs.id, job.id), eq(webhookJobs.status, 'processing')))
+}
+
+async function pruneWebhookHistory(db: Database, now: Date) {
+  const cutoff = new Date(now.getTime() - HISTORY_RETENTION_MS)
+  await db.delete(webhookEvents).where(and(
+    lt(webhookEvents.createdAt, cutoff),
+    sql`not exists (
+      select 1 from webhook_jobs
+      where webhook_jobs.event_id = ${webhookEvents.id}
+        and webhook_jobs.status in ('pending', 'processing', 'retrying')
+    )`
+  ))
+}
+
+export async function runWebhookDeliverySweep(options: {
+  db?: Database
+  now?: Date
+  transport?: WebhookTransport
+} = {}) {
+  const db = options.db ?? useDb()
+  const now = options.now ?? new Date()
+  const jobs = await claimWebhookJobs(db, now)
+  for (let index = 0; index < jobs.length; index += 5) {
+    await Promise.all(jobs.slice(index, index + 5).map(job => processWebhookJob(db, job, now, options.transport)))
+  }
+  await db.execute(sql`
+    update webhook_events
+    set data = null
+    where data is not null
+      and not exists (
+        select 1 from webhook_jobs
+        where webhook_jobs.event_id = webhook_events.id
+          and webhook_jobs.status in ('pending', 'processing', 'retrying', 'dead_letter')
+      )
+  `)
+  await pruneWebhookHistory(db, now)
+  return { processed: jobs.length }
+}
+
+export async function cancelWebhookJobsForEndpoint(
+  tx: DbTransaction,
+  endpointId: string,
+  enabled: boolean,
+  subscribedEvents: string[]
+) {
+  const active = await tx.select({ id: webhookJobs.id, event: webhookEvents.event }).from(webhookJobs)
+    .innerJoin(webhookEvents, eq(webhookEvents.id, webhookJobs.eventId))
+    .where(and(
+      eq(webhookJobs.endpointId, endpointId),
+      inArray(webhookJobs.status, ['pending', 'processing', 'retrying'])
+    ))
+  const ids = active.filter(row => !enabled || !subscribedEvents.includes(row.event)).map(row => row.id)
+  if (!ids.length) return 0
+  const canceled = await tx.update(webhookJobs).set({
+    status: 'canceled',
+    nextAttemptAt: null,
+    lockedAt: null,
+    cancelReason: enabled ? 'event_unsubscribed' : 'endpoint_disabled',
+    updatedAt: sql`now()`
+  }).where(inArray(webhookJobs.id, ids)).returning({ id: webhookJobs.id })
+  await tx.execute(sql`
+    update webhook_events
+    set data = null
+    where data is not null
+      and not exists (
+        select 1 from webhook_jobs
+        where webhook_jobs.event_id = webhook_events.id
+          and webhook_jobs.status in ('pending', 'processing', 'retrying', 'dead_letter')
+      )
+  `)
+  return canceled.length
+}
+
+export class WebhookReplayError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'WebhookReplayError'
+  }
+}
+
+export async function replayWebhookJob(input: {
+  db?: Database
+  workspaceId: string
+  endpointId: string
+  jobId: string
+  requestId: string
+  now?: Date
+}) {
+  const db = input.db ?? useDb()
+  const now = input.now ?? new Date()
+  return db.transaction(async (tx) => {
+    const [job] = await tx.select().from(webhookJobs).where(and(
+      eq(webhookJobs.id, input.jobId),
+      eq(webhookJobs.endpointId, input.endpointId),
+      eq(webhookJobs.workspaceId, input.workspaceId)
+    )).for('update')
+    if (!job) throw new WebhookReplayError('Delivery not found')
+    if (job.lastReplayKey === input.requestId) return job
+    if (job.status !== 'dead_letter') throw new WebhookReplayError('Only failed deliveries can be retried')
+
+    const [context] = await tx.select({ endpoint: webhookEndpoints, event: webhookEvents })
+      .from(webhookEndpoints)
+      .innerJoin(webhookEvents, eq(webhookEvents.id, job.eventId))
+      .where(and(
+        eq(webhookEndpoints.id, input.endpointId),
+        eq(webhookEndpoints.workspaceId, input.workspaceId),
+        eq(webhookEvents.workspaceId, input.workspaceId)
+      )).limit(1)
+    if (!context?.endpoint.enabled || !context.endpoint.events.includes(context.event.event)) {
+      throw new WebhookReplayError('Enable this endpoint and event before retrying')
+    }
+    if (!context.event.data) throw new WebhookReplayError('This delivery is too old to retry')
+
+    const [updated] = await tx.update(webhookJobs).set({
+      status: 'pending',
+      attempts: 0,
+      nextAttemptAt: now,
+      lockedAt: null,
+      lastError: null,
+      cancelReason: null,
+      replayCount: sql`${webhookJobs.replayCount} + 1`,
+      lastReplayKey: input.requestId,
+      updatedAt: sql`now()`
+    }).where(eq(webhookJobs.id, job.id)).returning()
+    return updated!
+  })
+}
+
+export async function recentDeliveries(endpointId: string, limit = 25, db: Database = useDb()) {
+  const [jobs, standalone] = await Promise.all([
+    db.select({ job: webhookJobs, event: webhookEvents }).from(webhookJobs)
+      .innerJoin(webhookEvents, eq(webhookEvents.id, webhookJobs.eventId))
+      .where(eq(webhookJobs.endpointId, endpointId))
+      .orderBy(desc(webhookJobs.createdAt))
+      .limit(limit),
+    db.query.webhookDeliveries.findMany({
+      where: and(eq(webhookDeliveries.endpointId, endpointId), sql`${webhookDeliveries.jobId} is null`),
+      orderBy: [desc(webhookDeliveries.createdAt)],
+      limit
+    })
+  ])
+  return [
+    ...jobs.map(({ job, event }) => ({
+      id: job.id,
+      event: event.event,
+      status: job.status,
+      ok: job.status === 'succeeded',
+      http_status: job.lastHttpStatus,
+      duration_ms: job.lastDurationMs,
+      attempts: job.attempts,
+      next_attempt_at: job.nextAttemptAt?.toISOString() ?? null,
+      error: job.lastError,
+      cancel_reason: job.cancelReason,
+      replay_count: job.replayCount,
+      can_replay: job.status === 'dead_letter' && event.data !== null,
+      created_at: job.createdAt.toISOString(),
+      updated_at: job.updatedAt.toISOString()
+    })),
+    ...standalone.map(delivery => ({
+      id: delivery.id,
+      event: delivery.event,
+      status: delivery.ok ? 'succeeded' as const : 'dead_letter' as const,
+      ok: delivery.ok,
+      http_status: delivery.httpStatus,
+      duration_ms: delivery.durationMs,
+      attempts: delivery.attempt,
+      next_attempt_at: null,
+      error: delivery.error,
+      cancel_reason: null,
+      replay_count: 0,
+      can_replay: false,
+      created_at: delivery.createdAt.toISOString(),
+      updated_at: delivery.createdAt.toISOString()
+    }))
+  ].sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, limit)
 }

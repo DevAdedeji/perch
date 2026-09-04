@@ -7,6 +7,7 @@ useHead({ title: 'Nest · Perch' })
 
 interface NestMessage {
   id: string
+  client_message_id?: string | null
   member_id: string
   member_name: string
   content: string
@@ -32,22 +33,38 @@ const members = ref<NestMember[]>([])
 const onlineNames = computed(() => members.value.filter(member => member.presence === 'online').map(member => member.name))
 const pendingMessageId = useState<string | null>('nest:pendingMessage', () => null)
 const highlightedMessageId = ref<string | null>(null)
+let scopeVersion = 0
+let alive = true
+let loadVersion = 0
+let presenceVersion = 0
+const sending = ref(false)
+let retryAttempt: { signature: string, id: string } | null = null
 
 async function load() {
   if (!wid.value) return
+  const workspaceId = wid.value
+  const scope = scopeVersion
+  const version = ++loadVersion
   if (!thread.value.length) loading.value = true
   try {
-    thread.value = await $fetch<NestMessage[]>(`/api/workspaces/${wid.value}/team-chat`)
+    const data = await $fetch<NestMessage[]>(`/api/workspaces/${workspaceId}/team-chat`)
+    if (!alive || scope !== scopeVersion || version !== loadVersion || workspaceId !== wid.value) return
+    const unsent = thread.value.filter(message => message.pending)
+    thread.value = [...data, ...unsent.filter(message => !data.some(saved => saved.client_message_id === message.client_message_id))]
     scrollDown()
   } finally {
-    loading.value = false
+    if (scope === scopeVersion && version === loadVersion) loading.value = false
   }
 }
 
 async function loadPresence() {
   if (!wid.value) return
+  const workspaceId = wid.value
+  const scope = scopeVersion
+  const version = ++presenceVersion
   try {
-    members.value = await $fetch<NestMember[]>(`/api/workspaces/${wid.value}/members`)
+    const data = await $fetch<NestMember[]>(`/api/workspaces/${workspaceId}/members`)
+    if (alive && scope === scopeVersion && version === presenceVersion && workspaceId === wid.value) members.value = data
   } catch {
     // decorative
   }
@@ -105,8 +122,9 @@ async function scrollDown(smooth = false) {
 
 function onEvent(ev: ServerEvent) {
   if (ev.type !== 'team.message' || ev.payload.workspace_id !== wid.value) return
+  if (ev.payload.member_id === myMemberId.value && ev.payload.client_message_id === retryAttempt?.id) retryAttempt = null
   // our own optimistic bubble reconciles in place; teammates' just append
-  const pendingIdx = thread.value.findIndex(m => m.pending && m.content === ev.payload.content && m.member_id === ev.payload.member_id)
+  const pendingIdx = thread.value.findIndex(m => m.pending && ev.payload.client_message_id && m.client_message_id === ev.payload.client_message_id && m.member_id === ev.payload.member_id)
   if (pendingIdx !== -1) {
     thread.value.splice(pendingIdx, 1, ev.payload)
   } else if (!thread.value.some(m => m.id === ev.payload.id)) {
@@ -117,12 +135,19 @@ function onEvent(ev: ServerEvent) {
 
 async function send() {
   const content = draft.value.trim()
-  if (!content || !wid.value) return
+  if (!content || !wid.value || sending.value) return
+  const workspaceId = wid.value
+  const scope = scopeVersion
   const mentionedMemberIds = selectedMentionIds(content, pickedMentions)
+  const signature = JSON.stringify([workspaceId, myMemberId.value, content, [...mentionedMemberIds].sort()])
+  if (retryAttempt?.signature !== signature) retryAttempt = { signature, id: crypto.randomUUID() }
+  const requestId = retryAttempt.id
+  sending.value = true
   draft.value = ''
-  const tempId = `temp-${Date.now()}`
+  const tempId = `temp-${requestId}`
   thread.value.push({
     id: tempId,
+    client_message_id: requestId,
     member_id: myMemberId.value ?? '',
     member_name: user.value?.name ?? 'Me',
     content,
@@ -132,10 +157,11 @@ async function send() {
   })
   scrollDown(true)
   try {
-    const msg = await $fetch<NestMessage>(`/api/workspaces/${wid.value}/team-chat`, {
+    const msg = await $fetch<NestMessage>(`/api/workspaces/${workspaceId}/team-chat`, {
       method: 'POST',
-      body: { content, mentioned_member_ids: mentionedMemberIds }
+      body: { content, mentioned_member_ids: mentionedMemberIds, client_message_id: requestId }
     })
+    if (!alive || scope !== scopeVersion || workspaceId !== wid.value) return
     const idx = thread.value.findIndex(m => m.id === tempId)
     if (thread.value.some(m => m.id === msg.id)) {
       if (idx !== -1) thread.value.splice(idx, 1)
@@ -143,10 +169,18 @@ async function send() {
       thread.value.splice(idx, 1, msg)
     }
     pickedMentions.clear()
+    retryAttempt = null
   } catch (e) {
+    if (!alive || scope !== scopeVersion || workspaceId !== wid.value) return
+    if (thread.value.some(message => !message.pending && message.client_message_id === requestId)) {
+      retryAttempt = null
+      return
+    }
     thread.value = thread.value.filter(m => m.id !== tempId)
-    draft.value = content
+    if (!draft.value) draft.value = content
     toast.add({ title: getErrorMessage(e, 'Could not send'), color: 'error' })
+  } finally {
+    if (scope === scopeVersion) sending.value = false
   }
 }
 
@@ -179,12 +213,23 @@ onMounted(() => {
   loadPresence()
   focusPendingMessage()
 })
-onBeforeUnmount(() => off?.())
-watch(wid, () => {
+onBeforeUnmount(() => {
+  alive = false
+  scopeVersion++
+  off?.()
+})
+watch([wid, myMemberId], () => {
+  scopeVersion++
   thread.value = []
+  members.value = []
+  draft.value = ''
+  pickedMentions.clear()
+  retryAttempt = null
+  sending.value = false
+  loading.value = false
   load()
   loadPresence()
-})
+}, { flush: 'sync' })
 watch([() => thread.value.length, pendingMessageId], focusPendingMessage)
 
 /* rows: day dividers + grouping (same rhythm as the inbox thread) */
@@ -395,7 +440,8 @@ function initials(n: string) {
           icon="i-lucide-arrow-up"
           square
           aria-label="Send"
-          :disabled="!draft.trim()"
+          :disabled="!draft.trim() || sending"
+          :loading="sending"
           @click="send"
         />
       </div>

@@ -1,9 +1,13 @@
 import { channels } from '@perch/shared'
-import type { ConversationPriority, ConversationStatus, MessageDTO, SavedInboxFilters, ServerEvent } from '@perch/shared'
+import type { ConversationPriority, ConversationStatus, MessageDTO, ResponseSlaDTO, SavedInboxFilters, ServerEvent } from '@perch/shared'
+import { inboxOutboxFor } from '../utils/inbox-outbox'
+import type { InboxMessage } from '../utils/inbox-outbox'
+import { claimInboxRequests } from '../utils/inbox-requests'
 
 export interface InboxItem {
   id: string
   status: ConversationStatus
+  isSpam: boolean
   assignedAgentId: string | null
   collaboratorMemberIds: string[]
   priority: ConversationPriority
@@ -13,6 +17,7 @@ export interface InboxItem {
   preview: string
   tags: { id: string, name: string }[]
   unread: boolean
+  responseSla: ResponseSlaDTO
   visitor: { id: string, name: string | null, email: string | null, visitorId: string }
 }
 
@@ -29,9 +34,7 @@ export interface InboxSavedView {
 
 export interface TeamMember {
   id: string
-  userId: string
   name: string
-  email: string
   role: 'admin' | 'agent'
   presence: 'online' | 'offline' | 'away'
 }
@@ -46,9 +49,24 @@ export interface VisitorContext {
   visitor: {
     name: string | null
     email: string | null
+    profile_name: string | null
+    profile_email: string | null
+    reported_name: string | null
+    reported_email: string | null
+    company: string | null
+    job_title: string | null
+    internal_note: string | null
+    profile_version: number
+    tags: WorkspaceTag[]
     visitor_id: string
     external_id: string | null
     identity_verified: boolean
+    messaging_blocked: boolean
+    reply_email: {
+      eligible: boolean
+      status: 'pending' | 'processing' | 'sent' | 'failed' | 'canceled' | null
+      cancel_reason: string | null
+    }
     first_seen_at: string
     last_seen_at: string
     page_url: string | null
@@ -61,9 +79,35 @@ export interface VisitorContext {
     resolved_at: string | null
   }
   past_conversations: number
+  recent_conversations: Array<{
+    id: string
+    status: ConversationStatus
+    last_message_at: string
+  }>
 }
 
-export type InboxFilter = 'all' | ConversationStatus
+export interface CustomerProfileUpdate {
+  name?: string | null
+  email?: string | null
+  company?: string | null
+  job_title?: string | null
+  internal_note?: string | null
+  tag_ids?: string[]
+}
+
+export type BulkConversationInput
+  = | { action: 'assign', conversation_ids: string[], member_id: string }
+    | { action: 'resolve' | 'reopen', conversation_ids: string[] }
+    | { action: 'add_tag' | 'remove_tag', conversation_ids: string[], tag_id: string }
+
+export interface BulkConversationResult {
+  action: BulkConversationInput['action']
+  requested_count: number
+  changed_count: number
+  unchanged_count: number
+}
+
+export type InboxFilter = 'all' | ConversationStatus | 'spam'
 
 /**
  * Drives the Control Room: loads the inbox + a selected thread over REST, wires
@@ -74,29 +118,23 @@ export type InboxFilter = 'all' | ConversationStatus
  * refresh runs — skeletons only ever show when there's nothing cached yet.
  */
 
-// monotonic request tokens — module scope so a stale instance's in-flight
-// response can never overwrite state owned by a newer mount
-let listSeq = 0
-let threadSeq = 0
-// pending upload fns survive navigation so failed image sends stay retryable
-const uploadFns = new Map<string, () => Promise<{ url: string, type: string }>>()
-// @mention targets per optimistic send — module scope so retries keep them
-const mentionMeta = new Map<string, string[]>()
-
 export function useControlRoom() {
-  const { currentWorkspace } = useAuth()
+  const { currentWorkspace, user } = useAuth()
   const rt = useRealtime()
+  const app = useNuxtApp()
+  const outbox = inboxOutboxFor(app)
 
   const conversations = useState<InboxItem[]>('cr:conversations', () => [])
   const members = useState<TeamMember[]>('cr:members', () => [])
   // shared so the dashboard layout can tell whether this conversation is being viewed
   const activeId = useState<string | null>('inbox:activeId', () => null)
-  const messages = useState<Array<MessageDTO & { pending?: boolean, failed?: boolean }>>('cr:messages', () => [])
+  const messages = useState<InboxMessage[]>('cr:messages', () => [])
   const filter = useState<InboxFilter>('cr:filter', () => 'all')
   const assigneeFilter = useState<string>('cr:assigneeFilter', () => 'any')
   const priorityFilters = useState<ConversationPriority[]>('cr:priorityFilters', () => [])
   const tagFilters = useState<string[]>('cr:tagFilters', () => [])
   const snoozedFilter = useState<'exclude' | 'include' | 'only'>('cr:snoozedFilter', () => 'exclude')
+  const responseFilter = useState<'all' | 'breached'>('cr:responseFilter', () => 'all')
   const workspaceTags = useState<WorkspaceTag[]>('cr:tags', () => [])
   const savedViews = useState<InboxSavedView[]>('cr:savedViews', () => [])
   const loadingList = ref(false)
@@ -106,7 +144,7 @@ export function useControlRoom() {
   const visitorDraft = ref('')
 
   // per-status counts for the tabs — fetched independently of the active filter
-  const counts = useState('cr:counts', () => ({ unassigned: 0, open: 0, resolved: 0 }))
+  const counts = useState('cr:counts', () => ({ unassigned: 0, open: 0, resolved: 0, spam: 0, breached: 0 }))
 
   // composer `/shortcut` templates + the context panel for the open thread
   const canned = useState<CannedResponse[]>('cr:canned', () => [])
@@ -119,12 +157,67 @@ export function useControlRoom() {
   const loadingOlder = ref(false)
 
   const workspaceId = computed(() => currentWorkspace.value?.workspaceId ?? null)
+  const identity = computed(() => {
+    const workspace = currentWorkspace.value
+    return user.value && workspace
+      ? `${user.value.id}:${workspace.workspaceId}:${workspace.memberId}:${workspace.role}`
+      : null
+  })
+  const cachedIdentity = useState<string | null>('cr:identity', () => null)
+  const requests = claimInboxRequests(app, () => identity.value)
+  let listSeq = 0
+  let threadSeq = 0
+  let disposed = false
   const activeConversation = computed(() => conversations.value.find(c => c.id === activeId.value) ?? null)
 
   // Agents see the unassigned pool, their own chats, and conversations where
   // a teammate explicitly brought them in through an internal-note mention.
   const myRole = computed(() => currentWorkspace.value?.role ?? 'agent')
   const myMemberId = computed(() => currentWorkspace.value?.memberId ?? null)
+
+  function syncPending(conversationId: string, sent?: { temporaryId: string, message: MessageDTO }) {
+    if (disposed || !requests.active || cachedIdentity.value !== identity.value || activeId.value !== conversationId) return
+    const delivered = messages.value.filter(message => !message.pending && !message.failed && message.id !== sent?.temporaryId)
+    if (sent && !delivered.some(message => message.id === sent.message.id)) delivered.push(sent.message)
+    messages.value = [...delivered, ...outbox.pending(conversationId)]
+  }
+  const offOutbox = outbox.subscribe(syncPending)
+
+  function applyThreadPage(items: MessageDTO[], id: string, existingIds: Set<string>) {
+    // A REST snapshot may predate a reply acknowledged while it was loading.
+    const arrivedDuringLoad = messages.value.filter(message => !message.pending && !message.failed && !existingIds.has(message.id))
+    for (const message of items) outbox.acknowledge(message)
+    const known = new Set(items.map(message => message.id))
+    messages.value = [...items, ...arrivedDuringLoad.filter(message => !known.has(message.id)), ...outbox.pending(id)]
+  }
+
+  function threadCurrent(id: string): () => boolean {
+    const current = requests.capture()
+    const seq = threadSeq
+    return () => current() && seq === threadSeq && activeId.value === id
+  }
+
+  function dropInaccessibleThread(error: unknown, id: string): boolean {
+    const status = (error as { statusCode?: number, status?: number } | null)?.statusCode
+      ?? (error as { status?: number } | null)?.status
+    if (![401, 403, 404].includes(status ?? 0)) return false
+    outbox.discardConversation(id)
+    conversations.value = conversations.value.filter(conversation => conversation.id !== id)
+    if (activeId.value === id) deselect()
+    return true
+  }
+
+  async function loadContext(id: string) {
+    const request = requests.start('context')
+    const current = threadCurrent(id)
+    try {
+      const value = await $fetch<VisitorContext>(`/api/conversations/${id}/context`, { signal: request.signal })
+      if (request.current() && current()) context.value = value
+    } catch (error) {
+      if (request.current() && current()) dropInaccessibleThread(error, id)
+      // Context is supplementary; changing threads or a failed load cannot block the inbox.
+    }
+  }
   function canSee(assignedAgentId: string | null, collaboratorMemberIds: string[] = []): boolean {
     return myRole.value === 'admin'
       || assignedAgentId == null
@@ -147,15 +240,18 @@ export function useControlRoom() {
   }
 
   function appendFilters(params: URLSearchParams) {
-    if (filter.value !== 'all') params.set('status', filter.value)
+    if (filter.value === 'spam') params.set('spam', 'only')
+    else if (filter.value !== 'all') params.set('status', filter.value)
     if (assigneeFilter.value !== 'any') params.set('assignee', assigneeFilter.value)
     if (priorityFilters.value.length) params.set('priority', priorityFilters.value.join(','))
     if (tagFilters.value.length) params.set('tag', tagFilters.value.join(','))
     if (snoozedFilter.value !== 'exclude') params.set('snoozed', snoozedFilter.value)
+    if (responseFilter.value !== 'all') params.set('response', responseFilter.value)
   }
 
   function matchesFilters(conversation: InboxItem) {
-    if (filter.value !== 'all' && conversation.status !== filter.value) return false
+    if (filter.value === 'spam' ? !conversation.isSpam : conversation.isSpam) return false
+    if (filter.value !== 'all' && filter.value !== 'spam' && conversation.status !== filter.value) return false
     if (priorityFilters.value.length && !priorityFilters.value.includes(conversation.priority)) return false
     if (assigneeFilter.value === 'unassigned' && conversation.assignedAgentId) return false
     if (assigneeFilter.value === 'me' && conversation.assignedAgentId !== myMemberId.value) return false
@@ -164,6 +260,7 @@ export function useControlRoom() {
     const activelySnoozed = Boolean(conversation.snoozedUntil && new Date(conversation.snoozedUntil) > new Date())
     if (snoozedFilter.value === 'exclude' && activelySnoozed) return false
     if (snoozedFilter.value === 'only' && !activelySnoozed) return false
+    if (responseFilter.value === 'breached' && currentResponseSlaStatus(conversation.responseSla) !== 'breached') return false
     return true
   }
 
@@ -171,94 +268,116 @@ export function useControlRoom() {
   // `showLoader` is used for user-driven loads (tab switch, workspace change);
   // live-event refreshes pass nothing so the list updates without flashing skeletons.
   async function loadConversations({ showLoader = false } = {}) {
-    if (!workspaceId.value) return
+    if (!identity.value || disposed || !requests.active) return
     const seq = ++listSeq
+    requests.cancel('more')
+    loadingMore.value = false
+    const request = requests.start('list')
     if (showLoader) loadingList.value = true
     try {
       const params = new URLSearchParams()
       appendFilters(params)
       const qs = params.size ? `?${params}` : ''
       const data = await $fetch<{ items: InboxItem[], has_more: boolean }>(
-        `/api/workspaces/${workspaceId.value}/conversations${qs}`
+        `/api/workspaces/${workspaceId.value}/conversations${qs}`, { signal: request.signal }
       )
-      if (seq !== listSeq) return // a newer load superseded this one
+      if (!request.current() || seq !== listSeq) return
       conversations.value = data.items
       hasMoreConversations.value = data.has_more
+    } catch (error) {
+      if (request.current()) throw error
     } finally {
-      if (seq === listSeq) loadingList.value = false
+      if (request.current() && seq === listSeq) loadingList.value = false
     }
   }
 
   async function loadMoreConversations() {
     const last = conversations.value[conversations.value.length - 1]
-    if (!workspaceId.value || !last || loadingMore.value) return
+    if (!identity.value || !last || loadingMore.value || disposed || !requests.active) return
     const seq = listSeq
+    const request = requests.start('more')
     loadingMore.value = true
     try {
       const params = new URLSearchParams({ before: last.id })
       appendFilters(params)
       const data = await $fetch<{ items: InboxItem[], has_more: boolean }>(
-        `/api/workspaces/${workspaceId.value}/conversations?${params}`
+        `/api/workspaces/${workspaceId.value}/conversations?${params}`, { signal: request.signal }
       )
-      if (seq !== listSeq) return // list was reloaded while we fetched
+      if (!request.current() || seq !== listSeq) return
       const known = new Set(conversations.value.map(c => c.id))
       conversations.value.push(...data.items.filter(c => !known.has(c.id)))
       hasMoreConversations.value = data.has_more
+    } catch (error) {
+      if (request.current()) throw error
     } finally {
-      loadingMore.value = false
+      if (request.current()) loadingMore.value = false
     }
   }
 
-  async function loadCounts() {
-    if (!workspaceId.value) return
-    counts.value = await $fetch<{ unassigned: number, open: number, resolved: number }>(
-      `/api/workspaces/${workspaceId.value}/conversation-counts`
-    )
+  async function loadWorkspaceResource<T>(lane: string, path: string, apply: (value: T) => void) {
+    if (!identity.value || disposed || !requests.active) return
+    const request = requests.start(lane)
+    try {
+      const data = await $fetch<T>(`/api/workspaces/${workspaceId.value}/${path}`, { signal: request.signal })
+      if (request.current()) apply(data)
+    } catch (error) {
+      if (request.current()) throw error
+    }
   }
 
-  async function loadMembers() {
-    if (!workspaceId.value) return
-    members.value = await $fetch<TeamMember[]>(`/api/workspaces/${workspaceId.value}/members`)
+  function loadCounts() {
+    return loadWorkspaceResource<typeof counts.value>('counts', 'conversation-counts', (data) => {
+      counts.value = data
+    })
   }
 
-  async function loadCanned() {
-    if (!workspaceId.value) return
-    canned.value = await $fetch<CannedResponse[]>(`/api/workspaces/${workspaceId.value}/canned`)
+  function loadMembers() {
+    return loadWorkspaceResource<TeamMember[]>('members', 'members', (data) => {
+      members.value = data
+    })
   }
 
-  async function loadSavedViews() {
-    if (!workspaceId.value) return
-    savedViews.value = await $fetch<InboxSavedView[]>(`/api/workspaces/${workspaceId.value}/saved-views`)
+  function loadCanned() {
+    return loadWorkspaceResource<CannedResponse[]>('canned', 'canned', (data) => {
+      canned.value = data
+    })
+  }
+
+  function loadSavedViews() {
+    return loadWorkspaceResource<InboxSavedView[]>('saved-views', 'saved-views', (data) => {
+      savedViews.value = data
+    })
   }
 
   async function select(id: string, opts: { force?: boolean } = {}) {
+    if (!identity.value || disposed || !requests.active) return
     if (activeId.value === id && !opts.force) return
-    if (activeId.value) rt.unsubscribe(channels.conversation(activeId.value))
+    deselect()
     activeId.value = id
     rt.subscribe(channels.conversation(id))
     visitorTyping.value = false
     visitorDraft.value = ''
-    messages.value = [] // clear the previous thread immediately so it can't linger
+    messages.value = outbox.pending(id)
     context.value = null
     loadingThread.value = true
 
-    const seq = ++threadSeq
-    // context loads alongside the thread; it must never block or fail the select
-    $fetch<VisitorContext>(`/api/conversations/${id}/context`)
-      .then((ctx) => {
-        if (seq === threadSeq) context.value = ctx
-      })
-      .catch(() => {})
+    const current = threadCurrent(id)
+    const request = requests.start('thread')
+    const existingIds = new Set(messages.value.map(message => message.id))
+    void loadContext(id)
     try {
-      const data = await $fetch<{ items: MessageDTO[], has_more: boolean }>(`/api/conversations/${id}/messages`)
-      if (seq !== threadSeq) return // switched to another chat mid-load
-      messages.value = data.items
+      const data = await $fetch<{ items: MessageDTO[], has_more: boolean }>(`/api/conversations/${id}/messages`, { signal: request.signal })
+      if (!request.current() || !current()) return
+      applyThreadPage(data.items, id, existingIds)
       hasMoreMessages.value = data.has_more
       await $fetch(`/api/conversations/${id}/read`, { method: 'POST' }).catch(() => {})
+      if (!request.current() || !current()) return
       const item = conversations.value.find(c => c.id === id)
       if (item) item.unread = false
+    } catch (error) {
+      if (request.current() && current() && !dropInaccessibleThread(error, id)) throw error
     } finally {
-      if (seq === threadSeq) loadingThread.value = false
+      if (request.current() && current()) loadingThread.value = false
     }
   }
 
@@ -266,113 +385,100 @@ export function useControlRoom() {
     const oldest = messages.value[0]
     const conversationId = activeId.value
     if (!conversationId || !oldest || loadingOlder.value) return
-    const seq = threadSeq
+    const current = threadCurrent(conversationId)
+    const request = requests.start('older')
     loadingOlder.value = true
     try {
       const data = await $fetch<{ items: MessageDTO[], has_more: boolean }>(
-        `/api/conversations/${conversationId}/messages?before=${oldest.id}`
+        `/api/conversations/${conversationId}/messages?before=${oldest.id}`, { signal: request.signal }
       )
-      if (seq !== threadSeq) return // switched threads while fetching
-      const known = new Set(messages.value.map(m => m.id))
-      messages.value.unshift(...data.items.filter(m => !known.has(m.id)))
+      if (!request.current() || !current()) return
+      for (const message of data.items) outbox.acknowledge(message)
+      const olderIds = new Set(data.items.map(message => message.id))
+      messages.value = [...data.items, ...messages.value.filter(message => !olderIds.has(message.id))]
       hasMoreMessages.value = data.has_more
+    } catch (error) {
+      if (request.current() && current() && !dropInaccessibleThread(error, conversationId)) throw error
     } finally {
-      loadingOlder.value = false
+      if (request.current() && current()) loadingOlder.value = false
     }
   }
 
   function deselect() {
+    threadSeq++
+    requests.cancel('thread')
+    requests.cancel('older')
+    requests.cancel('context')
     if (activeId.value) rt.unsubscribe(channels.conversation(activeId.value))
     activeId.value = null
     messages.value = []
     context.value = null
+    loadingThread.value = false
+    loadingOlder.value = false
+    hasMoreMessages.value = false
+    visitorTyping.value = false
+    visitorDraft.value = ''
   }
 
   /* actions */
-  function pushTemp(conversationId: string, content: string, isInternalNote: boolean, attachment?: { url: string, type: string }) {
-    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`
-    messages.value.push({
-      id: tempId,
-      conversation_id: conversationId,
-      sender_type: 'agent',
-      sender_id: myMemberId.value,
-      content,
-      attachment_url: attachment?.url ?? null,
-      attachment_type: attachment?.type ?? null,
-      is_internal_note: isInternalNote,
-      mentioned_member_ids: [],
-      created_at: new Date().toISOString(),
-      pending: true
+  function performSend(tempId: string) {
+    if (disposed || !requests.active || !identity.value) return Promise.resolve()
+    const scope = identity.value
+    return outbox.send(tempId, async (temp, clientMessageId) => {
+      // An upload can finish after logout or a workspace change. Never send it
+      // using the new session's credentials.
+      if (scope !== identity.value) throw new Error('Inbox identity changed')
+      try {
+        const { message } = await $fetch<{ message: MessageDTO }>(`/api/conversations/${temp.conversation_id}/messages`, {
+          method: 'POST',
+          body: {
+            client_message_id: clientMessageId,
+            content: temp.content,
+            attachment_url: temp.attachment_url ?? undefined,
+            attachment_type: temp.attachment_type ?? undefined,
+            is_internal_note: temp.is_internal_note,
+            mentioned_member_ids: temp.mentioned_member_ids
+          }
+        })
+        return message
+      } catch (error) {
+        if (requests.active && scope === identity.value) dropInaccessibleThread(error, temp.conversation_id)
+        throw error
+      }
     })
-    return tempId
-  }
-
-  async function performSend(tempId: string) {
-    const temp = messages.value.find(m => m.id === tempId)
-    if (!temp) return
-    temp.pending = true
-    temp.failed = false
-    try {
-      // upload phase (only when the bubble still shows a local blob preview)
-      if (temp.attachment_url?.startsWith('blob:')) {
-        const upload = uploadFns.get(tempId)
-        if (!upload) throw new Error('upload lost')
-        const img = await upload()
-        URL.revokeObjectURL(temp.attachment_url)
-        temp.attachment_url = img.url
-        temp.attachment_type = img.type
-      }
-
-      const { message } = await $fetch<{ message: MessageDTO }>(`/api/conversations/${temp.conversation_id}/messages`, {
-        method: 'POST',
-        body: {
-          content: temp.content,
-          attachment_url: temp.attachment_url ?? undefined,
-          attachment_type: temp.attachment_type ?? undefined,
-          is_internal_note: temp.is_internal_note,
-          mentioned_member_ids: mentionMeta.get(tempId)
-        }
-      })
-      // reconcile in place (the WS echo, if it arrives first, dedups by id)
-      const idx = messages.value.findIndex(m => m.id === tempId)
-      if (messages.value.some(m => m.id === message.id)) {
-        if (idx !== -1) messages.value.splice(idx, 1)
-      } else if (idx !== -1) {
-        messages.value.splice(idx, 1, message)
-      } else {
-        messages.value.push(message)
-      }
-      uploadFns.delete(tempId)
-      mentionMeta.delete(tempId)
-    } catch {
-      const failedMsg = messages.value.find(m => m.id === tempId)
-      if (failedMsg) {
-        failedMsg.pending = false
-        failedMsg.failed = true
-      }
-    }
   }
 
   async function sendReply(content: string, isInternalNote = false, attachment?: { url: string, type: string }, mentionedMemberIds?: string[]) {
     const text = content.trim()
-    if (!activeId.value || (!text && !attachment)) return
-    const tempId = pushTemp(activeId.value, text, isInternalNote, attachment)
-    if (mentionedMemberIds?.length) mentionMeta.set(tempId, mentionedMemberIds)
-    const temp = messages.value.find(message => message.id === tempId)
-    if (temp) temp.mentioned_member_ids = mentionedMemberIds ?? []
+    if (!activeId.value || !myMemberId.value || !identity.value || disposed || !requests.active || (!text && !attachment)) return
+    const tempId = outbox.add({
+      conversationId: activeId.value,
+      memberId: myMemberId.value,
+      content: text,
+      internalNote: isInternalNote,
+      attachment,
+      mentionedMemberIds
+    })
     await performSend(tempId)
   }
 
   /** Optimistic image send: the bubble shows a local preview while uploading. */
   async function sendAttachment(file: File, upload: () => Promise<{ url: string, type: string }>, isInternalNote = false) {
-    if (!activeId.value) return
+    if (!activeId.value || !myMemberId.value || !identity.value || disposed || !requests.active) return
     const preview = URL.createObjectURL(file)
-    const tempId = pushTemp(activeId.value, '', isInternalNote, { url: preview, type: file.type })
-    uploadFns.set(tempId, upload)
+    const tempId = outbox.add({
+      conversationId: activeId.value,
+      memberId: myMemberId.value,
+      content: '',
+      internalNote: isInternalNote,
+      attachment: { url: preview, type: file.type },
+      upload
+    })
     await performSend(tempId)
   }
 
   function retrySend(tempId: string) {
+    if (!activeId.value || !outbox.pending(activeId.value).some(message => message.id === tempId)) return Promise.resolve()
     return performSend(tempId)
   }
 
@@ -388,11 +494,30 @@ export function useControlRoom() {
   async function reopen(id: string) {
     await $fetch(`/api/conversations/${id}/reopen`, { method: 'POST' })
   }
+  async function markSpam(id: string) {
+    const current = requests.capture()
+    const result = await $fetch<{ visitor_blocked: boolean }>(`/api/conversations/${id}/spam`, { method: 'POST' })
+    if (!current()) return result
+    outbox.discardConversation(id)
+    if (activeId.value === id) deselect()
+    await Promise.all([loadConversations(), loadCounts()])
+    return result
+  }
+  async function restoreSpam(id: string) {
+    const current = requests.capture()
+    const result = await $fetch<{ visitor_blocked: boolean }>(`/api/conversations/${id}/spam`, { method: 'DELETE' })
+    if (!current()) return result
+    if (activeId.value === id) deselect()
+    await Promise.all([loadConversations(), loadCounts()])
+    return result
+  }
   async function organize(id: string, changes: { priority?: ConversationPriority, snoozed_until?: string | null }) {
+    const current = requests.capture()
     const { conversation } = await $fetch<{ conversation: { priority: ConversationPriority, snoozed_until: string | null } }>(`/api/conversations/${id}/organize`, {
       method: 'PATCH',
       body: changes
     })
+    if (!current()) return
     const item = conversations.value.find(conversation => conversation.id === id)
     if (item) {
       item.priority = conversation.priority
@@ -404,8 +529,36 @@ export function useControlRoom() {
     }
   }
 
+  async function updateCustomerProfile(changes: CustomerProfileUpdate) {
+    const conversationId = activeId.value
+    const current = context.value
+    if (!conversationId || !current) return
+    const isCurrent = threadCurrent(conversationId)
+    requests.cancel('context')
+    try {
+      const updated = await $fetch<VisitorContext>(`/api/conversations/${conversationId}/customer`, {
+        method: 'PATCH',
+        body: { ...changes, expected_version: current.visitor.profile_version }
+      })
+      if (!isCurrent()) return
+      context.value = updated
+      const inboxItem = conversations.value.find(item => item.id === conversationId)
+      if (inboxItem) {
+        inboxItem.visitor.name = updated.visitor.name
+        inboxItem.visitor.email = updated.visitor.email
+      }
+      return updated
+    } catch (error) {
+      if ((error as { statusCode?: number }).statusCode === 409 && isCurrent()) {
+        await loadContext(conversationId)
+      }
+      throw error
+    }
+  }
+
   /* live events */
   function applyEvent(ev: ServerEvent) {
+    if (disposed || !requests.active || !identity.value || cachedIdentity.value !== identity.value) return
     switch (ev.type) {
       case 'conversation.new':
         // reload to pick up visitor name + preview + unread in one shot
@@ -413,27 +566,41 @@ export function useControlRoom() {
         loadCounts()
         break
       case 'conversation.removed':
+        outbox.discardConversation(ev.payload.conversation_id)
+        listSeq++
+        requests.cancel('list')
+        requests.cancel('more')
+        loadingList.value = false
+        loadingMore.value = false
         conversations.value = conversations.value.filter(conversation => conversation.id !== ev.payload.conversation_id)
         if (activeId.value === ev.payload.conversation_id) deselect()
         loadCounts()
         break
       case 'conversation.refresh':
         loadConversations()
+        if (activeId.value === ev.payload.conversation_id) {
+          void loadContext(ev.payload.conversation_id)
+        }
         break
       case 'conversation.updated': {
         const p = ev.payload
+        if (!canSee(p.assigned_agent_id, p.collaborator_member_ids)) {
+          outbox.discardConversation(p.id)
+          if (activeId.value === p.id) deselect()
+        }
         const c = conversations.value.find(x => x.id === p.id)
         if (c) {
-          const assignmentChanged = c.assignedAgentId !== p.assigned_agent_id
           const statusChanged = c.status !== p.status
           c.status = p.status
+          c.isSpam = p.is_spam
           c.assignedAgentId = p.assigned_agent_id
           c.collaboratorMemberIds = p.collaborator_member_ids
           c.priority = p.priority
           c.snoozedUntil = p.snoozed_until
           c.lastMessageAt = p.last_message_at
 
-          if ((assignmentChanged && !canSee(p.assigned_agent_id, p.collaborator_member_ids)) || !matchesFilters(c)) {
+          if (!canSee(p.assigned_agent_id, p.collaborator_member_ids) || !matchesFilters(c)) {
+            if (!canSee(p.assigned_agent_id, p.collaborator_member_ids)) outbox.discardConversation(p.id)
             // reassigned to another agent — drop it from my view
             conversations.value = conversations.value.filter(x => x.id !== p.id)
             if (activeId.value === p.id) deselect()
@@ -454,6 +621,7 @@ export function useControlRoom() {
       }
       case 'message.new': {
         const m = ev.payload
+        outbox.acknowledge(m)
         const c = conversations.value.find(x => x.id === m.conversation_id)
         if (c) {
           if (!m.is_internal_note) c.preview = m.content
@@ -465,6 +633,10 @@ export function useControlRoom() {
           messages.value.push(m)
           visitorTyping.value = false
           visitorDraft.value = ''
+        }
+        if (!m.is_internal_note && (m.sender_type === 'visitor' || m.sender_type === 'agent')) {
+          loadConversations()
+          loadCounts()
         }
         break
       }
@@ -486,12 +658,10 @@ export function useControlRoom() {
   let off: (() => void) | undefined
 
   function loadAll() {
-    loadConversations({ showLoader: true })
-    loadCounts()
-    loadMembers()
-    loadCanned()
-    loadTags()
-    loadSavedViews()
+    return Promise.allSettled([
+      loadConversations({ showLoader: conversations.value.length === 0 }),
+      loadCounts(), loadMembers(), loadCanned(), loadTags(), loadSavedViews()
+    ])
   }
 
   // NB: the workspace channel is owned by the dashboard layout (so notifications
@@ -500,27 +670,33 @@ export function useControlRoom() {
   async function refreshActiveThread() {
     const id = activeId.value
     if (!id) return
-    const seq = ++threadSeq
+    const current = threadCurrent(id)
+    const request = requests.start('thread')
+    const existingIds = new Set(messages.value.map(message => message.id))
     try {
-      const data = await $fetch<{ items: MessageDTO[], has_more: boolean }>(`/api/conversations/${id}/messages`)
-      if (seq !== threadSeq || activeId.value !== id) return
-      // keep local unsent bubbles (pending/failed) on top of the fresh page
-      const unsent = messages.value.filter(m => m.pending || m.failed)
-      messages.value = [...data.items, ...unsent]
+      const data = await $fetch<{ items: MessageDTO[], has_more: boolean }>(`/api/conversations/${id}/messages`, { signal: request.signal })
+      if (!request.current() || !current()) return
+      applyThreadPage(data.items, id, existingIds)
       hasMoreMessages.value = data.has_more
-    } catch {
+    } catch (error) {
+      if (request.current() && current()) dropInaccessibleThread(error, id)
       // next event or manual select will retry
+    } finally {
+      if (request.current() && current()) loadingThread.value = false
     }
   }
 
   /* tags */
-  async function loadTags() {
-    if (!workspaceId.value) return
-    workspaceTags.value = await $fetch<WorkspaceTag[]>(`/api/workspaces/${workspaceId.value}/tags`)
+  function loadTags() {
+    return loadWorkspaceResource<WorkspaceTag[]>('tags', 'tags', (data) => {
+      workspaceTags.value = data
+    })
   }
 
   async function applyTag(conversationId: string, tag: WorkspaceTag) {
+    const current = requests.capture()
     await $fetch(`/api/conversations/${conversationId}/tags`, { method: 'POST', body: { tag_id: tag.id } })
+    if (!current()) return
     const item = conversations.value.find(c => c.id === conversationId)
     if (item && !item.tags.some(t => t.id === tag.id)) {
       item.tags = [...item.tags, tag].sort((a, b) => a.name.localeCompare(b.name))
@@ -528,25 +704,42 @@ export function useControlRoom() {
   }
 
   async function removeTag(conversationId: string, tagId: string) {
+    const current = requests.capture()
     await $fetch(`/api/conversations/${conversationId}/tags/${tagId}`, { method: 'DELETE' })
+    if (!current()) return
     const item = conversations.value.find(c => c.id === conversationId)
     if (item) item.tags = item.tags.filter(t => t.id !== tagId)
   }
 
   async function createTag(name: string): Promise<WorkspaceTag> {
+    const current = requests.capture()
+    requests.cancel('tags')
     const tag = await $fetch<WorkspaceTag>(`/api/workspaces/${workspaceId.value}/tags`, {
       method: 'POST',
       body: { name }
     })
-    if (!workspaceTags.value.some(t => t.id === tag.id)) {
+    if (current() && !workspaceTags.value.some(t => t.id === tag.id)) {
       workspaceTags.value = [...workspaceTags.value, tag].sort((a, b) => a.name.localeCompare(b.name))
     }
     return tag
   }
 
+  async function bulkUpdate(input: BulkConversationInput): Promise<BulkConversationResult> {
+    if (!workspaceId.value) throw new Error('No workspace selected')
+    const current = requests.capture()
+    const result = await $fetch<BulkConversationResult>(`/api/workspaces/${workspaceId.value}/conversations/bulk`, {
+      method: 'POST',
+      body: input
+    })
+    if (current()) await Promise.all([loadConversations(), loadCounts()])
+    return result
+  }
+
   let offReconnect: (() => void) | undefined
   let snoozeRefresh: ReturnType<typeof setInterval> | undefined
+  let mounted = false
   onMounted(() => {
+    mounted = true
     rt.connect()
     off = rt.on(applyEvent)
     // the socket was down — anything could have happened; refetch it all
@@ -555,13 +748,7 @@ export function useControlRoom() {
       refreshActiveThread()
     })
     if (workspaceId.value) {
-      // stale-while-revalidate: skeletons only when nothing is cached
-      loadConversations({ showLoader: conversations.value.length === 0 })
-      loadCounts()
-      loadMembers()
-      loadCanned()
-      loadTags()
-      loadSavedViews()
+      void loadAll()
     }
     // restore the open thread after navigating away and back
     if (activeId.value) {
@@ -569,11 +756,7 @@ export function useControlRoom() {
         rt.subscribe(channels.conversation(activeId.value))
         refreshActiveThread()
         if (!context.value) {
-          $fetch<VisitorContext>(`/api/conversations/${activeId.value}/context`)
-            .then((ctx) => {
-              context.value = ctx
-            })
-            .catch(() => {})
+          void loadContext(activeId.value)
         }
       } else {
         select(activeId.value, { force: true })
@@ -588,28 +771,45 @@ export function useControlRoom() {
   })
 
   onBeforeUnmount(() => {
+    const owned = requests.active
+    disposed = true
+    requests.dispose()
+    offOutbox()
     off?.()
     offReconnect?.()
     if (snoozeRefresh) clearInterval(snoozeRefresh)
-    if (activeId.value) rt.unsubscribe(channels.conversation(activeId.value))
+    if (owned && activeId.value) rt.unsubscribe(channels.conversation(activeId.value))
   })
 
-  // follow the workspace switcher
-  watch(workspaceId, (next) => {
-    activeId.value = null
-    messages.value = []
+  // Include the account, membership and role: switching accounts or losing
+  // access must clear the cache even when the workspace id itself is unchanged.
+  watch(identity, (next) => {
+    if (!requests.active) return
+    outbox.setScope(next)
+    if (cachedIdentity.value === next) return
+    requests.invalidate()
+    listSeq++
+    deselect()
+    cachedIdentity.value = next
     conversations.value = []
-    counts.value = { unassigned: 0, open: 0, resolved: 0 }
+    members.value = []
+    canned.value = []
+    workspaceTags.value = []
+    loadingList.value = false
+    loadingMore.value = false
+    hasMoreConversations.value = false
+    counts.value = { unassigned: 0, open: 0, resolved: 0, spam: 0, breached: 0 }
     savedViews.value = []
     filter.value = 'all'
     assigneeFilter.value = 'any'
     priorityFilters.value = []
     tagFilters.value = []
     snoozedFilter.value = 'exclude'
-    if (next) loadAll()
-  })
+    responseFilter.value = 'all'
+    if (next && mounted) void loadAll()
+  }, { immediate: true, flush: 'sync' })
 
-  watch([filter, assigneeFilter, priorityFilters, tagFilters, snoozedFilter], () => loadConversations({ showLoader: true }), { deep: true })
+  watch([filter, assigneeFilter, priorityFilters, tagFilters, snoozedFilter, responseFilter], () => loadConversations({ showLoader: true }), { deep: true })
 
   function currentSavedFilters(): SavedInboxFilters {
     return {
@@ -627,22 +827,27 @@ export function useControlRoom() {
     priorityFilters.value = [...view.filters.priorities]
     tagFilters.value = [...view.filters.tag_ids]
     snoozedFilter.value = view.filters.snoozed
+    responseFilter.value = 'all'
   }
 
   async function saveCurrentView(name: string) {
     if (!workspaceId.value) return
+    const current = requests.capture()
+    requests.cancel('saved-views')
     const view = await $fetch<InboxSavedView>(`/api/workspaces/${workspaceId.value}/saved-views`, {
       method: 'POST',
       body: { name, filters: currentSavedFilters() }
     })
-    savedViews.value = [...savedViews.value, view]
+    if (current()) savedViews.value = [...savedViews.value, view]
     return view
   }
 
   async function deleteSavedView(id: string) {
     if (!workspaceId.value) return
+    const current = requests.capture()
+    requests.cancel('saved-views')
     await $fetch(`/api/workspaces/${workspaceId.value}/saved-views/${id}`, { method: 'DELETE' })
-    savedViews.value = savedViews.value.filter(view => view.id !== id)
+    if (current()) savedViews.value = savedViews.value.filter(view => view.id !== id)
   }
 
   return {
@@ -670,6 +875,7 @@ export function useControlRoom() {
     priorityFilters,
     tagFilters,
     snoozedFilter,
+    responseFilter,
     workspaceTags,
     savedViews,
     currentSavedFilters,
@@ -679,6 +885,7 @@ export function useControlRoom() {
     applyTag,
     removeTag,
     createTag,
+    bulkUpdate,
     select,
     deselect,
     loadMoreConversations,
@@ -690,7 +897,10 @@ export function useControlRoom() {
     claim,
     resolve,
     reopen,
+    markSpam,
+    restoreSpam,
     organize,
+    updateCustomerProfile,
     reload: loadConversations
   }
 }

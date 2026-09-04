@@ -27,6 +27,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 403, statusMessage: 'Only the current assignee or an admin can transfer this conversation' })
   }
 
-  const updated = await assignConversation(conversationId, target.id, { memberId: member.id, name: user.name })
+  const updated = await assignConversation(conversationId, target.id, { memberId: member.id, name: user.name, workspaceId: conversation.workspaceId })
+  if (!updated) throw createError({ statusCode: 404, statusMessage: 'Conversation not found' })
   return { conversation: serializeConversation(updated!) }
 })

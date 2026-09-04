@@ -74,7 +74,9 @@ async function changeEmail() {
 /* active sessions */
 interface SessionRow {
   id: string
-  user_agent: string | null
+  browser: string
+  os: string | null
+  device_type: 'desktop' | 'mobile' | 'tablet' | 'unknown'
   ip: string | null
   created_at: string
   last_seen_at: string
@@ -97,23 +99,8 @@ async function loadSessions() {
 }
 onMounted(loadSessions)
 
-function deviceLabel(ua: string | null) {
-  if (!ua) return 'Unknown device'
-  const browser = /edg\//i.test(ua)
-    ? 'Edge'
-    : /firefox/i.test(ua)
-      ? 'Firefox'
-      : /chrome|crios/i.test(ua)
-        ? 'Chrome'
-        : /safari/i.test(ua) ? 'Safari' : 'Browser'
-  const os = /iphone|ipad/i.test(ua)
-    ? 'iOS'
-    : /android/i.test(ua)
-      ? 'Android'
-      : /mac os/i.test(ua)
-        ? 'macOS'
-        : /windows/i.test(ua) ? 'Windows' : /linux/i.test(ua) ? 'Linux' : ''
-  return os ? `${browser} · ${os}` : browser
+function deviceLabel(row: SessionRow) {
+  return row.os ? `${row.browser} · ${row.os}` : row.browser
 }
 
 function lastSeenLabel(iso: string) {
@@ -168,10 +155,19 @@ const changingPassword = ref(false)
 const deleteAccountOpen = ref(false)
 const deleteAccountPassword = ref('')
 const deletingAccount = ref(false)
+const deleteAccountError = ref('')
+
+watch(deleteAccountOpen, (open) => {
+  if (!open) {
+    deleteAccountPassword.value = ''
+    deleteAccountError.value = ''
+  }
+})
 
 async function deleteAccount() {
   if (!deleteAccountPassword.value || deletingAccount.value) return
   deletingAccount.value = true
+  deleteAccountError.value = ''
   try {
     await $fetch('/api/auth/account', {
       method: 'DELETE',
@@ -180,7 +176,8 @@ async function deleteAccount() {
     await refresh()
     await navigateTo('/')
   } catch (e) {
-    toast.add({ title: getErrorMessage(e, 'Could not delete account'), color: 'error' })
+    deleteAccountError.value = getErrorMessage(e, 'Could not delete account')
+    toast.add({ title: deleteAccountError.value, color: 'error' })
   } finally {
     deletingAccount.value = false
   }
@@ -400,12 +397,12 @@ async function changePassword() {
             class="flex items-center gap-3 rounded-xl bg-elevated/50 ring-1 ring-default px-4 py-3"
           >
             <UIcon
-              :name="/iphone|ipad|android/i.test(s.user_agent ?? '') ? 'i-lucide-smartphone' : 'i-lucide-monitor'"
+              :name="s.device_type === 'mobile' ? 'i-lucide-smartphone' : s.device_type === 'tablet' ? 'i-lucide-tablet' : 'i-lucide-monitor'"
               class="size-4.5 shrink-0 text-dimmed"
             />
             <div class="min-w-0 flex-1">
               <p class="text-sm font-medium text-highlighted truncate">
-                {{ deviceLabel(s.user_agent) }}
+                {{ deviceLabel(s) }}
                 <UBadge
                   v-if="s.current"
                   color="success"
@@ -538,21 +535,35 @@ async function changePassword() {
     <UModal
       v-model:open="deleteAccountOpen"
       title="Delete your account?"
-      description="Your login and any workspace where you're the only member will be permanently deleted."
+      description="Your login and any workspace where you're the only member will be permanently deleted. Perch will confirm renewal is canceled for paid workspaces first."
     >
       <template #body>
-        <UFormField label="Confirm with your password">
-          <PasswordInput
-            v-model="deleteAccountPassword"
-            autocomplete="current-password"
+        <div class="space-y-4">
+          <UAlert
+            v-if="deleteAccountError"
+            color="error"
+            variant="soft"
+            icon="i-lucide-circle-alert"
+            title="Account was not deleted"
+            :description="deleteAccountError"
           />
-        </UFormField>
+          <UFormField label="Confirm with your password">
+            <PasswordInput
+              v-model="deleteAccountPassword"
+              autocomplete="current-password"
+            />
+          </UFormField>
+          <p class="text-xs text-muted">
+            Keep this page open while Perch checks billing. If cancellation cannot be confirmed, nothing is deleted and you can retry safely.
+          </p>
+        </div>
       </template>
       <template #footer>
         <div class="flex justify-end gap-2 w-full">
           <UButton
             color="neutral"
             variant="ghost"
+            :disabled="deletingAccount"
             @click="deleteAccountOpen = false"
           >
             Cancel

@@ -15,7 +15,7 @@ const embeddedHostOrigin = useState<string>('perch-embed-origin', () =>
 
 const widget = useWidget(siteId.value, embedTicket.value, { installationPreview: installationPreview.value })
 const {
-  workspace, agentName, businessOnline, businessState, awayLabel, conversationId, conversationStatus, csatRating, messages, status, agentTyping, visitorName, agentReadAt
+  workspace, agentName, businessOnline, businessState, awayLabel, conversationId, conversationStatus, csatRating, messages, status, agentTyping, visitorName, visitorEmail, agentReadAt, messagingAvailable, replyEmailEnabled
 } = widget
 
 /* CSAT: quick thumbs after a conversation closes */
@@ -84,6 +84,10 @@ const fileEl = ref<HTMLInputElement | null>(null)
 const uploadError = ref('')
 
 function pickImage() {
+  if (!workspace.value?.attachments_available) {
+    uploadError.value = 'Image attachments are not available for this chat.'
+    return
+  }
   fileEl.value?.click()
 }
 
@@ -92,10 +96,18 @@ async function onFilePicked(e: Event) {
   const file = input.files?.[0]
   input.value = ''
   if (!file) return
+  if (!workspace.value?.attachments_available) {
+    uploadError.value = 'Image attachments are not available for this chat.'
+    return
+  }
   uploadError.value = ''
   const validationError = validateImageAttachment(file)
   if (!validationError) {
-    await widget.sendAttachment(file, () => uploadImage(file, { site_id: siteId.value, visitor_session: widget.visitorSession.value }))
+    await widget.sendAttachment(file, () => uploadImage(file, {
+      purpose: 'message',
+      site_id: siteId.value,
+      visitor_session: widget.visitorSession.value
+    }))
     return
   }
   uploadError.value = validationError
@@ -125,8 +137,10 @@ interface HelpGroup {
 
 const tab = ref<'chat' | 'help'>('chat')
 const helpGroups = ref<HelpGroup[]>([])
+const baseHelpGroups = ref<HelpGroup[]>([])
 const helpStatus = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
 const helpQuery = ref('')
+const helpSearchStatus = ref<'idle' | 'loading' | 'error'>('idle')
 const activeArticleId = ref<string | null>(null)
 const activeArticle = ref<HelpArticleDetail | null>(null)
 const articleStatus = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
@@ -139,7 +153,9 @@ async function loadHelp() {
     helpGroups.value = await $fetch<HelpGroup[]>('/api/widget/articles', {
       query: { site_id: siteId.value }
     })
+    baseHelpGroups.value = helpGroups.value
     helpStatus.value = 'ready'
+    if (helpQuery.value.trim()) void searchHelp()
   } catch {
     helpStatus.value = 'error'
   }
@@ -177,29 +193,54 @@ function closeHelpArticle() {
   articleStatus.value = 'idle'
 }
 
-const filteredGroups = computed(() => {
-  const q = helpQuery.value.trim().toLowerCase()
-  if (!q) return helpGroups.value
-  return helpGroups.value
-    .map(g => ({
-      ...g,
-      articles: g.articles.filter(a =>
-        a.title.toLowerCase().includes(q) || a.excerpt.toLowerCase().includes(q))
-    }))
-    .filter(g => g.articles.length > 0)
-})
+let helpSearchTimer: ReturnType<typeof setTimeout> | undefined
+let helpSearchController: AbortController | undefined
+
+async function searchHelp() {
+  clearTimeout(helpSearchTimer)
+  helpSearchController?.abort()
+  const query = helpQuery.value.trim().slice(0, 80)
+  if (!query) {
+    helpGroups.value = baseHelpGroups.value
+    helpSearchStatus.value = 'idle'
+    return
+  }
+
+  const controller = new AbortController()
+  helpSearchController = controller
+  helpSearchStatus.value = 'loading'
+  try {
+    const result = await $fetch<HelpGroup[]>('/api/widget/articles', {
+      query: { site_id: siteId.value, q: query },
+      signal: controller.signal
+    })
+    if (controller !== helpSearchController) return
+    helpGroups.value = result
+    helpSearchStatus.value = 'idle'
+  } catch {
+    if (controller.signal.aborted) return
+    helpSearchStatus.value = 'error'
+  }
+}
+
+function scheduleHelpSearch() {
+  clearTimeout(helpSearchTimer)
+  helpSearchTimer = setTimeout(searchHelp, 250)
+}
 
 const draft = ref('')
-const prechat = reactive({ name: '', email: '', message: '' })
+const prechat = reactive({ name: '', email: '', message: '', replyEmailConsent: false })
 const sending = ref(false)
 const isOpen = ref(false) // the loader tells us when we're revealed
 const unread = ref(0)
 const threadEl = ref<HTMLElement | null>(null)
 const composerEl = ref<HTMLTextAreaElement | null>(null)
 const composerFocused = ref(false)
+const replyPreferenceSaving = ref(false)
 
 const showPrechat = computed(() =>
   status.value === 'ready'
+  && messagingAvailable.value
   && !!workspace.value?.prechat_enabled
   && !conversationId.value
   && !visitorName.value
@@ -215,6 +256,21 @@ const onAccent = computed(() => {
 
 function initial(name: string | null | undefined) {
   return (name || 'A').charAt(0).toUpperCase()
+}
+
+function maskedEmail(email: string) {
+  const [local = '', domain = ''] = email.split('@')
+  return domain ? `${local.slice(0, 1)}•••@${domain}` : 'your email'
+}
+
+async function setReplyPreference(enabled: boolean) {
+  if (replyPreferenceSaving.value) return
+  replyPreferenceSaving.value = true
+  try {
+    await widget.setReplyEmail(enabled)
+  } finally {
+    replyPreferenceSaving.value = false
+  }
 }
 
 let hostOrigin = embeddedHostOrigin.value
@@ -356,7 +412,8 @@ async function onPrechatSubmit() {
   try {
     await widget.sendMessage(text, {
       name: prechat.name.trim() || undefined,
-      email: prechat.email.trim() || undefined
+      email: prechat.email.trim() || undefined,
+      replyEmailConsent: !!prechat.email.trim() && prechat.replyEmailConsent
     })
   } finally {
     sending.value = false
@@ -380,6 +437,7 @@ watch(() => messages.value.length, () => {
     unread.value++
     post({ perch: 'unread', count: unread.value })
   }
+  if (last?.sender_type === 'agent' && isOpen.value) void widget.markLatestAgentRead()
   // reading help while an agent replies — dot the Chat tab
   if (last && last.sender_type === 'agent' && tab.value === 'help') {
     chatDot.value = true
@@ -398,13 +456,20 @@ function onParentMessage(e: MessageEvent) {
     unread.value = 0
     post({ perch: 'unread', count: 0 })
     scrollToBottom()
+    void widget.markLatestAgentRead()
     // focus the composer on open — desktop only (mobile would pop the keyboard)
     if (window.matchMedia('(pointer: fine)').matches) nextTick(() => composerEl.value?.focus())
   } else if (data.perch === 'close') {
     isOpen.value = false
   } else if (data.perch === 'identify') {
     // the host site told us who its signed-in user is — skip pre-chat
-    widget.identify({ user_id: data.user_id, name: data.name, email: data.email, hash: data.hash })
+    widget.identify({
+      user_id: data.user_id,
+      name: data.name,
+      email: data.email,
+      hash: data.hash,
+      email_hash: data.email_hash
+    })
   } else if (data.perch === 'page') {
     // the loader reporting the host page (SPA-aware) — for the live roster
     if (typeof data.url === 'string') widget.updatePage(data.url)
@@ -433,6 +498,8 @@ onMounted(async () => {
   scrollToBottom()
 })
 onBeforeUnmount(() => {
+  clearTimeout(helpSearchTimer)
+  helpSearchController?.abort()
   darkQuery?.removeEventListener('change', syncSystemTheme)
   window.removeEventListener('message', onParentMessage)
   widget.stop()
@@ -598,10 +665,20 @@ onBeforeUnmount(() => {
         />
         <input
           v-model="helpQuery"
-          type="text"
+          type="search"
           placeholder="Search articles…"
           class="w-full bg-transparent text-sm outline-none"
+          aria-label="Search help articles"
+          autocomplete="off"
+          @input="scheduleHelpSearch"
+          @keydown.esc="helpQuery = ''; searchHelp()"
         >
+        <UIcon
+          v-if="helpSearchStatus === 'loading'"
+          name="i-lucide-loader-circle"
+          class="size-4 shrink-0 animate-spin text-dimmed"
+          aria-label="Searching"
+        />
       </div>
 
       <div
@@ -628,15 +705,31 @@ onBeforeUnmount(() => {
           Try again
         </button>
       </div>
-      <p
-        v-else-if="!filteredGroups.length"
-        class="text-center py-10 text-sm text-dimmed"
+      <div
+        v-else-if="helpSearchStatus === 'error'"
+        class="text-center py-10"
       >
-        No articles match “{{ helpQuery }}”.
+        <p class="text-sm text-muted">
+          Couldn’t search articles.
+        </p>
+        <button
+          class="mt-3 text-sm font-medium hover:underline"
+          :style="{ color: accent }"
+          @click="searchHelp"
+        >
+          Try again
+        </button>
+      </div>
+      <p
+        v-else-if="!helpGroups.length"
+        class="text-center py-10 text-sm text-dimmed"
+        role="status"
+      >
+        {{ helpQuery.trim() ? `No articles match “${helpQuery.trim()}”.` : 'No articles published yet.' }}
       </p>
 
       <div
-        v-for="g in filteredGroups"
+        v-for="g in helpGroups"
         v-else
         :key="g.id"
         class="mb-5"
@@ -722,6 +815,17 @@ onBeforeUnmount(() => {
         class="w-full rounded-xl bg-elevated ring-1 ring-default px-3.5 py-2.5 text-sm outline-none focus:ring-2 transition-shadow"
         :style="{ '--tw-ring-color': accent }"
       >
+      <label
+        v-if="workspace?.reply_email_enabled && prechat.email.trim()"
+        class="-mt-1 flex cursor-pointer items-start gap-2 rounded-lg p-1 text-[11px] leading-4 text-muted"
+      >
+        <input
+          v-model="prechat.replyEmailConsent"
+          type="checkbox"
+          class="mt-0.5 size-3.5 shrink-0 accent-current"
+        >
+        <span>Email me one private return link when a teammate replies. I can unsubscribe anytime.</span>
+      </label>
       <textarea
         v-model="prechat.message"
         rows="3"
@@ -767,14 +871,16 @@ onBeforeUnmount(() => {
             />
           </span>
           <p class="font-display text-base font-semibold text-highlighted">
-            {{ greeting }}
+            {{ messagingAvailable ? greeting : 'Messaging unavailable' }}
           </p>
           <p class="text-sm text-muted max-w-60">
-            {{ businessOnline
-              ? intro
-              : awayLabel
-                ? `${offlineMessage} ${awayLabel}.`
-                : offlineMessage }}
+            {{ !messagingAvailable
+              ? 'This chat cannot receive new messages right now.'
+              : businessOnline
+                ? intro
+                : awayLabel
+                  ? `${offlineMessage} ${awayLabel}.`
+                  : offlineMessage }}
           </p>
         </div>
 
@@ -844,9 +950,10 @@ onBeforeUnmount(() => {
                     alt="Image attachment"
                   >
                 </a>
-                <template v-if="row.m.content">
-                  {{ row.m.content }}
-                </template>
+                <MessageContent
+                  v-if="row.m.content"
+                  :content="row.m.content"
+                />
               </div>
             </div>
             <!-- group meta: time / sending state -->
@@ -977,68 +1084,106 @@ onBeforeUnmount(() => {
 
       <!-- composer -->
       <div class="shrink-0 border-t border-default bg-elevated/50 p-3">
-        <p
-          v-if="!businessOnline && messages.length"
-          class="pb-2 text-[11px] text-dimmed text-center"
+        <div
+          v-if="!messagingAvailable"
+          class="flex items-center justify-center gap-2 rounded-xl bg-elevated px-3 py-3 text-center text-xs text-muted ring-1 ring-default"
+          role="status"
         >
-          {{ awayLabel ? `We’re away right now — ${awayLabel}.` : 'We’re away right now — we’ll reply as soon as we’re back.' }}
-        </p>
-        <p
-          v-if="uploadError"
-          class="pb-2 text-[11px] text-red-500 text-center"
-        >
-          {{ uploadError }}
-        </p>
-        <div class="flex items-end gap-2">
-          <input
-            ref="fileEl"
-            type="file"
-            accept="image/*"
-            class="hidden"
-            @change="onFilePicked"
-          >
-          <button
-            class="grid place-items-center size-9 shrink-0 rounded-xl text-dimmed hover:text-highlighted hover:bg-elevated transition disabled:opacity-50"
-            :disabled="uploading"
-            aria-label="Attach an image (max 1 MB)"
-            @click="pickImage"
-          >
-            <UIcon
-              :name="uploading ? 'i-lucide-loader-circle' : 'i-lucide-image-plus'"
-              class="size-5"
-              :class="uploading && 'animate-spin'"
-            />
-          </button>
-          <div
-            class="flex-1 flex items-end rounded-xl bg-default px-3 py-1 transition-shadow min-w-0"
-            :class="composerFocused ? 'ring-2' : 'ring-1 ring-default'"
-            :style="composerFocused ? { '--tw-ring-color': accent } : {}"
-          >
-            <textarea
-              ref="composerEl"
-              v-model="draft"
-              rows="1"
-              placeholder="Type a message…"
-              class="flex-1 max-h-30 bg-transparent py-1.5 text-sm outline-none resize-none"
-              @input="onInput"
-              @keydown.enter.exact.prevent="onSend"
-              @focus="composerFocused = true"
-              @blur="onComposerBlur"
-            />
-          </div>
-          <button
-            class="grid place-items-center size-9 shrink-0 rounded-xl transition enabled:hover:brightness-110 enabled:active:scale-90 disabled:opacity-40"
-            :style="{ background: accent, color: onAccent }"
-            :disabled="!draft.trim()"
-            aria-label="Send"
-            @click="onSend"
-          >
-            <UIcon
-              name="i-lucide-arrow-up"
-              class="size-4"
-            />
-          </button>
+          <UIcon
+            name="i-lucide-message-circle-off"
+            class="size-4 shrink-0 text-dimmed"
+          />
+          Messaging is unavailable for this chat.
         </div>
+        <template v-else>
+          <div
+            v-if="workspace?.reply_email_enabled && visitorEmail && messages.length"
+            class="mb-2 flex items-center justify-between gap-2 rounded-xl bg-default px-3 py-2 text-[11px] ring-1 ring-default"
+          >
+            <span class="min-w-0 text-muted">
+              <template v-if="replyEmailEnabled">
+                We’ll email {{ maskedEmail(visitorEmail) }} if you leave before a reply.
+              </template>
+              <template v-else>
+                Want a private email when there’s a reply?
+              </template>
+            </span>
+            <button
+              type="button"
+              class="shrink-0 font-semibold hover:underline disabled:opacity-50"
+              :style="{ color: accent }"
+              :disabled="replyPreferenceSaving"
+              @click="setReplyPreference(!replyEmailEnabled)"
+            >
+              {{ replyEmailEnabled ? 'Turn off' : 'Email me' }}
+            </button>
+          </div>
+          <p
+            v-if="!businessOnline && messages.length"
+            class="pb-2 text-[11px] text-dimmed text-center"
+          >
+            {{ awayLabel ? `We’re away right now — ${awayLabel}.` : 'We’re away right now — we’ll reply as soon as we’re back.' }}
+          </p>
+          <p
+            v-if="uploadError"
+            class="pb-2 text-[11px] text-red-500 text-center"
+          >
+            {{ uploadError }}
+          </p>
+          <div class="flex items-end gap-2">
+            <input
+              v-if="workspace?.attachments_available"
+              ref="fileEl"
+              type="file"
+              accept="image/*"
+              class="hidden"
+              @change="onFilePicked"
+            >
+            <button
+              v-if="workspace?.attachments_available"
+              class="grid place-items-center size-9 shrink-0 rounded-xl text-dimmed hover:text-highlighted hover:bg-elevated transition disabled:opacity-50"
+              :disabled="uploading"
+              title="Attach an image (max 1 MB)"
+              aria-label="Attach an image (max 1 MB)"
+              @click="pickImage"
+            >
+              <UIcon
+                :name="uploading ? 'i-lucide-loader-circle' : 'i-lucide-image-plus'"
+                class="size-5"
+                :class="uploading && 'animate-spin'"
+              />
+            </button>
+            <div
+              class="flex-1 flex items-end rounded-xl bg-default px-3 py-1 transition-shadow min-w-0"
+              :class="composerFocused ? 'ring-2' : 'ring-1 ring-default'"
+              :style="composerFocused ? { '--tw-ring-color': accent } : {}"
+            >
+              <textarea
+                ref="composerEl"
+                v-model="draft"
+                rows="1"
+                placeholder="Type a message…"
+                class="flex-1 max-h-30 bg-transparent py-1.5 text-sm outline-none resize-none"
+                @input="onInput"
+                @keydown.enter.exact.prevent="onSend"
+                @focus="composerFocused = true"
+                @blur="onComposerBlur"
+              />
+            </div>
+            <button
+              class="grid place-items-center size-9 shrink-0 rounded-xl transition enabled:hover:brightness-110 enabled:active:scale-90 disabled:opacity-40"
+              :style="{ background: accent, color: onAccent }"
+              :disabled="!draft.trim()"
+              aria-label="Send"
+              @click="onSend"
+            >
+              <UIcon
+                name="i-lucide-arrow-up"
+                class="size-4"
+              />
+            </button>
+          </div>
+        </template>
       </div>
     </template>
 

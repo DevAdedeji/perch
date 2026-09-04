@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { and, eq, sql, widgetInstallationSignals } from '@perch/db'
+import { safeErrorSummary } from './request-security'
 
 export interface InstallationPage {
   url: string
@@ -182,7 +183,10 @@ export async function recordWidgetInstallation(
     })
   } catch (error) {
     installationSignalDebouncer.forget(workspaceId, pageHash, writeTime)
-    console.error('[installation] could not record widget load', { workspaceId, error })
+    console.error('[installation] could not record widget load', {
+      workspaceId,
+      ...safeErrorSummary(error)
+    })
     return false
   }
 }

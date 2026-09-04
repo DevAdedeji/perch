@@ -9,7 +9,7 @@ import * as Sentry from '@sentry/nuxt'
  */
 export default defineNitroPlugin(() => {
   process.on('unhandledRejection', (reason) => {
-    console.error('[unhandledRejection]', reason)
+    console.error('[unhandledRejection]', safeErrorSummary(reason))
     try {
       Sentry.captureException(reason)
     } catch {

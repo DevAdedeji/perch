@@ -1,6 +1,8 @@
-import { eq, sessions } from '@perch/db'
+import { and, eq, gt, lt, sessions } from '@perch/db'
 import type { H3Event } from 'h3'
 import type { SessionUser } from './require-user'
+import { encodeSessionClientContext, SESSION_IDLE_TTL_MS } from './client-context'
+import { disconnectAgentSessions } from './realtime'
 
 /**
  * Server-side session registry (sealed cookies alone can't be revoked).
@@ -18,6 +20,7 @@ const BUMP_MS = 5 * 60_000
 interface CacheEntry {
   until: number
   lastBump: number
+  userId: string
 }
 
 const alive = new Map<string, CacheEntry>()
@@ -26,12 +29,12 @@ const alive = new Map<string, CacheEntry>()
 export async function createDbSession(event: H3Event, user: SessionUser) {
   const [row] = await useDb().insert(sessions).values({
     userId: user.id,
-    userAgent: (getHeader(event, 'user-agent') ?? '').slice(0, 300) || null,
+    userAgent: encodeSessionClientContext(getHeader(event, 'user-agent')),
     ip: requestIp(event)
   }).returning()
 
   await setUserSession(event, { user, sessionId: row!.id })
-  alive.set(row!.id, { until: Date.now() + CACHE_MS, lastBump: Date.now() })
+  alive.set(row!.id, { until: Date.now() + CACHE_MS, lastBump: Date.now(), userId: user.id })
   return row!
 }
 
@@ -45,19 +48,30 @@ export async function assertSessionAlive(event: H3Event, sessionId: string | und
 
   const now = Date.now()
   const hit = alive.get(sessionId)
-  if (hit && hit.until > now) return
+  if (hit && hit.until > now && hit.userId === userId) return
 
-  const row = await useDb().query.sessions.findFirst({ where: eq(sessions.id, sessionId) })
+  const idleCutoff = new Date(now - SESSION_IDLE_TTL_MS)
+  const row = await useDb().query.sessions.findFirst({
+    where: and(
+      eq(sessions.id, sessionId),
+      eq(sessions.userId, userId),
+      gt(sessions.lastSeenAt, idleCutoff)
+    )
+  })
   if (!row || row.userId !== userId) {
     alive.delete(sessionId)
+    await useDb().delete(sessions).where(and(
+      eq(sessions.id, sessionId),
+      lt(sessions.lastSeenAt, idleCutoff)
+    ))
     await clearUserSession(event)
     throw createError({ statusCode: 401, statusMessage: 'Session expired — please sign in again' })
   }
 
   const lastBump = hit?.lastBump ?? 0
-  alive.set(sessionId, { until: now + CACHE_MS, lastBump })
+  alive.set(sessionId, { until: now + CACHE_MS, lastBump, userId })
   if (now - lastBump > BUMP_MS) {
-    alive.set(sessionId, { until: now + CACHE_MS, lastBump: now })
+    alive.set(sessionId, { until: now + CACHE_MS, lastBump: now, userId })
     // fire-and-forget — last-seen freshness is never worth failing a request
     useDb().update(sessions).set({ lastSeenAt: new Date() }).where(eq(sessions.id, sessionId))
       .catch(() => {})
@@ -67,6 +81,13 @@ export async function assertSessionAlive(event: H3Event, sessionId: string | und
 /** Evict revoked ids from the liveness cache so revocation is instant here. */
 export function forgetSessions(ids: string[]) {
   for (const id of ids) alive.delete(id)
+  disconnectAgentSessions(ids)
+}
+
+/** A ticket is issued only after `requireUser` refreshes this same-replica cache. */
+export function isSessionAliveForRealtime(sessionId: string, userId: string): boolean {
+  const entry = alive.get(sessionId)
+  return !!entry && entry.userId === userId && entry.until > Date.now()
 }
 
 /** The current request's registry session id (from the sealed cookie). */

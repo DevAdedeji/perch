@@ -50,6 +50,7 @@ export interface VisitorMetadata {
   installation_preview?: boolean
   ua?: string
   browser?: string
+  os?: string
   device?: string
   referrer?: string
 }
@@ -67,12 +68,24 @@ export interface ConversationDTO {
   created_at: string
   updated_at: string
   resolved_at: string | null
+  is_spam: boolean
+}
+
+export type ResponseSlaStatus = 'due' | 'approaching' | 'breached' | 'answered' | 'paused'
+
+export interface ResponseSlaDTO {
+  status: ResponseSlaStatus
+  target_minutes: number
+  started_at: string | null
+  approaching_at: string | null
+  due_at: string | null
+  paused_until: string | null
 }
 
 export type InboxSnoozedFilter = 'exclude' | 'include' | 'only'
 
 export interface SavedInboxFilters {
-  status: ConversationStatus | 'all'
+  status: ConversationStatus | 'all' | 'spam'
   assignee: 'any' | 'me' | 'unassigned' | string
   priorities: ConversationPriority[]
   tag_ids: string[]
@@ -89,6 +102,7 @@ export type AutomationRuleConfig
     | { hours: number }
 
 export interface MessageDTO {
+  client_message_id?: string | null
   id: string
   conversation_id: string
   sender_type: SenderType
@@ -102,6 +116,7 @@ export interface MessageDTO {
 }
 
 export interface VisitorMessageDTO {
+  client_message_id?: string | null
   id: string
   conversation_id: string
   sender_type: SenderType

@@ -1,9 +1,9 @@
 <script setup lang="ts">
 const links = [
-  { label: 'Features', to: '#features' },
-  { label: 'Control Room', to: '#control-room' },
-  { label: 'How it works', to: '#how' },
-  { label: 'Pricing', to: '#pricing' }
+  { label: 'Features', to: '/#features' },
+  { label: 'Control Room', to: '/#control-room' },
+  { label: 'How it works', to: '/#how' },
+  { label: 'Pricing', to: '/pricing' }
 ]
 
 const { loggedIn, ensureLoaded } = useAuth()

@@ -82,8 +82,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <!-- the panel is dark in both color modes, the way the Control Room reads best -->
-  <aside class="dark relative isolate hidden overflow-hidden bg-slate-950 lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col lg:justify-between lg:border-r lg:border-slate-700 lg:px-10 lg:py-9 xl:px-14">
+  <aside class="relative isolate hidden overflow-hidden bg-slate-50 lg:sticky lg:top-0 lg:flex lg:h-screen lg:flex-col lg:justify-between lg:border-r lg:border-default lg:px-10 lg:py-9 xl:px-14 dark:bg-slate-950">
     <div class="bg-grid pointer-events-none absolute inset-0 z-0 opacity-40" />
 
     <NuxtLink
@@ -97,14 +96,14 @@ onBeforeUnmount(() => {
     <div class="relative z-10 my-8">
       <h2 class="font-display text-3xl font-bold leading-tight tracking-tight text-highlighted xl:text-4xl">
         Live chat that feels
-        <span class="text-primary-400">instant</span>.
+        <span class="text-primary-600 dark:text-primary-400">instant</span>.
       </h2>
       <p class="mt-3 max-w-md text-sm text-muted">
         Watch a conversation travel from a visitor’s screen to your team and back.
       </p>
 
       <!-- the scene: fixed height, messages stack up from the bottom like a real thread -->
-      <div class="mt-7 w-full max-w-md overflow-hidden rounded-2xl bg-elevated/60 ring-1 ring-default">
+      <div class="mt-7 w-full max-w-md overflow-hidden rounded-2xl bg-default/80 ring-1 ring-default dark:bg-elevated/60">
         <div class="flex items-center gap-2.5 border-b border-default px-4 py-3">
           <span class="avatar-primary grid size-8 place-items-center rounded-lg text-xs font-bold">AS</span>
           <div class="min-w-0">
@@ -115,8 +114,8 @@ onBeforeUnmount(() => {
               Control Room · shared inbox
             </p>
           </div>
-          <span class="ml-auto flex items-center gap-1.5 rounded-full bg-green-500/10 px-2 py-0.5 text-[11px] font-medium text-green-400 ring-1 ring-green-500/20">
-            <span class="size-1.5 rounded-full bg-green-400" />
+          <span class="ml-auto flex items-center gap-1.5 rounded-full bg-green-500/10 px-2 py-0.5 text-[11px] font-medium text-green-700 ring-1 ring-green-500/20 dark:text-green-400">
+            <span class="size-1.5 rounded-full bg-green-500 dark:bg-green-400" />
             live
           </span>
         </div>
@@ -160,7 +159,7 @@ onBeforeUnmount(() => {
           >
             <div
               v-if="claimed"
-              class="flex w-fit items-center gap-1.5 self-center rounded-full bg-primary-500/10 px-2.5 py-1 text-[11px] font-medium text-primary-300 ring-1 ring-primary-500/25"
+              class="flex w-fit items-center gap-1.5 self-center rounded-full bg-primary-500/10 px-2.5 py-1 text-[11px] font-medium text-primary-700 ring-1 ring-primary-500/25 dark:text-primary-300"
             >
               <UIcon
                 name="i-lucide-hand"
@@ -194,7 +193,7 @@ onBeforeUnmount(() => {
           >
             <div
               v-if="agentSent"
-              class="max-w-[82%] self-end rounded-2xl rounded-br-md bg-primary-500 px-3.5 py-2 text-sm leading-snug font-medium text-slate-900"
+              class="max-w-[82%] self-end rounded-2xl rounded-br-md bg-primary-500 px-3.5 py-2 text-sm leading-snug font-medium text-slate-950"
             >
               {{ AGENT_MSG }}
             </div>
@@ -204,7 +203,7 @@ onBeforeUnmount(() => {
         <div class="flex items-center gap-2 border-t border-default bg-default/40 px-4 py-2.5 font-mono text-[11px] text-dimmed">
           <UIcon
             name="i-lucide-radio"
-            class="size-3.5 shrink-0 text-primary-400"
+            class="size-3.5 shrink-0 text-primary-600 dark:text-primary-400"
           />
           <span class="truncate">{{ wire }}</span>
           <span class="ml-auto shrink-0">websocket</span>
@@ -226,7 +225,7 @@ onBeforeUnmount(() => {
         >
           <UIcon
             :name="proof?.icon ?? ''"
-            class="mt-0.5 size-4 shrink-0 text-primary-400"
+            class="mt-0.5 size-4 shrink-0 text-primary-600 dark:text-primary-400"
           />
           {{ proof?.text }}
         </p>
@@ -237,7 +236,7 @@ onBeforeUnmount(() => {
           v-for="(p, i) in proofs"
           :key="p.icon"
           class="h-1 rounded-full transition-all duration-500"
-          :class="i === proofIndex ? 'w-6 bg-primary-400' : 'w-1.5 bg-slate-600'"
+          :class="i === proofIndex ? 'w-6 bg-primary-500 dark:bg-primary-400' : 'w-1.5 bg-accented'"
         />
       </div>
     </div>

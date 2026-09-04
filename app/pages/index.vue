@@ -24,8 +24,7 @@ useHead(() => ({
           '@id': `${siteUrl.value}/#organization`,
           'name': 'Perch',
           'url': siteUrl.value,
-          'logo': `${siteUrl.value}/favicon.svg`,
-          'sameAs': ['https://github.com/DevAdedeji/perch']
+          'logo': `${siteUrl.value}/favicon.svg`
         },
         {
           '@type': 'SoftwareApplication',
@@ -37,7 +36,7 @@ useHead(() => ({
           'description': 'Real-time website live chat with a shared inbox, conversation ownership, private notes, saved replies and team handoffs.',
           'offers': {
             '@type': 'Offer',
-            'price': '0',
+            'price': '9.00',
             'priceCurrency': 'USD'
           },
           'publisher': { '@id': `${siteUrl.value}/#organization` }
@@ -71,10 +70,10 @@ function copySnippet() {
 
 // plain-language numbers under the demo
 const stats = [
-  { value: '<1s', label: 'Message delivery' },
-  { value: '2 min', label: 'From signup to live' },
+  { value: 'Live', label: 'Realtime updates' },
+  { value: '1', label: 'Shared team inbox' },
   { value: '1 line', label: 'Of code to install' },
-  { value: '0', label: 'Double-answered chats' }
+  { value: '1 owner', label: 'Per conversation' }
 ]
 
 // what the team actually gets — written for humans, not engineers
@@ -87,7 +86,7 @@ const benefits = [
   {
     icon: 'i-lucide-hand',
     title: 'Claim chats, don’t collide',
-    desc: 'One click makes a conversation yours. If two teammates reach for the same one, the first wins and the other is told instantly — visitors never get two competing replies.'
+    desc: 'One click makes a conversation yours. If two teammates reach for the same one, the first wins and only that teammate becomes its owner.'
   },
   {
     icon: 'i-lucide-users',
@@ -140,6 +139,7 @@ const claimSql = 'UPDATE conversations\nSET assigned_agent_id = $me, status = \'
       </div>
 
       <UContainer>
+        <SandboxPaymentNotice class="mx-auto mb-8 max-w-3xl" />
         <div class="text-center max-w-3xl mx-auto">
           <div class="inline-flex items-center gap-2 rounded-full glass ring-1 ring-primary-500/30 px-3 py-1.5 text-xs">
             <span class="relative flex size-2">
@@ -171,7 +171,7 @@ const claimSql = 'UPDATE conversations\nSET assigned_agent_id = $me, status = \'
               trailing-icon="i-lucide-arrow-right"
               class="font-semibold shadow-lg shadow-primary-500/25"
             >
-              Get started free
+              Get started
             </UButton>
             <UButton
               to="#how"
@@ -180,7 +180,7 @@ const claimSql = 'UPDATE conversations\nSET assigned_agent_id = $me, status = \'
               variant="subtle"
               icon="i-lucide-code"
             >
-              Set up in 2 minutes
+              See how it works
             </UButton>
           </div>
         </div>
@@ -222,11 +222,11 @@ const claimSql = 'UPDATE conversations\nSET assigned_agent_id = $me, status = \'
       <UContainer>
         <div class="text-center max-w-2xl mx-auto">
           <h2 class="font-display text-4xl sm:text-5xl font-bold tracking-tight text-highlighted">
-            Everything your support team needs.
+            The essentials your support team needs.
           </h2>
           <p class="mt-4 text-lg text-muted">
-            Nothing you have to configure. Sign up, add the bubble to your site, and this
-            is what your team works with.
+            Start with sensible defaults, add the bubble to your site, and shape the workspace
+            around the way your team works.
           </p>
         </div>
 
@@ -308,7 +308,7 @@ const claimSql = 'UPDATE conversations\nSET assigned_agent_id = $me, status = \'
                 under the hood
               </p>
               <h2 class="mt-3 font-display text-3xl sm:text-4xl font-bold tracking-tight text-highlighted">
-                Also an open-source engineering build.
+                Built for dependable real-time support.
               </h2>
               <p class="mt-4 text-muted leading-relaxed">
                 For the technically curious: Perch runs on real WebSockets end to end, with
@@ -317,14 +317,13 @@ const claimSql = 'UPDATE conversations\nSET assigned_agent_id = $me, status = \'
                 itself — first one wins, guaranteed, no matter the timing.
               </p>
               <UButton
-                to="https://github.com/DevAdedeji/perch"
-                target="_blank"
+                to="/pricing"
                 class="mt-6"
                 color="neutral"
                 variant="subtle"
-                icon="i-simple-icons-github"
+                icon="i-lucide-arrow-right"
               >
-                Read the source
+                View plans
               </UButton>
             </div>
             <pre class="rounded-xl bg-default ring-1 ring-default p-5 font-mono text-xs sm:text-[13px] leading-relaxed text-highlighted overflow-x-auto">{{ claimSql }}</pre>
@@ -352,31 +351,41 @@ const claimSql = 'UPDATE conversations\nSET assigned_agent_id = $me, status = \'
       </UContainer>
     </section>
 
-    <!-- ═══════════════ PRICING — one honest strip ═══════════════ -->
+    <!-- ═══════════════ PRICING ═══════════════ -->
     <section
       id="pricing"
       class="relative py-16 scroll-mt-16"
     >
       <UContainer>
-        <div class="rounded-3xl border-glow bg-elevated/30 glass px-8 py-12 sm:px-14 grid lg:grid-cols-[1fr_auto] gap-8 items-center">
-          <div>
-            <h2 class="font-display text-3xl sm:text-4xl font-bold tracking-tight text-highlighted">
-              Free. <span class="text-accent">All of it.</span>
-            </h2>
-            <p class="mt-3 max-w-xl text-muted leading-relaxed">
-              Every feature, unlimited teammates, unlimited conversations. No credit card,
-              no trial clock. If that ever changes, this is where the plans would live.
-            </p>
+        <div class="mx-auto max-w-2xl text-center">
+          <p class="text-sm font-semibold uppercase tracking-[0.2em] text-primary-600 dark:text-primary-400">
+            Simple pricing
+          </p>
+          <h2 class="mt-3 font-display text-3xl font-bold tracking-tight text-highlighted sm:text-4xl">
+            One price for your whole workspace.
+          </h2>
+          <p class="mt-3 text-muted">
+            Launch pricing starts at $9 per month. No per-seat tax and no limit on customer conversations.
+          </p>
+        </div>
+        <div class="mx-auto mt-10 max-w-3xl rounded-3xl border border-primary-500/50 bg-primary-500/5 p-7 glass sm:p-9">
+          <div class="grid gap-6 sm:grid-cols-[1fr_auto] sm:items-center">
+            <div>
+              <p class="font-display text-4xl font-bold text-highlighted">
+                $9 <span class="text-base font-normal text-muted">/ workspace / month</span>
+              </p>
+              <p class="mt-2 text-sm text-muted">
+                Unlimited teammates on Pro, custom reminders and your own branding.
+              </p>
+            </div>
+            <UButton
+              to="/pricing"
+              size="lg"
+              trailing-icon="i-lucide-arrow-right"
+            >
+              See plans
+            </UButton>
           </div>
-          <UButton
-            to="/signup"
-            size="lg"
-            color="primary"
-            trailing-icon="i-lucide-arrow-right"
-            class="font-semibold justify-self-start lg:justify-self-end"
-          >
-            Create a workspace
-          </UButton>
         </div>
       </UContainer>
     </section>
@@ -408,17 +417,16 @@ const claimSql = 'UPDATE conversations\nSET assigned_agent_id = $me, status = \'
               trailing-icon="i-lucide-arrow-right"
               class="font-semibold shadow-lg shadow-primary-500/25"
             >
-              Get started free
+              Get started
             </UButton>
             <UButton
-              to="https://github.com/DevAdedeji/perch"
-              target="_blank"
+              to="#how"
               size="xl"
               color="neutral"
               variant="subtle"
-              icon="i-simple-icons-github"
+              icon="i-lucide-code"
             >
-              Star on GitHub
+              See the installation
             </UButton>
           </div>
         </div>

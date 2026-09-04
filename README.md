@@ -1,17 +1,32 @@
 # Perch 🐦
 
-**A live-chat support platform, built from scratch — real WebSockets, multi-tenant, embeddable.**
+**A fast, easy Intercom alternative — real-time, multi-tenant, and embeddable.**
 
-Perch is a hosted live-chat product in the vein of Intercom, Crisp, and Tawk.to. A business signs up,
-creates a workspace, and drops a single `<script>` tag on their site. Visitors chat from a floating
-widget; support agents answer from a real-time **Control Room** dashboard — with presence, typing
-indicators, unread state, and race-safe conversation claiming.
+Perch is a hosted customer-support platform in the vein of Intercom, Crisp, and Tawk.to. A business
+creates a workspace and adds one `<script>` tag to its site. Visitors chat from a floating widget;
+support teams reply from a real-time **Control Room** with a shared inbox, team collaboration,
+automations, a help center, proactive messages, and simple workspace pricing.
 
 > Built from scratch and run as a real product: real-time systems, presence, multi-tenancy with
-> auth scoping, secure third-party embedding, and concurrency correctness — all open source.
-> Every dependency is free or on a genuine free tier.
+> auth scoping, secure third-party embedding, and concurrency correctness.
 
 **Live:** https://useperch.xyz &nbsp;·&nbsp; **Stack:** Nuxt 4 · Nitro WebSockets · Drizzle · Neon Postgres
+
+Built as a portfolio application demonstrating complete customer-support
+workflows. A working demo is not a claim of production certification or customer
+adoption. The app labels sandbox payments when that environment is configured.
+
+## Try the main journey
+
+Create your own test workspace, open Installation, and add the widget to a page
+you control. Send a visitor message from a separate browser session, claim it in
+the inbox, reply, leave an internal note, and resolve it. Invite another test
+account to explore reassignment and Nest mentions; publish a sample help article
+to see it in the widget.
+
+Use only your own test data. Sandbox billing does not move real money, but chat,
+email, uploads, and outbound webhooks are still real actions. Do not contact
+uninvolved people or enter real card details in test checkout.
 
 ![Landing page](docs/screenshots/landing.png)
 
@@ -20,7 +35,8 @@ visitor context panel:
 
 ![Control Room inbox](docs/screenshots/dashboard.png)
 
-**The widget** your visitors see — presence, read receipts, image attachments:
+**The widget** your visitors see — presence, read receipts, and optional image attachments when
+Cloudinary is configured:
 
 <p align="center">
   <img src="docs/screenshots/widget.png" alt="Embedded chat widget" width="400">
@@ -32,19 +48,24 @@ visitor context panel:
 
 **For the business (the Control Room)**
 - Email/password or Google auth with sealed-cookie sessions; a user can belong to multiple workspaces.
-- Real-time inbox with priority, snoozing, advanced filters, tags, and personal saved views.
-- **Claim / assign / reassign** conversations, with an atomic first-claim-wins race guard.
-- Per-agent unread tracking, internal notes (never leaked to the visitor), resolve/reopen.
+- Real-time shared inbox with priority, snoozing, search, bulk actions, tags, advanced filters, and personal saved views.
+- **Claim / assign / reassign** conversations, with an atomic first-claim-wins race guard and role-aware visibility.
+- Per-agent unread tracking, internal notes, teammate mentions and notifications, resolve/reopen, canned replies, and image attachments.
+- **Nest** team chat with presence, `@mentions`, notification delivery, and consistent message threads.
 - Live team presence (online / away / offline) and role-scoped visibility (agents see unassigned + their own; admins see everything).
-- Settings: workspace name, copyable embed snippet, pre-chat toggle, and team management (invite / remove / change role).
-- In-dashboard toast + notification sound on new messages.
+- Help-center articles and groups, with public search inside the hosted help center and widget.
+- Visitor and support analytics, response targets, personal notification preferences, browser notifications, and optional unanswered-message email reminders.
 - Template-driven automations for round-robin and page routing, verified VIP tagging, inactivity reminders, and safe automatic closing.
+- Proactive widget triggers based on page matching and time on page.
+- Team management, audit history, outbound conversation webhooks, operator metrics, and recoverable background-job failures.
+- Free and Pro workspace entitlements with Bachs checkout, signed webhooks, canonical provider verification, and durable reconciliation.
 
 **For the visitor (the widget)**
 - One `<script>` tag, no build step, isolated in an iframe so it can't collide with the host site.
 - Anonymous identity via a `localStorage` `visitor_id` — closing/refreshing resumes the same conversation.
 - Live thread, agent typing indicator, and a "business online/offline" status.
 - Optional pre-chat form (name / email), toggleable per workspace.
+- Help-center search without leaving the widget, optional image attachments, and explicit opt-in for email replies.
 - **`Perch.identify()`** — sites with signed-in users pass `{ user_id, name, email }` so pre-chat is
   skipped and agents see who they're talking to, with optional **HMAC identity verification** so
   visitors can't impersonate each other (see below).
@@ -59,11 +80,12 @@ visitor context panel:
     user_id: 'user_42',
     name: 'Ada Lovelace',
     email: 'ada@example.com',
-    hash: '<hmac from your server>' // required if verification is enforced
+    hash: '<hmac of user id from your server>', // required if verification is enforced
+    email_hash: '<hmac of normalized email from your server>'
   }
 
   // or, for logins that happen after page load (SPA):
-  Perch.identify({ user_id, name, email, hash })
+  Perch.identify({ user_id, name, email, hash, email_hash })
 </script>
 ```
 
@@ -75,9 +97,29 @@ workspace's secret — computed on the business's server, never in the browser:
 // Node.js — on YOUR server
 import { createHmac } from 'node:crypto'
 const hash = createHmac('sha256', PERCH_IDENTITY_SECRET).update(user.id).digest('hex')
+const email_hash = createHmac('sha256', PERCH_IDENTITY_SECRET).update(user.email.toLowerCase()).digest('hex')
 ```
 
+`hash` proves the user ID. When an email accompanies a user ID, `email_hash` separately proves the
+email address. A signed address is still not a subscription: when visitor reply email is enabled,
+the visitor explicitly chooses reply emails in the widget.
+
 Verified visitors get a green **Verified** badge in the agent's context panel.
+
+---
+
+## Plans
+
+Perch prices the workspace, not each teammate:
+
+| Plan | Price | Includes |
+|---|---:|---|
+| Free | $0 | Unlimited conversations, 2 teammates, shared inbox, Nest, help center, core automations, and 15-minute unanswered-message reminders |
+| Pro | $9/month or $90/year | Everything in Free, unlimited teammates, configurable reminder timing, business-hours delivery, and removable Perch branding |
+
+Sandbox checkout is verified on staging. Live Bachs checkout remains fail-closed until the provider's
+recurring subscription response contract is verified authoritatively; existing webhook and
+reconciliation processing remains independent of the new-checkout switch.
 
 ---
 
@@ -98,12 +140,14 @@ Verified visitors get a green **Verified** badge in the agent's context panel.
   internal notes are filtered **server-side** before they ever reach a visitor socket.
 - **Production hardening.** Rate limiting on every public and auth endpoint (per-IP and per-account
   brute-force throttles, per-visitor message caps), a full password-reset flow with single-use
-  hashed tokens, transactional email (Resend) for resets and team invites, a per-workspace
+  hashed tokens, transactional email (Resend) for resets, unanswered reminders, visitor replies, and team invites, a per-workspace
   **domain allowlist** (a copied site_id can't be embedded on a stranger's site), Sentry error
-  tracking, and a real `/api/health` check.
+  tracking, attachment cleanup recovery, signed provider webhooks, billing reconciliation, and a
+  real `/api/health` check.
 - **Tested where it hurts.** A Vitest suite covers the security-critical invariants: ticket
-  signing/tampering/expiry, identity HMAC verification, the domain allowlist (including suffix
-  look-alike attacks), rate-limit windows, and agent visibility scoping — `pnpm test`.
+  signing/tampering/expiry, identity HMAC verification, authorization, domain look-alike attacks,
+  rate limits, notification races, webhook retries, payment verification, reconciliation, and agent
+  visibility scoping — `pnpm test`.
 - **A deliberate, documented scaling path** (`publish()` → Redis pub/sub) that is intentionally *not*
   built for v1 — see [Scaling](#scaling-the-real-time-layer).
 
@@ -139,7 +183,14 @@ only the connection lifecycle, authorized subscription, presence, and typing rel
 enforced with a `publishFiltered(channel, event, predicate)` that checks each peer's role/member id
 against the conversation's assignee.
 
-### Tech stack (all free / free-tier)
+### Scaling the real-time layer
+
+The current production shape intentionally runs one application instance. Before adding replicas,
+replace the in-memory publish/subscribe bus and presence registry with shared infrastructure such as
+Redis pub/sub plus expiring presence records. The REST mutations, typed event contract, channel
+authorization, and filtered delivery rules can remain unchanged.
+
+### Tech stack
 
 | Concern | Choice |
 |---|---|
@@ -151,7 +202,7 @@ against the conversation's assignee.
 | ORM | Drizzle (schema + migrations) |
 | Dashboard auth | nuxt-auth-utils (sealed cookie sessions) |
 | Visitor auth | short-lived HMAC-signed WS tickets scoped to `site_id` + `visitor_id` |
-| Hosting | Render (single long-lived Nitro process) |
+| Hosting | A long-lived container host such as Railway (single Nitro process) |
 
 ---
 
@@ -169,7 +220,7 @@ perch/
 │   ├── db/                 # Drizzle schema + migrations
 │   └── widget-loader/      # vanilla TS → builds widget.js (the embeddable file)
 ├── Dockerfile              # multi-stage build → self-contained Nitro .output
-└── PRD.md                  # the product spec this was built against
+└── docs/LAUNCH_OPERATIONS.md # deployment and recovery checks
 ```
 
 ---
@@ -196,7 +247,8 @@ pnpm dev
 ```
 
 Useful scripts: `pnpm build` (production Nitro bundle), `pnpm preview`, `pnpm lint`, `pnpm typecheck`,
-`pnpm test` (Vitest — tickets, HMAC identity, domain allowlist, rate limits, visibility scoping).
+and `pnpm test`. Database-backed integration tests run when `TEST_DATABASE_URL` points to an isolated
+test database; never point destructive integration tests at staging or production.
 
 ### Environment variables
 
@@ -207,35 +259,59 @@ Useful scripts: `pnpm build` (production Nitro bundle), `pnpm preview`, `pnpm li
 | `NUXT_OAUTH_GOOGLE_CLIENT_ID` / `NUXT_OAUTH_GOOGLE_CLIENT_SECRET` | *(optional)* Google OAuth web-client credentials; both are required to enable Google sign-in |
 | `NUXT_OAUTH_GOOGLE_REDIRECT_URL` | *(required with Google OAuth)* Exact callback URL registered in Google Cloud, e.g. `https://useperch.xyz/auth/google` |
 | `REALTIME_SECRET` | *(optional)* separate 32+ char HMAC secret for realtime and visitor tickets; otherwise `NUXT_SESSION_PASSWORD` is reused |
-| `RESEND_API_KEY` | *(optional)* transactional email — password resets + invite emails. Without it, emails are logged to the server console |
-| `RESEND_FROM` | *(optional)* from address, e.g. `Perch <no-reply@yourdomain.com>` |
-| `SENTRY_DSN` | *(optional)* server-side error tracking; the client DSN lives in `sentry.client.config.ts` |
-| `CLOUDINARY_CLOUD_NAME` / `CLOUDINARY_API_KEY` / `CLOUDINARY_API_SECRET` | *(optional)* signed image attachments; the secret never leaves the server |
-| `PERCH_PUBLIC_URL` | Canonical origin used in prerendered SEO metadata, password, verification, and invite links; set it to `https://useperch.xyz` during both the production build and runtime |
+| `RESEND_API_KEY` | Transactional email for password resets and invites. Optional only during local development; every production-mode deployment, including Railway staging, requires its own key |
+| `RESEND_FROM` | Verified sender, e.g. `Perch <no-reply@yourdomain.com>`. Optional only during local development and required with `RESEND_API_KEY` in deployed environments |
+| `VISITOR_REPLY_SECRET` | Separate 32+ character secret for one-time visitor return and unsubscribe links |
+| `VISITOR_EMAIL_HASH_SECRET` | Stable, separate 32+ character HMAC key for email suppression and delivery-dedup hashes. Do not rotate it during normal return-link key rotation |
+| `VISITOR_REPLY_EMAIL_FEATURE_ENABLED` | Global feature-exposure gate. When `false`, Settings and the widget do not offer visitor reply emails and the opt-in API rejects requests |
+| `VISITOR_REPLY_EMAIL_DELIVERY_ENABLED` | Independent delivery safety gate. It requires feature exposure and must remain `false` until the approved scheduled worker and Resend bounce/complaint webhook are configured |
+| `RESEND_WEBHOOK_SECRET` | Signed Resend webhook secret used to verify bounce/complaint events and durably suppress unsafe future delivery; visitor reply delivery must stay disabled until this is configured |
+| `BACHS_ENV` / `BACHS_SECRET_KEY` / `BACHS_WEBHOOK_SECRET` | Bachs subscription environment, API key, and webhook signature secret. Configure all three together |
+| `PERCH_BILLING_CHECKOUT_ENABLED` | Fail-closed gate for new paid checkouts. Explicit sandbox checkout is allowed for contract verification, but live checkout remains closed until Bachs' canonical recurring product/subscription response contract is authoritatively verified. Disabling it does not interrupt existing subscriptions or webhooks |
+| `SENTRY_DSN` / `NUXT_PUBLIC_SENTRY_DSN` | *(optional)* server and browser error tracking. The public value is exposed to the browser by design and must never contain a secret |
+| `SENTRY_ENVIRONMENT` / `NUXT_PUBLIC_SENTRY_ENVIRONMENT` | Labels server and browser events by environment, such as `staging` or `production` |
+| `CLOUDINARY_CLOUD_NAME` / `CLOUDINARY_API_KEY` / `CLOUDINARY_API_SECRET` | *(optional)* signed image attachments. Configure all three to expose uploads; existing attachment rendering remains available without upload credentials |
+| `PERCH_PUBLIC_URL` | Canonical origin used in prerendered SEO metadata and account links. Use `http://localhost:2222` locally, the staging HTTPS origin on staging, and `https://useperch.xyz` in production; it must be present during build and runtime |
 | `PERCH_ADMIN_EMAILS` | *(optional)* comma-separated operator emails allowed to access instance metrics |
 | `NUXT_PUBLIC_DEMO_SITE_ID` | *(optional)* workspace site ID used by the landing-page demo widget |
+| `PERCH_WEBHOOK_DELIVERY_ENABLED` | Safety gate for durable outbound conversation webhook processing and admin replay. Keep `false` until customer-data egress and destinations are approved |
+| `PERCH_WEBHOOK_ALLOW_LOCALHOST` | Local-only escape hatch for testing webhook receivers over HTTP. Production startup rejects it when enabled |
 
 > Nuxt only auto-maps `NUXT_`-prefixed env at runtime. The server reads the documented plain
 > environment variable names directly as production fallbacks.
+
+The visitor reply and email-hash secrets are required only when visitor reply email exposure or
+delivery is enabled. Keep the stable hash secret available for as long as suppression or delivery
+records exist: replacing it makes existing email hashes impossible to match.
 
 For Google sign-in, create an OAuth 2.0 **Web application** client in Google Cloud and register the
 exact local and deployed callback URLs (`http://localhost:2222/auth/google` and
 `https://useperch.xyz/auth/google`). Keep the client secret server-side.
 
+Provider webhook endpoints:
+
+| Provider | Staging | Production |
+|---|---|---|
+| Bachs | `https://staging.useperch.xyz/api/webhooks/bachs` | `https://useperch.xyz/api/webhooks/bachs` |
+| Resend | `https://staging.useperch.xyz/api/webhooks/resend` | `https://useperch.xyz/api/webhooks/resend` |
+
+Bachs signs billing events and Resend signs bounce/complaint events. Perch verifies each signature
+before accepting the event; do not place webhook secrets in URLs or browser code.
+
 ---
 
 ## Deployment
 
-The whole app is one Nitro process, so it deploys as a single service on a host that supports
-**long-lived WebSocket connections** (Railway, Render, Fly, a VM — *not* Vercel/Netlify/Cloud Run,
-which don't hold persistent sockets). The included multi-stage `Dockerfile` produces a
+The whole app is one Nitro process, so it deploys as a single service on a host configured for
+**long-lived WebSocket connections**. The current deployment uses Railway. The included multi-stage `Dockerfile` produces a
 self-contained `.output`, and its CMD runs **pending database migrations before booting the
 server** (`scripts/migrate.mjs`, bundled at build time) — a deploy with unapplied migrations
 fails loudly instead of serving against a stale schema.
 
-**Backups:** Neon's point-in-time restore covers recent mistakes; `scripts/backup.sh` takes the
-off-provider copy — a nightly `pg_dump | gzip` with retention pruning, meant for a cron on any
-machine (see the script header for the crontab line and restore command).
+**Backups:** Neon's point-in-time restore covers recent mistakes; `scripts/backup.sh` creates an
+atomic, checksummed PostgreSQL archive for private off-provider storage. Schedule it on an
+always-on service, then use `scripts/restore-verify.sh` for the required fresh-database restore
+drill before launch and at least monthly. See `docs/LAUNCH_OPERATIONS.md` for the checklist.
 
 Notes from getting this live on a small tier:
 - The Nitro build can OOM on small builders — the Dockerfile raises V8's heap
@@ -251,22 +327,46 @@ Notes from getting this live on a small tier:
 
 
 
-## Status & roadmap
+## Status and launch boundary
 
-**Built:** email/password and Google auth · workspaces & invites · role-scoped Control Room inbox · atomic claim / assign /
-reassign · resolve/reopen · per-agent unread · internal notes · live presence · settings & team
-management · the embeddable widget with pre-chat, typing, and presence · notification toast + sound ·
-canned responses · visitor context panel · `Perch.identify()` with HMAC verification · password
-reset & invite emails (Resend) · rate limiting · per-workspace domain allowlist · Sentry +
-`/api/health` · cursor pagination · workspace & account deletion · Vitest security suite ·
-image attachments (authenticated server-gated Cloudinary uploads, images only, ≤ 1 MB) · email verification ·
-account management (name, email change with confirm-on-new-address, password change) · security
-headers · migrations-on-deploy · privacy & terms pages · nightly backup script · revocable
-sessions (server-side registry, per-device sign-out, "sign out everywhere else").
+Perch is maintained as a public portfolio application. The main customer-support journey is built: authentication,
+workspaces, installation, shared inbox, assignment and reassignment, internal notes and mentions,
+Nest team chat, help center, automations, proactive triggers, analytics, visitor context, attachments,
+notifications, reminder emails, workspace billing, audit history, and account/workspace lifecycle controls.
+
+The repository also includes production-oriented safeguards: server-side tenant authorization,
+revocable sessions, email verification and recovery, rate limits, domain allowlists, signed visitor
+identity, signed provider webhooks, fail-closed feature gates, idempotent billing, durable background
+jobs, operator recovery screens, migrations-on-deploy, health checks, backups, and restore verification.
+
+Before public launch, complete the operational checklist in
+[`docs/LAUNCH_OPERATIONS.md`](docs/LAUNCH_OPERATIONS.md), verify the live Bachs recurring contract and
+payment lifecycle, run a restore drill, review customer-data egress, and complete production-like
+cross-role and mobile acceptance testing.
+
+### Sandbox portfolio deployment
+
+Set `BACHS_ENV=sandbox` with matching sandbox `BACHS_SECRET_KEY` and
+`BACHS_WEBHOOK_SECRET` values in the deployment platform. This also works on the
+production domain without disabling HTTPS or secret validation. Keep
+`PERCH_BILLING_CHECKOUT_ENABLED=false` until deliberately testing checkout, then
+enable it only with complete sandbox provider configuration. Register the sandbox
+webhook at that deployment's `/api/webhooks/bachs` endpoint.
+
+The runtime `/api/payment-environment` endpoint exposes only the mode, never keys;
+pricing and billing pages use it to label sandbox payments without baking a stale
+mode into prerendered HTML. Bachs account approval alone does not remove the
+application's live recurring-contract safeguard.
+
+Switching keys does not cancel or migrate live subscriptions. Do not experiment
+with sandbox billing against a database containing live financial history.
+Use a dedicated demo workspace and review [public-release checks](docs/PUBLIC_RELEASE.md)
+before sharing the repository or a recorded walkthrough.
 
 
 ---
 
 ## License
 
-See [LICENSE](LICENSE).
+See [LICENSE](LICENSE). The original Nuxt UI template attribution is retained.
+Report vulnerabilities privately using [SECURITY.md](SECURITY.md), not public issues.

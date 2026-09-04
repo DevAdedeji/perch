@@ -1,5 +1,6 @@
 import { eq, workspaces } from '@perch/db'
 import { z } from 'zod'
+import { PERCH_PRO_PLAN } from '@perch/shared'
 
 const dayHours = z.object({
   open: z.string().regex(TIME_RE, 'Times must be HH:MM'),
@@ -22,7 +23,11 @@ const schema = z.object({
     fri: dayHours.optional(),
     sat: dayHours.optional()
   }).nullable().optional(),
-  timezone: z.string().max(64).refine(isValidTimezone, 'Unknown timezone').nullable().optional()
+  timezone: z.string().max(64).refine(isValidTimezone, 'Unknown timezone').nullable().optional(),
+  unansweredReminderEnabled: z.boolean().optional(),
+  unansweredReminderDelayMinutes: z.number().int().min(5).max(1440).optional(),
+  unansweredReminderBusinessHoursOnly: z.boolean().optional(),
+  visitorReplyEmailEnabled: z.boolean().optional()
 })
 
 /** Update workspace settings (admin only). */
@@ -37,6 +42,24 @@ export default defineEventHandler(async (event) => {
 
   const db = useDb()
   const patch = { ...result.data }
+  if (patch.visitorReplyEmailEnabled === true && !visitorReplyEmailFeatureEnabled(event)) {
+    throw createError({ statusCode: 409, statusMessage: 'Visitor reply emails are not available' })
+  }
+  const entitlement = await workspaceEntitlement(workspaceId)
+  if (!entitlement.isPro) {
+    if (patch.unansweredReminderBusinessHoursOnly) {
+      throw createError({ statusCode: 402, statusMessage: 'Business-hours-only reminders are available on Perch Pro.' })
+    }
+    if (patch.widgetShowBranding === false) {
+      throw createError({ statusCode: 402, statusMessage: 'Removing Perch branding is available on Perch Pro.' })
+    }
+    if (patch.unansweredReminderEnabled !== undefined || patch.unansweredReminderDelayMinutes !== undefined) {
+      patch.unansweredReminderDelayMinutes = PERCH_PRO_PLAN.freeReminderMinutes
+    }
+    if (patch.unansweredReminderEnabled !== undefined) {
+      patch.unansweredReminderBusinessHoursOnly = false
+    }
+  }
   // logos ride the same signed-upload pipeline as attachments — own cloud only
   if (patch.logoUrl && !isOwnCloudinaryImageUrl(patch.logoUrl, cloudinaryConfig().cloudName)) {
     throw createError({ statusCode: 400, statusMessage: 'Invalid logo upload' })
@@ -62,9 +85,39 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Pick a timezone for your business hours' })
   }
 
-  const [workspace] = Object.keys(patch).length
-    ? await db.update(workspaces).set(patch).where(eq(workspaces.id, workspaceId)).returning()
-    : [await db.query.workspaces.findFirst({ where: eq(workspaces.id, workspaceId) })]
+  const workspace = Object.keys(patch).length
+    ? await db.transaction(async (tx) => {
+        const [lockedWorkspace] = await tx.select().from(workspaces)
+          .where(eq(workspaces.id, workspaceId)).for('update')
+        if (!lockedWorkspace) throw createError({ statusCode: 404, statusMessage: 'Workspace not found' })
+        const updatePatch: typeof patch & { logoAssetId?: string | null } = { ...patch }
+        if (patch.logoUrl !== undefined && patch.logoUrl !== lockedWorkspace.logoUrl) {
+          if (patch.logoUrl) {
+            const asset = await claimLogoAttachment(tx, {
+              workspaceId,
+              secureUrl: patch.logoUrl,
+              uploaderUserId: user.id
+            })
+            updatePatch.logoAssetId = asset.id
+          } else {
+            updatePatch.logoAssetId = null
+          }
+          if (lockedWorkspace.logoAssetId) {
+            await queueAssetCleanup(tx, lockedWorkspace.logoAssetId, patch.logoUrl ? 'logo_replaced' : 'logo_removed')
+          } else if (lockedWorkspace.logoUrl) {
+            await queueLegacyLogoCleanup(tx, {
+              workspaceId,
+              uploaderUserId: user.id,
+              secureUrl: lockedWorkspace.logoUrl,
+              reason: patch.logoUrl ? 'logo_replaced' : 'logo_removed'
+            })
+          }
+        }
+        const [updated] = await tx.update(workspaces).set(updatePatch)
+          .where(eq(workspaces.id, workspaceId)).returning()
+        return updated!
+      })
+    : await db.query.workspaces.findFirst({ where: eq(workspaces.id, workspaceId) })
 
   if (Object.keys(patch).length) {
     logAudit(workspaceId, user, 'settings.updated', { changed: Object.keys(patch) })

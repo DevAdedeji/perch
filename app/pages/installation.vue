@@ -681,7 +681,7 @@ watch(wid, async () => {
                     </p>
                     <NuxtLink
                       v-if="verification.reason === 'domain_not_allowed'"
-                      to="/settings"
+                      to="/admin"
                       class="mt-2 inline-flex text-sm font-medium underline underline-offset-2"
                     >
                       Open domain settings

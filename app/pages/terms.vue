@@ -4,7 +4,7 @@ useSeoMeta({
   description: 'The terms governing access to and use of the Perch live-chat service.'
 })
 
-const updated = 'July 11, 2026'
+const updated = 'September 2, 2026'
 const contact = 'adedejitewogbade2@gmail.com'
 </script>
 
@@ -79,11 +79,30 @@ const contact = 'adedejitewogbade2@gmail.com'
         </section>
 
         <section>
+          <h2>Plans & billing</h2>
+          <p class="mt-3">
+            Perch may offer free and paid workspace plans. Paid subscriptions are processed by
+            Bachs and renew at the interval shown at checkout until an admin cancels renewal.
+            Cancellation takes effect at the end of the current paid period, so the workspace keeps
+            its paid features until then. Prices and included features are shown before purchase;
+            we'll give reasonable notice before changing the price of an active subscription.
+          </p>
+          <p>
+            If you believe a charge is incorrect, contact us promptly at
+            <a
+              :href="`mailto:${contact}`"
+              class="text-primary-600 dark:text-primary-400 hover:underline"
+            >{{ contact }}</a>.
+          </p>
+        </section>
+
+        <section>
           <h2>Termination</h2>
           <p class="mt-3">
-            You can delete your workspace or account at any time from the app — deletion is
-            immediate and permanent. We may suspend or terminate accounts that violate these terms,
-            with notice where practical.
+            You can delete your workspace or account at any time from the app. It is removed from
+            the live service immediately and cannot be undone in the app. Short-lived private
+            disaster-recovery backups rotate automatically as described in the Privacy Policy. We
+            may suspend or terminate accounts that violate these terms, with notice where practical.
           </p>
         </section>
 
@@ -92,7 +111,7 @@ const contact = 'adedejitewogbade2@gmail.com'
           <p class="mt-3">
             To the maximum extent the law allows, Perch is provided without warranties of any kind,
             and our total liability for any claim is limited to the amount you paid us in the twelve
-            months before the claim (currently: nothing, as the service is free). We're not liable
+            months before the claim. We're not liable
             for indirect damages, lost profits, or lost data beyond what's in our control.
           </p>
         </section>

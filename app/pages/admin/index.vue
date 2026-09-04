@@ -141,12 +141,18 @@ interface WebhookRow {
 interface DeliveryRow {
   id: string
   event: string
+  status: 'pending' | 'processing' | 'retrying' | 'succeeded' | 'dead_letter' | 'canceled'
   ok: boolean
   http_status: number | null
-  duration_ms: number
-  attempt: number
+  duration_ms: number | null
+  attempts: number
+  next_attempt_at: string | null
   error: string | null
+  cancel_reason: string | null
+  replay_count: number
+  can_replay: boolean
   created_at: string
+  updated_at: string
 }
 
 const WEBHOOK_EVENT_OPTIONS = [
@@ -156,6 +162,8 @@ const WEBHOOK_EVENT_OPTIONS = [
 ]
 
 const webhooks = ref<WebhookRow[]>([])
+const webhooksLoading = ref(false)
+const webhooksError = ref<string | null>(null)
 const webhookUrl = ref('')
 const webhookEvents = ref<string[]>(['conversation.created'])
 const webhookSaving = ref(false)
@@ -164,14 +172,29 @@ const newSecret = ref<string | null>(null)
 const expandedWebhook = ref<string | null>(null)
 const deliveries = ref<DeliveryRow[]>([])
 const deliveriesLoading = ref(false)
+const deliveriesError = ref<string | null>(null)
 const testingWebhook = ref<string | null>(null)
+const webhookDeliveryEnabled = ref(false)
+const replayingDelivery = ref<string | null>(null)
+const pendingWebhookDelete = ref<WebhookRow | null>(null)
+const deletingWebhook = ref(false)
+const webhookDeleteOpen = computed({
+  get: () => Boolean(pendingWebhookDelete.value),
+  set: (open: boolean) => {
+    if (!open && !deletingWebhook.value) pendingWebhookDelete.value = null
+  }
+})
 
 async function loadWebhooks() {
   if (!wid.value || !isAdmin.value) return
+  webhooksLoading.value = true
+  webhooksError.value = null
   try {
     webhooks.value = await $fetch<WebhookRow[]>(`/api/workspaces/${wid.value}/webhooks`)
-  } catch {
-    // section renders empty; the rest of the page still works
+  } catch (error) {
+    webhooksError.value = getErrorMessage(error, 'Could not load webhook endpoints')
+  } finally {
+    webhooksLoading.value = false
   }
 }
 
@@ -217,14 +240,24 @@ async function toggleWebhook(w: WebhookRow, enabled: boolean) {
   }
 }
 
-async function removeWebhook(w: WebhookRow) {
+function requestWebhookDelete(webhook: WebhookRow) {
+  pendingWebhookDelete.value = webhook
+}
+
+async function removeWebhook() {
+  const webhook = pendingWebhookDelete.value
+  if (!webhook || deletingWebhook.value) return
+  deletingWebhook.value = true
   try {
-    await $fetch(`/api/workspaces/${wid.value}/webhooks/${w.id}`, { method: 'DELETE' })
-    webhooks.value = webhooks.value.filter(x => x.id !== w.id)
-    if (expandedWebhook.value === w.id) expandedWebhook.value = null
+    await $fetch(`/api/workspaces/${wid.value}/webhooks/${webhook.id}`, { method: 'DELETE' })
+    webhooks.value = webhooks.value.filter(item => item.id !== webhook.id)
+    if (expandedWebhook.value === webhook.id) expandedWebhook.value = null
+    pendingWebhookDelete.value = null
     loadAudit()
   } catch (e) {
     toast.add({ title: getErrorMessage(e, 'Could not delete'), color: 'error' })
+  } finally {
+    deletingWebhook.value = false
   }
 }
 
@@ -235,14 +268,45 @@ async function toggleDeliveries(w: WebhookRow) {
   }
   expandedWebhook.value = w.id
   deliveries.value = []
+  deliveriesError.value = null
   deliveriesLoading.value = true
   try {
-    const res = await $fetch<{ deliveries: DeliveryRow[] }>(`/api/workspaces/${wid.value}/webhooks/${w.id}/deliveries`)
+    const res = await $fetch<{ deliveries: DeliveryRow[], delivery_enabled: boolean }>(`/api/workspaces/${wid.value}/webhooks/${w.id}/deliveries`)
     deliveries.value = res.deliveries
-  } catch {
-    // list stays empty
+    webhookDeliveryEnabled.value = res.delivery_enabled
+  } catch (error) {
+    deliveriesError.value = getErrorMessage(error, 'Could not load recent deliveries')
   } finally {
     deliveriesLoading.value = false
+  }
+}
+
+function deliveryLabel(status: DeliveryRow['status']) {
+  return ({
+    pending: 'Queued',
+    processing: 'Sending',
+    retrying: 'Retry scheduled',
+    succeeded: 'Delivered',
+    dead_letter: 'Needs attention',
+    canceled: 'Canceled'
+  })[status]
+}
+
+async function replayDelivery(webhook: WebhookRow, delivery: DeliveryRow) {
+  if (replayingDelivery.value) return
+  replayingDelivery.value = delivery.id
+  try {
+    await $fetch(`/api/workspaces/${wid.value}/webhooks/${webhook.id}/deliveries/${delivery.id}/replay`, {
+      method: 'POST',
+      body: { request_id: crypto.randomUUID() }
+    })
+    toast.add({ title: 'Delivery queued again', color: 'success' })
+    expandedWebhook.value = null
+    await toggleDeliveries(webhook)
+  } catch (error) {
+    toast.add({ title: getErrorMessage(error, 'Could not retry the delivery'), color: 'error' })
+  } finally {
+    replayingDelivery.value = null
   }
 }
 
@@ -295,7 +359,9 @@ const AUDIT_LABELS: Record<string, string> = {
   'automation.reordered': 'reordered automations',
   'webhook.created': 'added a webhook endpoint',
   'webhook.updated': 'updated a webhook endpoint',
-  'webhook.deleted': 'deleted a webhook endpoint'
+  'webhook.deleted': 'deleted a webhook endpoint',
+  'webhook.delivery_replayed': 'retried a failed webhook delivery',
+  'customer.profile_updated': 'updated customer details'
 }
 
 function auditLabel(row: AuditRow) {
@@ -320,6 +386,7 @@ function auditDetail(row: AuditRow) {
     case 'webhook.created':
     case 'webhook.updated':
     case 'webhook.deleted': return (d.url as string | undefined) ?? ''
+    case 'customer.profile_updated': return (d.changed as string[] | undefined)?.join(', ') ?? ''
     default: return ''
   }
 }
@@ -348,18 +415,31 @@ async function loadAudit() {
 const deleteWsOpen = ref(false)
 const deleteWsConfirm = ref('')
 const deletingWs = ref(false)
+const deleteWsError = ref('')
+
+watch(deleteWsOpen, (open) => {
+  if (!open) {
+    deleteWsConfirm.value = ''
+    deleteWsError.value = ''
+  }
+})
 
 async function deleteWorkspace() {
   if (deleteWsConfirm.value.trim() !== workspace.value?.name || deletingWs.value) return
   deletingWs.value = true
+  deleteWsError.value = ''
   try {
-    await $fetch(`/api/workspaces/${wid.value}`, { method: 'DELETE' })
+    await $fetch(`/api/workspaces/${wid.value}`, {
+      method: 'DELETE',
+      body: { confirmation: deleteWsConfirm.value.trim() }
+    })
     deleteWsOpen.value = false
     toast.add({ title: 'Workspace deleted', color: 'neutral' })
     await refresh()
     await navigateTo('/dashboard')
   } catch (e) {
-    toast.add({ title: getErrorMessage(e, 'Could not delete workspace'), color: 'error' })
+    deleteWsError.value = getErrorMessage(e, 'Could not delete workspace')
+    toast.add({ title: deleteWsError.value, color: 'error' })
   } finally {
     deletingWs.value = false
   }
@@ -557,7 +637,7 @@ async function deleteWorkspace() {
             Webhooks
           </h2>
           <p class="text-sm text-muted mt-0.5">
-            POST signed events to your own systems. Verify each request with the
+            Perch durably queues signed events and retries temporary failures. Verify each request with the
             <span class="font-mono text-xs">X-Perch-Signature</span> header
             (HMAC-SHA256 of <span class="font-mono text-xs">t.body</span> with your endpoint secret).
           </p>
@@ -591,7 +671,35 @@ async function deleteWorkspace() {
           </div>
 
           <ul
-            v-if="webhooks.length"
+            v-if="webhooksLoading"
+            class="mt-4 space-y-2"
+            aria-label="Loading webhook endpoints"
+          >
+            <li
+              v-for="index in 2"
+              :key="index"
+              class="h-14 rounded-xl bg-elevated animate-pulse"
+            />
+          </ul>
+          <div
+            v-else-if="webhooksError"
+            class="mt-4 flex flex-col items-start gap-2 rounded-xl ring-1 ring-red-500/30 bg-red-500/5 px-4 py-3 sm:flex-row sm:items-center"
+          >
+            <p class="min-w-0 flex-1 text-xs text-red-600 dark:text-red-400">
+              {{ webhooksError }}
+            </p>
+            <UButton
+              size="xs"
+              color="neutral"
+              variant="soft"
+              icon="i-lucide-refresh-cw"
+              @click="loadWebhooks"
+            >
+              Try again
+            </UButton>
+          </div>
+          <ul
+            v-else-if="webhooks.length"
             class="mt-4 divide-y divide-default/60 rounded-xl ring-1 ring-default overflow-hidden"
           >
             <li
@@ -600,7 +708,7 @@ async function deleteWorkspace() {
               class="bg-default"
               :class="{ 'opacity-60': !w.enabled }"
             >
-              <div class="group flex items-center gap-3 px-3.5 py-2.5">
+              <div class="group flex flex-wrap items-center gap-2 px-3.5 py-2.5 sm:flex-nowrap sm:gap-3">
                 <div class="min-w-0 flex-1">
                   <p class="text-sm font-mono text-highlighted truncate">
                     {{ w.url }}
@@ -633,13 +741,13 @@ async function deleteWorkspace() {
                   @update:model-value="(v: boolean) => toggleWebhook(w, v)"
                 />
                 <UButton
-                  class="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
+                  class="sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100 sm:transition-opacity"
                   size="xs"
                   color="error"
                   variant="ghost"
                   icon="i-lucide-trash-2"
                   aria-label="Delete webhook"
-                  @click="removeWebhook(w)"
+                  @click="requestWebhookDelete(w)"
                 />
               </div>
 
@@ -649,11 +757,34 @@ async function deleteWorkspace() {
                 class="border-t border-default/60 bg-elevated/30 px-3.5 py-2.5"
               >
                 <p
+                  v-if="!webhookDeliveryEnabled && !deliveriesLoading"
+                  class="mb-2 rounded-lg bg-amber-50 px-2.5 py-2 text-xs text-amber-800 dark:bg-amber-950/30 dark:text-amber-200"
+                >
+                  Automatic delivery is paused by the Perch operator. New events are not queued while it is paused.
+                </p>
+                <p
                   v-if="deliveriesLoading"
                   class="text-xs text-dimmed"
                 >
                   Loading deliveries…
                 </p>
+                <div
+                  v-else-if="deliveriesError"
+                  class="flex items-center gap-2"
+                >
+                  <p class="min-w-0 flex-1 text-xs text-red-600 dark:text-red-400">
+                    {{ deliveriesError }}
+                  </p>
+                  <UButton
+                    size="xs"
+                    color="neutral"
+                    variant="ghost"
+                    icon="i-lucide-refresh-cw"
+                    @click="expandedWebhook = null; toggleDeliveries(w)"
+                  >
+                    Retry
+                  </UButton>
+                </div>
                 <p
                   v-else-if="!deliveries.length"
                   class="text-xs text-dimmed"
@@ -662,25 +793,59 @@ async function deleteWorkspace() {
                 </p>
                 <ul
                   v-else
-                  class="space-y-1"
+                  class="space-y-2"
                 >
                   <li
                     v-for="d in deliveries"
                     :key="d.id"
-                    class="flex items-center gap-2 text-xs"
+                    class="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-default px-2.5 py-2 text-xs sm:flex-nowrap"
                   >
                     <span
                       class="size-1.5 shrink-0 rounded-full"
-                      :class="d.ok ? 'bg-green-500' : 'bg-red-500'"
+                      :class="{
+                        'bg-green-500': d.status === 'succeeded',
+                        'bg-red-500': d.status === 'dead_letter',
+                        'bg-amber-500': d.status === 'retrying',
+                        'bg-blue-500': d.status === 'pending' || d.status === 'processing',
+                        'bg-gray-400': d.status === 'canceled'
+                      }"
                     />
                     <span class="font-mono text-muted">{{ d.event }}</span>
-                    <span class="text-dimmed">{{ d.http_status ?? '—' }} · {{ d.duration_ms }}ms<template v-if="d.attempt > 1"> · try {{ d.attempt }}</template></span>
+                    <span class="font-medium text-highlighted">{{ deliveryLabel(d.status) }}</span>
                     <span
-                      v-if="d.error"
-                      class="min-w-0 truncate text-red-500/80"
-                      :title="d.error"
-                    >{{ d.error }}</span>
-                    <span class="ml-auto shrink-0 text-dimmed">{{ auditWhen(d.created_at) }}</span>
+                      v-if="d.http_status || d.duration_ms !== null"
+                      class="text-dimmed"
+                    >{{ d.http_status ?? '—' }}<template v-if="d.duration_ms !== null"> · {{ d.duration_ms }}ms</template></span>
+                    <span
+                      v-if="d.attempts > 1"
+                      class="text-dimmed"
+                    >try {{ d.attempts }}</span>
+                    <span
+                      v-if="d.next_attempt_at"
+                      class="basis-full text-amber-600 dark:text-amber-400 sm:basis-auto"
+                    >Next try {{ auditWhen(d.next_attempt_at) }}</span>
+                    <span
+                      v-if="d.error || d.cancel_reason"
+                      class="min-w-0 basis-full truncate text-red-500/80 sm:basis-auto"
+                      :title="d.error ?? d.cancel_reason ?? undefined"
+                    >{{ d.error ?? d.cancel_reason?.replaceAll('_', ' ') }}</span>
+                    <UButton
+                      v-if="d.can_replay && webhookDeliveryEnabled"
+                      class="sm:ml-auto"
+                      size="xs"
+                      color="neutral"
+                      variant="soft"
+                      icon="i-lucide-rotate-cw"
+                      :loading="replayingDelivery === d.id"
+                      :disabled="Boolean(replayingDelivery)"
+                      @click="replayDelivery(w, d)"
+                    >
+                      Retry now
+                    </UButton>
+                    <span
+                      v-else
+                      class="ml-auto shrink-0 text-dimmed"
+                    >{{ auditWhen(d.updated_at) }}</span>
                   </li>
                 </ul>
               </div>
@@ -697,12 +862,12 @@ async function deleteWorkspace() {
             class="mt-4 space-y-2.5"
             @submit.prevent="addWebhook"
           >
-            <div class="flex gap-2">
+            <div class="flex flex-col gap-2 sm:flex-row">
               <UInput
                 v-model="webhookUrl"
                 placeholder="https://example.com/hooks/perch"
                 size="lg"
-                class="flex-1 font-mono"
+                class="w-full flex-1 font-mono"
                 type="url"
               />
               <UButton
@@ -798,27 +963,73 @@ async function deleteWorkspace() {
       </template>
     </div>
 
+    <UModal
+      v-model:open="webhookDeleteOpen"
+      title="Delete this webhook?"
+      description="Perch will stop sending new events to this endpoint. Its recent delivery history will also be removed."
+    >
+      <template #body>
+        <p class="break-all rounded-xl bg-elevated px-3 py-2 font-mono text-xs text-muted">
+          {{ pendingWebhookDelete?.url }}
+        </p>
+      </template>
+      <template #footer>
+        <div class="flex w-full flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          <UButton
+            color="neutral"
+            variant="ghost"
+            :disabled="deletingWebhook"
+            @click="pendingWebhookDelete = null"
+          >
+            Keep webhook
+          </UButton>
+          <UButton
+            color="error"
+            icon="i-lucide-trash-2"
+            :loading="deletingWebhook"
+            @click="removeWebhook"
+          >
+            Delete webhook
+          </UButton>
+        </div>
+      </template>
+    </UModal>
+
     <!-- delete workspace confirm -->
     <UModal
       v-model:open="deleteWsOpen"
       title="Delete this workspace?"
-      :description="`Every conversation, visitor, and teammate in ${workspace?.name ?? 'this workspace'} will be permanently deleted.`"
+      :description="`Every conversation, visitor, and teammate in ${workspace?.name ?? 'this workspace'} will be permanently deleted. If it has a paid plan, Perch will confirm renewal is canceled first.`"
     >
       <template #body>
-        <UFormField :label="`Type “${workspace?.name}” to confirm`">
-          <UInput
-            v-model="deleteWsConfirm"
-            size="lg"
-            class="w-full"
-            :placeholder="workspace?.name"
+        <div class="space-y-4">
+          <UAlert
+            v-if="deleteWsError"
+            color="error"
+            variant="soft"
+            icon="i-lucide-circle-alert"
+            title="Workspace was not deleted"
+            :description="deleteWsError"
           />
-        </UFormField>
+          <UFormField :label="`Type “${workspace?.name}” to confirm`">
+            <UInput
+              v-model="deleteWsConfirm"
+              size="lg"
+              class="w-full"
+              :placeholder="workspace?.name"
+            />
+          </UFormField>
+          <p class="text-xs text-muted">
+            Keep this page open while Perch checks billing. If cancellation cannot be confirmed, nothing is deleted and you can retry safely.
+          </p>
+        </div>
       </template>
       <template #footer>
         <div class="flex justify-end gap-2 w-full">
           <UButton
             color="neutral"
             variant="ghost"
+            :disabled="deletingWs"
             @click="deleteWsOpen = false"
           >
             Cancel

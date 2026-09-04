@@ -2,7 +2,7 @@
 const emit = defineEmits<{ navigate: [] }>()
 
 const route = useRoute()
-const { user, workspaces, currentWorkspace, setWorkspace, logout } = useAuth()
+const { user, workspaces, currentWorkspace, platformAdmin, setWorkspace, logout } = useAuth()
 const { status: myPresence, away, setAway } = usePresence()
 
 const nav = computed(() => [
@@ -17,11 +17,17 @@ const nav = computed(() => [
   ...(currentWorkspace.value?.role === 'admin'
     ? [{ label: 'Install', icon: 'i-lucide-code-xml', to: '/installation' }]
     : []),
+  ...(currentWorkspace.value?.role === 'admin'
+    ? [{ label: 'Plans & billing', icon: 'i-lucide-credit-card', to: '/billing' }]
+    : []),
   { label: 'Settings', icon: 'i-lucide-settings', to: '/settings' },
   { label: 'Account', icon: 'i-lucide-user-cog', to: '/account' },
   // workspace administration — admins only
   ...(currentWorkspace.value?.role === 'admin'
     ? [{ label: 'Admin', icon: 'i-lucide-shield', to: '/admin' }]
+    : []),
+  ...(platformAdmin.value
+    ? [{ label: 'Instance metrics', icon: 'i-lucide-activity', to: '/admin/metrics' }]
     : [])
 ])
 

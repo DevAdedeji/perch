@@ -20,15 +20,21 @@ export default defineEventHandler(async (event) => {
       .where(eq(workspaceMembers.userId, user.id))
   ])
 
+  const email = dbUser?.email ?? user.email
+
   return {
     user: {
       ...user,
       // the session cookie can go stale after an email change — DB is truth
-      email: dbUser?.email ?? user.email,
+      email,
       name: dbUser?.name ?? user.name,
       emailVerified: !!dbUser?.emailVerifiedAt,
       hasPassword: !!dbUser?.passwordHash
     },
-    workspaces: memberships
+    platformAdmin: isPlatformAdminEmail(event, email),
+    workspaces: memberships.map(membership => ({
+      ...membership,
+      attachmentsAvailable: imageAttachmentsAvailable()
+    }))
   }
 })

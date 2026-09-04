@@ -14,6 +14,9 @@ const wid = computed(() => currentWorkspace.value?.workspaceId ?? null)
 // cached across navigation — the roster re-renders instantly on return
 const roster = useState<LiveVisitorDTO[]>('visitors:live', () => [])
 const loading = ref(false)
+let generation = 0
+let alive = true
+let loadVersion = 0
 
 // ticking clock so "on page 2m" climbs while you watch
 const now = ref(Date.now())
@@ -21,12 +24,16 @@ let tick: ReturnType<typeof setInterval> | undefined
 
 async function load() {
   if (!wid.value) return
+  const workspaceId = wid.value
+  const scope = generation
+  const version = ++loadVersion
   if (!roster.value.length) loading.value = true
   try {
-    const res = await $fetch<{ visitors: LiveVisitorDTO[] }>(`/api/workspaces/${wid.value}/visitors/live`)
+    const res = await $fetch<{ visitors: LiveVisitorDTO[] }>(`/api/workspaces/${workspaceId}/visitors/live`)
+    if (!alive || scope !== generation || version !== loadVersion || workspaceId !== wid.value) return
     roster.value = res.visitors.sort((a, b) => b.connected_at - a.connected_at)
   } finally {
-    loading.value = false
+    if (scope === generation && version === loadVersion) loading.value = false
   }
 }
 
@@ -60,17 +67,24 @@ onMounted(() => {
   }, 5000)
 })
 onBeforeUnmount(() => {
+  alive = false
+  generation++
   if (wid.value) rt.unsubscribe(channels.visitors(wid.value))
   off?.()
   offReconnect?.()
   clearInterval(tick)
 })
 watch(wid, (next, prev) => {
+  generation++
   if (prev) rt.unsubscribe(channels.visitors(prev))
   if (next) rt.subscribe(channels.visitors(next))
   roster.value = []
+  composeFor.value = null
+  composeText.value = ''
+  sendAttempt = null
+  sending.value = false
   load()
-})
+}, { flush: 'sync' })
 
 /* display helpers */
 function displayName(v: LiveVisitorDTO) {
@@ -105,30 +119,39 @@ const pendingSelect = useState<string | null>('inbox:pendingSelect', () => null)
 const composeFor = ref<LiveVisitorDTO | null>(null)
 const composeText = ref('')
 const sending = ref(false)
+let sendAttempt: { signature: string, id: string } | null = null
 
 function openCompose(v: LiveVisitorDTO) {
   composeFor.value = v
   composeText.value = ''
+  sendAttempt = null
 }
 
 async function startConversation() {
   const target = composeFor.value
   const message = composeText.value.trim()
   if (!target || !message || !wid.value || sending.value) return
+  const workspaceId = wid.value
+  const scope = generation
+  const signature = JSON.stringify([workspaceId, target.visitor_ref, message])
+  if (sendAttempt?.signature !== signature) sendAttempt = { signature, id: crypto.randomUUID() }
   sending.value = true
   try {
-    const res = await $fetch<{ conversation_id: string }>(`/api/workspaces/${wid.value}/conversations`, {
+    const res = await $fetch<{ conversation_id: string }>(`/api/workspaces/${workspaceId}/conversations`, {
       method: 'POST',
-      body: { visitor_ref: target.visitor_ref, message }
+      body: { visitor_ref: target.visitor_ref, message, client_message_id: sendAttempt.id }
     })
+    if (!alive || scope !== generation || workspaceId !== wid.value) return
+    sendAttempt = null
     composeFor.value = null
     toast.add({ title: `Message sent to ${displayName(target)}`, icon: 'i-lucide-check', color: 'success' })
     pendingSelect.value = res.conversation_id
     navigateTo('/dashboard')
   } catch (e) {
+    if (!alive || scope !== generation || workspaceId !== wid.value) return
     toast.add({ title: getErrorMessage(e, 'Could not start the conversation'), color: 'error' })
   } finally {
-    sending.value = false
+    if (scope === generation) sending.value = false
   }
 }
 </script>

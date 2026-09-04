@@ -79,6 +79,7 @@ export async function requireConversationMember(
 
 /** Public-facing workspace shape returned to the dashboard. */
 export function serializeWorkspace(w: Workspace) {
+  const visitorReplyEmailAvailable = visitorReplyEmailFeatureEnabled()
   return {
     id: w.id,
     name: w.name,
@@ -96,6 +97,11 @@ export function serializeWorkspace(w: Workspace) {
     prechatFormEnabled: w.prechatFormEnabled,
     allowedDomains: w.allowedDomains,
     businessHours: w.businessHours,
-    timezone: w.timezone
+    timezone: w.timezone,
+    unansweredReminderEnabled: w.unansweredReminderEnabled,
+    unansweredReminderDelayMinutes: w.unansweredReminderDelayMinutes,
+    unansweredReminderBusinessHoursOnly: w.unansweredReminderBusinessHoursOnly,
+    visitorReplyEmailAvailable,
+    visitorReplyEmailEnabled: visitorReplyEmailAvailable && w.visitorReplyEmailEnabled
   }
 }

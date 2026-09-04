@@ -4,6 +4,7 @@ export interface Membership {
   workspaceId: string
   workspaceName: string
   siteId: string
+  attachmentsAvailable: boolean
 }
 
 export interface AuthUser {
@@ -17,6 +18,7 @@ export interface AuthUser {
 interface AuthState {
   user: AuthUser | null
   workspaces: Membership[]
+  platformAdmin: boolean
 }
 
 /**
@@ -25,7 +27,7 @@ interface AuthState {
  * (with SSR cookie forwarding) and every component reads the same snapshot.
  */
 export function useAuth() {
-  const state = useState<AuthState>('auth', () => ({ user: null, workspaces: [] }))
+  const state = useState<AuthState>('auth', () => ({ user: null, workspaces: [], platformAdmin: false }))
   const loaded = useState<boolean>('auth:loaded', () => false)
 
   // which workspace the dashboard is currently scoped to (persisted across reloads)
@@ -46,7 +48,7 @@ export function useAuth() {
     try {
       state.value = await request<AuthState>('/api/auth/me')
     } catch {
-      state.value = { user: null, workspaces: [] }
+      state.value = { user: null, workspaces: [], platformAdmin: false }
     }
     loaded.value = true
   }
@@ -57,13 +59,14 @@ export function useAuth() {
 
   async function logout() {
     await $fetch('/api/auth/logout', { method: 'POST' })
-    state.value = { user: null, workspaces: [] }
+    state.value = { user: null, workspaces: [], platformAdmin: false }
     loaded.value = true
     await navigateTo('/login')
   }
 
   return {
     user: computed(() => state.value.user),
+    platformAdmin: computed(() => state.value.platformAdmin),
     workspaces: computed(() => state.value.workspaces),
     loggedIn: computed(() => !!state.value.user),
     hasWorkspace: computed(() => state.value.workspaces.length > 0),

@@ -14,12 +14,14 @@ interface WidgetWorkspace {
   theme: 'light' | 'dark' | 'system'
   show_branding: boolean
   has_articles: boolean
+  reply_email_enabled: boolean
+  attachments_available: boolean
 }
 
 interface SessionResponse {
   workspace: WidgetWorkspace
   agent: { name: string } | null
-  visitor: { name: string | null, email: string | null }
+  visitor: { name: string | null, email: string | null, reply_email_enabled: boolean }
   business_online: boolean
   business_state: 'online' | 'away' | 'offline'
   within_hours: boolean
@@ -33,6 +35,7 @@ interface SessionResponse {
   visitor_session: string
   ws_ticket: string
   presence_channel: string
+  messaging_available: boolean
 }
 
 /**
@@ -56,11 +59,13 @@ export function useWidget(
   const conversationStatus = ref<'open' | 'unassigned' | 'resolved' | null>(null)
   const csatRating = ref<'good' | 'bad' | null>(null)
   const conversationId = ref<string | null>(null)
+  const messagingAvailable = ref(true)
   const messages = ref<Array<VisitorMessageDTO & { pending?: boolean, failed?: boolean }>>([])
   const status = ref<'loading' | 'ready' | 'error'>('loading')
   const agentTyping = ref(false)
   const visitorName = ref<string | null>(null)
   const visitorEmail = ref<string | null>(null)
+  const replyEmailEnabled = ref(false)
   // newest agent read — visitor messages at or before this show "Seen"
   const agentReadAt = ref<string | null>(null)
 
@@ -99,8 +104,7 @@ export function useWidget(
       site_id: siteId,
       embed_ticket: embedTicket,
       visitor_session: visitorSession || undefined,
-      page_url: document.referrer,
-      ua: navigator.userAgent
+      page_url: document.referrer
     })
     let res: SessionResponse
     try {
@@ -135,11 +139,13 @@ export function useWidget(
     withinHours.value = res.within_hours ?? true
     awayLabel.value = res.away_label ?? null
     conversationId.value = res.conversation_id
+    messagingAvailable.value = res.messaging_available !== false
     conversationStatus.value = res.conversation_status ?? null
     csatRating.value = res.csat_rating ?? null
     messages.value = res.messages
     visitorName.value = res.visitor.name
     visitorEmail.value = res.visitor.email
+    replyEmailEnabled.value = res.visitor.reply_email_enabled
     agentReadAt.value = res.agent_last_read_at
     ticket = res.ws_ticket
     presenceChan = res.presence_channel
@@ -225,9 +231,12 @@ export function useWidget(
         if (ev.payload.conversation_id === conversationId.value && !messages.value.some(m => m.id === ev.payload.id)) {
           // WS echo of our own optimistic send — swap the temp bubble in place
           const tempIdx = ev.payload.sender_type === 'visitor'
-            ? messages.value.findIndex(m => m.pending && m.content === ev.payload.content)
+            ? messages.value.findIndex(m => (m.pending || m.failed) && ev.payload.client_message_id && m.client_message_id === ev.payload.client_message_id)
             : -1
           if (tempIdx !== -1) {
+            const temporaryId = messages.value[tempIdx]!.id
+            uploadFns.delete(temporaryId)
+            sendIdentities.delete(temporaryId)
             messages.value.splice(tempIdx, 1, ev.payload)
           } else {
             messages.value.push(ev.payload)
@@ -276,6 +285,10 @@ export function useWidget(
           refreshAgent()
         }
         break
+      case 'visitor.messaging':
+        messagingAvailable.value = ev.payload.available
+        if (!ev.payload.available) sendTyping(false)
+        break
       case 'trigger.fire': {
         // proactive trigger — show an ephemeral bubble (never persisted; the
         // server threads the real text in if the visitor replies) + auto-open
@@ -311,6 +324,7 @@ export function useWidget(
     name?: string
     email?: string
     hash?: string
+    email_hash?: string
   }
 
   // traits arriving before the handshake are queued; traits always win over
@@ -320,10 +334,11 @@ export function useWidget(
 
   async function pushIdentity(traits: IdentityTraits) {
     try {
-      await $fetch('/api/widget/identify', {
+      const result = await $fetch<{ messaging_available: boolean }>('/api/widget/identify', {
         method: 'POST',
         body: { site_id: siteId, visitor_session: visitorSession, ...traits }
       })
+      messagingAvailable.value = result.messaging_available !== false
     } catch {
       // identity is best-effort from the widget's side; the session still works
     }
@@ -335,7 +350,8 @@ export function useWidget(
       user_id: str(traits.user_id, 128),
       name: str(traits.name, 100),
       email: str(traits.email, 200),
-      hash: str(traits.hash, 64)
+      hash: str(traits.hash, 64),
+      email_hash: str(traits.email_hash, 64)
     }
     if (!clean.user_id && !clean.name && !clean.email) return
     if (clean.name) visitorName.value = clean.name
@@ -372,6 +388,8 @@ export function useWidget(
   // sends stay visible as retryable bubbles.
   let sendChain: Promise<unknown> = Promise.resolve()
   const uploadFns = new Map<string, () => Promise<{ url: string, type: string }>>()
+  const activeSends = new Set<string>()
+  const sendIdentities = new Map<string, { name?: string, email?: string, replyEmailConsent?: boolean }>()
 
   function queuePost(run: () => Promise<void>) {
     const p = sendChain.then(run, run)
@@ -380,9 +398,10 @@ export function useWidget(
   }
 
   function pushTemp(content: string, attachment?: { url: string, type: string }) {
-    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    const tempId = `temp-${crypto.randomUUID()}`
     messages.value.push({
       id: tempId,
+      client_message_id: tempId.slice(5),
       conversation_id: conversationId.value ?? 'pending',
       sender_type: 'visitor',
       content,
@@ -394,9 +413,12 @@ export function useWidget(
     return tempId
   }
 
-  async function performSend(tempId: string, identity?: { name?: string, email?: string }) {
+  async function performSend(tempId: string, identity?: { name?: string, email?: string, replyEmailConsent?: boolean }) {
     const temp = messages.value.find(m => m.id === tempId)
-    if (!temp) return
+    if (!alive || !messagingAvailable.value || !temp || activeSends.has(tempId)) return
+    if (identity) sendIdentities.set(tempId, identity)
+    identity = sendIdentities.get(tempId)
+    activeSends.add(tempId)
     temp.pending = true
     temp.failed = false
     try {
@@ -411,11 +433,13 @@ export function useWidget(
       }
 
       await queuePost(async () => {
+        if (!alive || !messagingAvailable.value) return
         // a pending trigger threads its message into the newly-created convo
         const triggerId = !conversationId.value && pendingTriggerId ? pendingTriggerId : undefined
         const res = await $fetch<{ conversation_id: string, message: VisitorMessageDTO }>('/api/widget/messages', {
           method: 'POST',
           body: {
+            client_message_id: tempId.slice(5),
             site_id: siteId,
             visitor_session: visitorSession,
             content: temp.content,
@@ -423,9 +447,11 @@ export function useWidget(
             attachment_type: temp.attachment_type ?? undefined,
             page_url: currentPage || document.referrer,
             trigger_id: triggerId,
+            reply_email_consent: identity?.replyEmailConsent === true,
             ...identity
           }
         })
+        if (!alive) return
         if (triggerId) pendingTriggerId = null
         if (!conversationId.value) {
           conversationId.value = res.conversation_id
@@ -437,6 +463,7 @@ export function useWidget(
         }
         if (identity?.name) visitorName.value = identity.name
         if (identity?.email) visitorEmail.value = identity.email
+        if (identity?.email) replyEmailEnabled.value = identity.replyEmailConsent === true
         // reconcile in place — replacing (not filter + push) keeps send order
         const idx = messages.value.findIndex(m => m.id === tempId)
         if (messages.value.some(m => m.id === res.message.id)) {
@@ -447,20 +474,35 @@ export function useWidget(
           messages.value.push(res.message)
         }
         uploadFns.delete(tempId)
+        sendIdentities.delete(tempId)
       })
     } catch (e) {
+      if (messages.value.some(message => !message.pending && !message.failed && message.client_message_id === tempId.slice(5))) return
+      const errorData = (e as { data?: { code?: string, data?: { code?: string } } }).data
+      const blocked = errorData?.code === 'MESSAGING_UNAVAILABLE'
+        || errorData?.data?.code === 'MESSAGING_UNAVAILABLE'
+      if (blocked) {
+        messagingAvailable.value = false
+        const index = messages.value.findIndex(message => message.id === tempId)
+        if (index !== -1) messages.value.splice(index, 1)
+        uploadFns.delete(tempId)
+        sendIdentities.delete(tempId)
+        throw e
+      }
       const failedMsg = messages.value.find(m => m.id === tempId)
       if (failedMsg) {
         failedMsg.pending = false
         failedMsg.failed = true
       }
       throw e
+    } finally {
+      activeSends.delete(tempId)
     }
   }
 
   async function sendMessage(
     content: string,
-    identity?: { name?: string, email?: string },
+    identity?: { name?: string, email?: string, replyEmailConsent?: boolean },
     attachment?: { url: string, type: string }
   ) {
     const text = content.trim()
@@ -504,6 +546,29 @@ export function useWidget(
     pendingCsat = null
   }
 
+  async function setReplyEmail(enabled: boolean) {
+    const result = await $fetch<{ enabled: boolean }>('/api/widget/email-preference', {
+      method: 'POST',
+      body: { site_id: siteId, visitor_session: visitorSession, enabled }
+    })
+    replyEmailEnabled.value = result.enabled
+  }
+
+  async function markLatestAgentRead() {
+    if (!conversationId.value) return
+    const latest = [...messages.value].reverse().find(message => message.sender_type === 'agent' && !message.pending)
+    if (!latest) return
+    await $fetch('/api/widget/read', {
+      method: 'POST',
+      body: {
+        site_id: siteId,
+        visitor_session: visitorSession,
+        conversation_id: conversationId.value,
+        message_id: latest.id
+      }
+    }).catch(() => {})
+  }
+
   function sendTyping(isTyping: boolean, preview?: string) {
     if (!conversationId.value) return
     send(isTyping
@@ -513,6 +578,11 @@ export function useWidget(
 
   function stop() {
     alive = false
+    for (const message of messages.value) {
+      if (message.attachment_url?.startsWith('blob:')) URL.revokeObjectURL(message.attachment_url)
+    }
+    uploadFns.clear()
+    sendIdentities.clear()
     clearTimeout(reconnectTimer)
     clearInterval(pingTimer)
     socket?.close()
@@ -531,11 +601,15 @@ export function useWidget(
     csatRating,
     sendCsat,
     conversationId,
+    messagingAvailable,
     messages,
     status,
     agentTyping,
     visitorName,
     visitorEmail,
+    replyEmailEnabled,
+    setReplyEmail,
+    markLatestAgentRead,
     start,
     stop,
     identify,

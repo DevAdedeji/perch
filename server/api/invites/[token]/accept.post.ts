@@ -1,4 +1,4 @@
-import { and, eq, invites, users, workspaceMembers } from '@perch/db'
+import { and, count, eq, invites, sql, users, workspaceMembers, workspaces } from '@perch/db'
 
 /** Accept an invite: the logged-in user joins the workspace as the invited role. */
 export default defineEventHandler(async (event) => {
@@ -21,7 +21,24 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 403, statusMessage: `This invite is for ${invite.email}. Sign in with that email to accept.` })
   }
 
+  const entitlement = await workspaceEntitlement(invite.workspaceId)
   const joined = await db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`perch-members:${invite.workspaceId}`}))`)
+    const [workspace] = await tx.select({ deletionRequestedAt: workspaces.deletionRequestedAt })
+      .from(workspaces).where(eq(workspaces.id, invite.workspaceId)).limit(1).for('update')
+    if (!workspace || workspace.deletionRequestedAt) {
+      throw createError({ statusCode: 409, statusMessage: 'This workspace is being deleted and cannot accept new teammates.' })
+    }
+    const existingMember = await tx.query.workspaceMembers.findFirst({ where: and(
+      eq(workspaceMembers.workspaceId, invite.workspaceId), eq(workspaceMembers.userId, user.id)
+    ) })
+    if (!existingMember && !entitlement.isPro) {
+      const [members] = await tx.select({ total: count() }).from(workspaceMembers)
+        .where(eq(workspaceMembers.workspaceId, invite.workspaceId))
+      if (Number(members!.total) >= entitlement.limits.members!) {
+        throw createError({ statusCode: 402, statusMessage: 'This free workspace has reached its teammate limit.' })
+      }
+    }
     const [claimed] = await tx.update(invites).set({ status: 'accepted' }).where(and(
       eq(invites.id, invite.id), eq(invites.status, 'pending')
     )).returning()

@@ -18,7 +18,11 @@ export default defineEventHandler(async (event) => {
   }
 
   const scope = member.role === 'agent'
-    ? or(isNull(conversations.assignedAgentId), eq(conversations.assignedAgentId, member.id))
+    ? or(
+        isNull(conversations.assignedAgentId),
+        eq(conversations.assignedAgentId, member.id),
+        sql`${member.id}::uuid = any(${conversations.collaboratorMemberIds})`
+      )
     : undefined
   // escape LIKE wildcards so "50%" searches for a literal percent sign
   const needle = `%${query.data.q.replace(/[%_\\]/g, '\\$&')}%`
@@ -30,8 +34,8 @@ export default defineEventHandler(async (event) => {
       assignedAgentId: conversations.assignedAgentId,
       lastMessageAt: conversations.lastMessageAt,
       visitorRef: visitors.id,
-      visitorName: visitors.name,
-      visitorEmail: visitors.email,
+      visitorName: sql<string | null>`coalesce(${visitors.profileName}, ${visitors.name})`,
+      visitorEmail: sql<string | null>`coalesce(${visitors.profileEmail}, ${visitors.email})`,
       visitorPublicId: visitors.visitorId,
       // the best matching message, for a result snippet
       snippet: sql<string | null>`(
@@ -45,10 +49,14 @@ export default defineEventHandler(async (event) => {
     .from(conversations)
     .innerJoin(visitors, eq(visitors.id, conversations.visitorRef))
     .where(sql`${conversations.workspaceId} = ${workspaceId}
+      and ${conversations.isSpam} = false
       and (${scope ?? sql`true`})
       and (
-        ${visitors.name} ilike ${needle}
-        or ${visitors.email} ilike ${needle}
+        coalesce(${visitors.profileName}, '') ilike ${needle}
+        or coalesce(${visitors.name}, '') ilike ${needle}
+        or coalesce(${visitors.profileEmail}, '') ilike ${needle}
+        or coalesce(${visitors.email}, '') ilike ${needle}
+        or coalesce(${visitors.company}, '') ilike ${needle}
         or exists (
           select 1 from messages m
           where m.conversation_id = ${conversations.id}

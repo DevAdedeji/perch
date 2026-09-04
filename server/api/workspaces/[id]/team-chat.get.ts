@@ -8,6 +8,7 @@ export default defineEventHandler(async (event) => {
   const rows = await useDb()
     .select({
       id: teamMessages.id,
+      clientMessageId: teamMessages.clientMessageId,
       memberId: teamMessages.memberId,
       memberName: users.name,
       content: teamMessages.content,
@@ -23,6 +24,7 @@ export default defineEventHandler(async (event) => {
 
   return rows.reverse().map(r => ({
     id: r.id,
+    client_message_id: r.clientMessageId,
     member_id: r.memberId,
     member_name: r.memberName,
     content: r.content,
