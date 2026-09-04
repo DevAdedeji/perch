@@ -12,6 +12,22 @@ automations, a help center, proactive messages, and simple workspace pricing.
 
 **Live:** https://useperch.xyz &nbsp;·&nbsp; **Stack:** Nuxt 4 · Nitro WebSockets · Drizzle · Neon Postgres
 
+Built as a portfolio application demonstrating complete customer-support
+workflows. A working demo is not a claim of production certification or customer
+adoption. The app labels sandbox payments when that environment is configured.
+
+## Try the main journey
+
+Create your own test workspace, open Installation, and add the widget to a page
+you control. Send a visitor message from a separate browser session, claim it in
+the inbox, reply, leave an internal note, and resolve it. Invite another test
+account to explore reassignment and Nest mentions; publish a sample help article
+to see it in the widget.
+
+Use only your own test data. Sandbox billing does not move real money, but chat,
+email, uploads, and outbound webhooks are still real actions. Do not contact
+uninvolved people or enter real card details in test checkout.
+
 ![Landing page](docs/screenshots/landing.png)
 
 **The Control Room** — shared inbox with claim-race-safe assignment, internal notes, and a live
@@ -40,7 +56,7 @@ Cloudinary is configured:
 - Help-center articles and groups, with public search inside the hosted help center and widget.
 - Visitor and support analytics, response targets, personal notification preferences, browser notifications, and optional unanswered-message email reminders.
 - Template-driven automations for round-robin and page routing, verified VIP tagging, inactivity reminders, and safe automatic closing.
-- Proactive widget triggers based on page, visit count, time on page, and audience rules.
+- Proactive widget triggers based on page matching and time on page.
 - Team management, audit history, outbound conversation webhooks, operator metrics, and recoverable background-job failures.
 - Free and Pro workspace entitlements with Bachs checkout, signed webhooks, canonical provider verification, and durable reconciliation.
 
@@ -204,7 +220,7 @@ perch/
 │   ├── db/                 # Drizzle schema + migrations
 │   └── widget-loader/      # vanilla TS → builds widget.js (the embeddable file)
 ├── Dockerfile              # multi-stage build → self-contained Nitro .output
-└── PRD.md                  # the product spec this was built against
+└── docs/LAUNCH_OPERATIONS.md # deployment and recovery checks
 ```
 
 ---
@@ -313,7 +329,7 @@ Notes from getting this live on a small tier:
 
 ## Status and launch boundary
 
-Perch is in private pre-launch development. The main customer-support journey is built: authentication,
+Perch is maintained as a public portfolio application. The main customer-support journey is built: authentication,
 workspaces, installation, shared inbox, assignment and reassignment, internal notes and mentions,
 Nest team chat, help center, automations, proactive triggers, analytics, visitor context, attachments,
 notifications, reminder emails, workspace billing, audit history, and account/workspace lifecycle controls.
@@ -328,9 +344,29 @@ Before public launch, complete the operational checklist in
 payment lifecycle, run a restore drill, review customer-data egress, and complete production-like
 cross-role and mobile acceptance testing.
 
+### Sandbox portfolio deployment
+
+Set `BACHS_ENV=sandbox` with matching sandbox `BACHS_SECRET_KEY` and
+`BACHS_WEBHOOK_SECRET` values in the deployment platform. This also works on the
+production domain without disabling HTTPS or secret validation. Keep
+`PERCH_BILLING_CHECKOUT_ENABLED=false` until deliberately testing checkout, then
+enable it only with complete sandbox provider configuration. Register the sandbox
+webhook at that deployment's `/api/webhooks/bachs` endpoint.
+
+The runtime `/api/payment-environment` endpoint exposes only the mode, never keys;
+pricing and billing pages use it to label sandbox payments without baking a stale
+mode into prerendered HTML. Bachs account approval alone does not remove the
+application's live recurring-contract safeguard.
+
+Switching keys does not cancel or migrate live subscriptions. Do not experiment
+with sandbox billing against a database containing live financial history.
+Use a dedicated demo workspace and review [public-release checks](docs/PUBLIC_RELEASE.md)
+before sharing the repository or a recorded walkthrough.
+
 
 ---
 
 ## License
 
-See [LICENSE](LICENSE).
+See [LICENSE](LICENSE). The original Nuxt UI template attribution is retained.
+Report vulnerabilities privately using [SECURITY.md](SECURITY.md), not public issues.

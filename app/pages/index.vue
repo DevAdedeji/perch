@@ -139,6 +139,7 @@ const claimSql = 'UPDATE conversations\nSET assigned_agent_id = $me, status = \'
       </div>
 
       <UContainer>
+        <SandboxPaymentNotice class="mx-auto mb-8 max-w-3xl" />
         <div class="text-center max-w-3xl mx-auto">
           <div class="inline-flex items-center gap-2 rounded-full glass ring-1 ring-primary-500/30 px-3 py-1.5 text-xs">
             <span class="relative flex size-2">

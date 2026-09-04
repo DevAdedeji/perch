@@ -270,6 +270,8 @@ function date(value: string) {
         </div>
       </div>
 
+      <SandboxPaymentNotice class="mb-6" />
+
       <USkeleton
         v-if="loading"
         class="h-96 w-full rounded-2xl"
