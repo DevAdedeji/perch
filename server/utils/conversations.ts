@@ -1,4 +1,4 @@
-import { and, conversations, desc, eq, memberNotifications, messages, ne, sql, supportOutcomeEvents, triggerFires, triggers, visitors } from '@perch/db'
+import { and, auditLogs, conversations, desc, eq, memberNotifications, messages, ne, sql, supportOutcomeEvents, triggerFires, triggers, visitors } from '@perch/db'
 import type { Conversation, Message } from '@perch/db'
 import { channels } from '@perch/shared'
 import type { ConversationDTO, MessageDTO, VisitorConversationDTO, VisitorMessageDTO } from '@perch/shared'
@@ -6,6 +6,9 @@ import { enqueueWebhookEvent } from './webhooks'
 import { agentWorkspaceAuthorization } from './realtime'
 import { safeErrorSummary } from './request-security'
 import { claimMessageAttachment } from './attachment-lifecycle'
+import { assertSameMessage, messageFingerprint } from './message-retries'
+import { currentMutationMember, lockWorkspaceMembership } from './mutation-membership'
+import { canMemberAccessConversation, canMemberReassignConversation } from './workspace'
 
 /* serialization (rows → §6 wire DTOs) */
 
@@ -29,6 +32,7 @@ export function serializeConversation(c: Conversation): ConversationDTO {
 
 export function serializeMessage(m: Message): MessageDTO {
   return {
+    client_message_id: m.clientMessageId,
     id: m.id,
     conversation_id: m.conversationId,
     sender_type: m.senderType,
@@ -44,6 +48,7 @@ export function serializeMessage(m: Message): MessageDTO {
 
 export function serializeVisitorMessage(m: Message): VisitorMessageDTO {
   return {
+    client_message_id: m.clientMessageId,
     id: m.id,
     conversation_id: m.conversationId,
     sender_type: m.senderType,
@@ -84,6 +89,7 @@ function publishConversationMessage(
 /* visitor → business (used by the embed widget) */
 
 interface IncomingVisitorMessage {
+  clientMessageId?: string
   workspaceId: string
   visitorId: string
   conversationId?: string
@@ -141,6 +147,23 @@ export async function ingestVisitorMessage(input: IncomingVisitorMessage) {
     }).returning()
 
     await assertVisitorCanMessage(visitor!, tx)
+
+    const fingerprint = messageFingerprint(input)
+    if (input.clientMessageId) {
+      const [replay] = await tx.select({ message: messages, conversation: conversations }).from(messages)
+        .innerJoin(conversations, eq(messages.conversationId, conversations.id))
+        .where(and(
+          eq(conversations.visitorRef, visitor!.id),
+          eq(messages.clientMessageId, input.clientMessageId)
+        )).limit(1)
+      if (replay) {
+        if (replay.message.senderType !== 'visitor' || (input.conversationId && input.conversationId !== replay.conversation.id)) {
+          throw createError({ statusCode: 409, statusMessage: 'This message request was already used' })
+        }
+        assertSameMessage(replay.message.requestFingerprint, fingerprint)
+        return { visitor: visitor!, ...replay, isNew: false, replayed: true }
+      }
+    }
 
     const existing = await tx.query.conversations.findFirst({
       where: input.conversationId
@@ -208,6 +231,8 @@ export async function ingestVisitorMessage(input: IncomingVisitorMessage) {
       conversationId: conversation.id,
       senderType: 'visitor',
       content: input.content,
+      clientMessageId: input.clientMessageId,
+      requestFingerprint: fingerprint,
       attachmentUrl: input.attachmentUrl ?? null,
       attachmentType: input.attachmentType ?? null,
       attachmentAssetId: attachment?.id ?? null
@@ -221,8 +246,9 @@ export async function ingestVisitorMessage(input: IncomingVisitorMessage) {
     await enqueueWebhookEvent(tx, input.workspaceId, 'message.created', {
       message: serializeMessage(message!)
     }, `message.created:${message!.id}`)
-    return { visitor: visitor!, conversation, message: message!, isNew }
+    return { visitor: visitor!, conversation, message: message!, isNew, replayed: false }
   })
+  if (result.replayed) return { visitor: result.visitor, conversation: result.conversation, message: result.message }
   const { visitor, message, isNew } = result
   let conversation = result.conversation
   let automationTagsChanged = false
@@ -280,6 +306,7 @@ export function inboxScope(workspaceId: string, assignedAgentId: string | null, 
 /* agent → visitor */
 
 interface AgentMessageInput {
+  clientMessageId?: string
   conversationId: string
   workspaceId: string
   senderMemberId: string
@@ -296,10 +323,28 @@ export async function addAgentMessage(input: AgentMessageInput) {
   const db = useDb()
   const now = new Date()
 
-  const { message, conv, notifications, collaboratorsChanged } = await db.transaction(async (tx) => {
+  const { message, conv, notifications, collaboratorsChanged, replayed } = await db.transaction(async (tx) => {
+    await lockWorkspaceMembership(tx, input.workspaceId)
+    const member = await currentMutationMember(tx, input.workspaceId, input.senderMemberId)
     const [current] = await tx.select().from(conversations)
-      .where(eq(conversations.id, input.conversationId)).for('update')
+      .where(and(eq(conversations.id, input.conversationId), eq(conversations.workspaceId, input.workspaceId))).for('update')
     if (!current) throw createError({ statusCode: 404, statusMessage: 'Conversation not found' })
+    if (!canMemberAccessConversation(member, current)) {
+      throw createError({ statusCode: 403, statusMessage: 'This conversation is assigned to another agent' })
+    }
+    const fingerprint = messageFingerprint(input)
+    if (input.clientMessageId) {
+      const replay = await tx.query.messages.findFirst({ where: and(
+        eq(messages.conversationId, input.conversationId), eq(messages.clientMessageId, input.clientMessageId)
+      ) })
+      if (replay) {
+        if (replay.senderId !== input.senderMemberId || replay.senderType !== 'agent') {
+          throw createError({ statusCode: 409, statusMessage: 'This message request was already used' })
+        }
+        assertSameMessage(replay.requestFingerprint, fingerprint)
+        return { message: replay, conv: current, notifications: [], collaboratorsChanged: false, replayed: true }
+      }
+    }
     if (current.isSpam && !input.isInternalNote) {
       throw createError({ statusCode: 409, statusMessage: 'Restore this conversation before replying' })
     }
@@ -328,6 +373,8 @@ export async function addAgentMessage(input: AgentMessageInput) {
       senderType: 'agent',
       senderId: input.senderMemberId,
       content: input.content,
+      clientMessageId: input.clientMessageId,
+      requestFingerprint: fingerprint,
       attachmentUrl: input.attachmentUrl ?? null,
       attachmentType: input.attachmentType ?? null,
       attachmentAssetId: attachment?.id ?? null,
@@ -356,9 +403,12 @@ export async function addAgentMessage(input: AgentMessageInput) {
       message: message!,
       conv,
       notifications,
-      collaboratorsChanged: collaboratorMemberIds.length !== current.collaboratorMemberIds.length
+      collaboratorsChanged: collaboratorMemberIds.length !== current.collaboratorMemberIds.length,
+      replayed: false
     }
   })
+
+  if (replayed) return message
 
   const event = { type: 'message.new' as const, payload: serializeMessage(message) }
   if (collaboratorsChanged) publishConversationUpdate(conv)
@@ -377,6 +427,7 @@ export async function addAgentMessage(input: AgentMessageInput) {
 /* agent-initiated conversations (live roster outreach) */
 
 interface StartConversationInput {
+  clientMessageId?: string
   workspaceId: string
   visitorRef: string
   memberId: string
@@ -394,6 +445,8 @@ export async function startAgentConversation(input: StartConversationInput) {
   const db = useDb()
   const now = new Date()
   const result = await db.transaction(async (tx) => {
+    await lockWorkspaceMembership(tx, input.workspaceId)
+    const member = await currentMutationMember(tx, input.workspaceId, input.memberId)
     // This row lock serializes agent and visitor starts for one visitor.
     const [visitor] = await tx.update(visitors).set({ lastSeenAt: now })
       .where(and(eq(visitors.id, input.visitorRef), eq(visitors.workspaceId, input.workspaceId)))
@@ -407,8 +460,23 @@ export async function startAgentConversation(input: StartConversationInput) {
       where: and(eq(conversations.visitorRef, input.visitorRef), ne(conversations.status, 'resolved')),
       orderBy: [desc(conversations.lastMessageAt)]
     })
-    if (existing?.assignedAgentId && existing.assignedAgentId !== input.memberId && input.memberRole !== 'admin') {
+    if (existing?.assignedAgentId && existing.assignedAgentId !== input.memberId && member.role !== 'admin') {
       throw createError({ statusCode: 403, statusMessage: 'This conversation is assigned to another agent' })
+    }
+
+    const fingerprint = messageFingerprint(input)
+    if (input.clientMessageId) {
+      const [replay] = await tx.select({ message: messages, conversation: conversations }).from(messages)
+        .innerJoin(conversations, eq(messages.conversationId, conversations.id)).where(and(
+          eq(conversations.visitorRef, visitor.id), eq(messages.clientMessageId, input.clientMessageId)
+        )).limit(1)
+      if (replay) {
+        if (replay.message.senderType !== 'agent' || replay.message.senderId !== member.id || !canMemberAccessConversation(member, replay.conversation)) {
+          throw createError({ statusCode: 409, statusMessage: 'This message request is no longer available' })
+        }
+        assertSameMessage(replay.message.requestFingerprint, fingerprint)
+        return { visitor, ...replay, isNew: false, previousAssignedAgentId: replay.conversation.assignedAgentId, replayed: true }
+      }
     }
 
     let conversation: Conversation
@@ -436,7 +504,9 @@ export async function startAgentConversation(input: StartConversationInput) {
       conversationId: conversation.id,
       senderType: 'agent',
       senderId: input.memberId,
-      content: input.content
+      content: input.content,
+      clientMessageId: input.clientMessageId,
+      requestFingerprint: fingerprint
     }).returning()
     if (isNew) {
       await enqueueWebhookEvent(tx, input.workspaceId, 'conversation.created', {
@@ -447,9 +517,10 @@ export async function startAgentConversation(input: StartConversationInput) {
     await enqueueWebhookEvent(tx, input.workspaceId, 'message.created', {
       message: serializeMessage(message!)
     }, `message.created:${message!.id}`)
-    return { visitor, conversation, message: message!, isNew, previousAssignedAgentId: existing?.assignedAgentId ?? null }
+    return { visitor, conversation, message: message!, isNew, previousAssignedAgentId: existing?.assignedAgentId ?? null, replayed: false }
   })
   const { conversation, message, isNew, previousAssignedAgentId } = result
+  if (result.replayed) return { conversation, message }
 
   const msgEvent = { type: 'message.new' as const, payload: serializeMessage(message) }
   if (isNew) {
@@ -514,12 +585,20 @@ export async function claimConversation(conversationId: string, workspaceId: str
 export async function assignConversation(
   conversationId: string,
   memberId: string,
-  actor: { memberId: string, name: string }
+  actor: { memberId: string, name: string, workspaceId: string }
 ): Promise<Conversation | null> {
   const db = useDb()
   const result = await db.transaction(async (tx) => {
-    const [current] = await tx.select().from(conversations).where(eq(conversations.id, conversationId)).for('update')
+    await lockWorkspaceMembership(tx, actor.workspaceId)
+    const actingMember = await currentMutationMember(tx, actor.workspaceId, actor.memberId)
+    await currentMutationMember(tx, actor.workspaceId, memberId)
+    const [current] = await tx.select().from(conversations).where(and(
+      eq(conversations.id, conversationId), eq(conversations.workspaceId, actor.workspaceId)
+    )).for('update')
     if (!current) return null
+    if (!canMemberReassignConversation(actingMember, current)) {
+      throw createError({ statusCode: 403, statusMessage: 'Only the current assignee or an admin can transfer this conversation' })
+    }
     if (current.assignedAgentId === memberId) {
       return { conversation: current, previousAssignedAgentId: current.assignedAgentId, notification: null }
     }
@@ -527,6 +606,13 @@ export async function assignConversation(
       .set({ assignedAgentId: memberId, status: 'open', updatedAt: new Date() })
       .where(eq(conversations.id, conversationId))
       .returning()
+    await tx.insert(auditLogs).values({
+      workspaceId: actor.workspaceId,
+      actorId: actingMember.userId,
+      actorName: actor.name,
+      action: 'conversation.reassigned',
+      detail: { conversationId, fromMemberId: current.assignedAgentId, toMemberId: memberId }
+    })
     const [notification] = conversation && memberId !== actor.memberId
       ? await tx.insert(memberNotifications).values({
           workspaceId: conversation.workspaceId,

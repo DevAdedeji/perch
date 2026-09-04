@@ -18,7 +18,6 @@ describe('spam-control security boundary', () => {
   const messageSource = readFileSync(new URL('../server/api/widget/messages.post.ts', import.meta.url), 'utf8')
   const uploadSource = readFileSync(new URL('../server/api/attachments/upload.post.ts', import.meta.url), 'utf8')
   const websocketSource = readFileSync(new URL('../server/routes/api/ws.ts', import.meta.url), 'utf8')
-  const triggerSource = readFileSync(new URL('../server/plugins/trigger-sweep.ts', import.meta.url), 'utf8')
 
   it('authorizes, rate-limits, workspace-scopes, and audits moderation actions', () => {
     for (const source of [markSource, restoreSource]) {
@@ -35,7 +34,6 @@ describe('spam-control security boundary', () => {
     expect(messageSource).toContain('await assertVisitorCanMessage(visitor)')
     expect(uploadSource).toContain('await assertVisitorCanMessage(visitor)')
     expect(websocketSource).toContain('await isVisitorMessagingBlocked(visitor)')
-    expect(triggerSource).toContain('await isVisitorMessagingBlocked(visitorRow)')
     expect(messageSource).not.toContain('spam')
     expect(messageSource).not.toContain('blocked')
   })

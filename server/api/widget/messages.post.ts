@@ -1,6 +1,7 @@
 import { z } from 'zod'
 
 const schema = z.object({
+  client_message_id: z.string().uuid().optional(),
   site_id: z.string().min(1),
   visitor_session: z.string().min(1).max(2048),
   content: z.string().trim().max(5000).default(''),
@@ -33,6 +34,7 @@ export default defineEventHandler(async (event) => {
   await assertVisitorCanMessage(visitor)
 
   const { conversation, message } = await ingestVisitorMessage({
+    clientMessageId: result.data.client_message_id,
     workspaceId: workspace.id,
     visitorId: visitor.visitorId,
     name,

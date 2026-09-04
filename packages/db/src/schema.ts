@@ -517,9 +517,12 @@ export const teamMessages = pgTable('team_messages', {
   workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
   memberId: uuid('member_id').notNull().references(() => workspaceMembers.id, { onDelete: 'cascade' }),
   content: text('content').notNull(),
+  clientMessageId: uuid('client_message_id'),
+  requestFingerprint: text('request_fingerprint'),
   mentionedMemberIds: uuid('mentioned_member_ids').array().default([]).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull()
 }, t => [
+  uniqueIndex('team_messages_client_request_uq').on(t.workspaceId, t.memberId, t.clientMessageId),
   index('team_messages_workspace_recency_idx').on(t.workspaceId, t.createdAt)
 ])
 
@@ -530,6 +533,8 @@ export const messages = pgTable('messages', {
   // null when the sender is the visitor or the system
   senderId: uuid('sender_id').references(() => workspaceMembers.id, { onDelete: 'set null' }),
   content: text('content').notNull(),
+  clientMessageId: uuid('client_message_id'),
+  requestFingerprint: text('request_fingerprint'),
   attachmentUrl: text('attachment_url'),
   attachmentType: text('attachment_type'),
   attachmentAssetId: uuid('attachment_asset_id').references(() => attachmentAssets.id, { onDelete: 'set null' }),
@@ -539,6 +544,7 @@ export const messages = pgTable('messages', {
   mentionedMemberIds: uuid('mentioned_member_ids').array().default([]).notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull()
 }, t => [
+  uniqueIndex('messages_client_request_uq').on(t.conversationId, t.clientMessageId),
   index('messages_conversation_created_idx').on(t.conversationId, t.createdAt),
   index('messages_public_conversation_sender_time_idx')
     .on(t.conversationId, t.senderType, t.createdAt)

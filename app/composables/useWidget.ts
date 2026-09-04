@@ -231,9 +231,12 @@ export function useWidget(
         if (ev.payload.conversation_id === conversationId.value && !messages.value.some(m => m.id === ev.payload.id)) {
           // WS echo of our own optimistic send — swap the temp bubble in place
           const tempIdx = ev.payload.sender_type === 'visitor'
-            ? messages.value.findIndex(m => m.pending && m.content === ev.payload.content)
+            ? messages.value.findIndex(m => (m.pending || m.failed) && ev.payload.client_message_id && m.client_message_id === ev.payload.client_message_id)
             : -1
           if (tempIdx !== -1) {
+            const temporaryId = messages.value[tempIdx]!.id
+            uploadFns.delete(temporaryId)
+            sendIdentities.delete(temporaryId)
             messages.value.splice(tempIdx, 1, ev.payload)
           } else {
             messages.value.push(ev.payload)
@@ -385,6 +388,8 @@ export function useWidget(
   // sends stay visible as retryable bubbles.
   let sendChain: Promise<unknown> = Promise.resolve()
   const uploadFns = new Map<string, () => Promise<{ url: string, type: string }>>()
+  const activeSends = new Set<string>()
+  const sendIdentities = new Map<string, { name?: string, email?: string, replyEmailConsent?: boolean }>()
 
   function queuePost(run: () => Promise<void>) {
     const p = sendChain.then(run, run)
@@ -393,9 +398,10 @@ export function useWidget(
   }
 
   function pushTemp(content: string, attachment?: { url: string, type: string }) {
-    const tempId = `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`
+    const tempId = `temp-${crypto.randomUUID()}`
     messages.value.push({
       id: tempId,
+      client_message_id: tempId.slice(5),
       conversation_id: conversationId.value ?? 'pending',
       sender_type: 'visitor',
       content,
@@ -409,7 +415,10 @@ export function useWidget(
 
   async function performSend(tempId: string, identity?: { name?: string, email?: string, replyEmailConsent?: boolean }) {
     const temp = messages.value.find(m => m.id === tempId)
-    if (!temp) return
+    if (!alive || !messagingAvailable.value || !temp || activeSends.has(tempId)) return
+    if (identity) sendIdentities.set(tempId, identity)
+    identity = sendIdentities.get(tempId)
+    activeSends.add(tempId)
     temp.pending = true
     temp.failed = false
     try {
@@ -424,11 +433,13 @@ export function useWidget(
       }
 
       await queuePost(async () => {
+        if (!alive || !messagingAvailable.value) return
         // a pending trigger threads its message into the newly-created convo
         const triggerId = !conversationId.value && pendingTriggerId ? pendingTriggerId : undefined
         const res = await $fetch<{ conversation_id: string, message: VisitorMessageDTO }>('/api/widget/messages', {
           method: 'POST',
           body: {
+            client_message_id: tempId.slice(5),
             site_id: siteId,
             visitor_session: visitorSession,
             content: temp.content,
@@ -440,6 +451,7 @@ export function useWidget(
             ...identity
           }
         })
+        if (!alive) return
         if (triggerId) pendingTriggerId = null
         if (!conversationId.value) {
           conversationId.value = res.conversation_id
@@ -462,8 +474,10 @@ export function useWidget(
           messages.value.push(res.message)
         }
         uploadFns.delete(tempId)
+        sendIdentities.delete(tempId)
       })
     } catch (e) {
+      if (messages.value.some(message => !message.pending && !message.failed && message.client_message_id === tempId.slice(5))) return
       const errorData = (e as { data?: { code?: string, data?: { code?: string } } }).data
       const blocked = errorData?.code === 'MESSAGING_UNAVAILABLE'
         || errorData?.data?.code === 'MESSAGING_UNAVAILABLE'
@@ -472,6 +486,7 @@ export function useWidget(
         const index = messages.value.findIndex(message => message.id === tempId)
         if (index !== -1) messages.value.splice(index, 1)
         uploadFns.delete(tempId)
+        sendIdentities.delete(tempId)
         throw e
       }
       const failedMsg = messages.value.find(m => m.id === tempId)
@@ -480,6 +495,8 @@ export function useWidget(
         failedMsg.failed = true
       }
       throw e
+    } finally {
+      activeSends.delete(tempId)
     }
   }
 
@@ -561,6 +578,11 @@ export function useWidget(
 
   function stop() {
     alive = false
+    for (const message of messages.value) {
+      if (message.attachment_url?.startsWith('blob:')) URL.revokeObjectURL(message.attachment_url)
+    }
+    uploadFns.clear()
+    sendIdentities.clear()
     clearTimeout(reconnectTimer)
     clearInterval(pingTimer)
     socket?.close()

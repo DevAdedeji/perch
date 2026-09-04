@@ -132,6 +132,7 @@ export interface BusinessPresencePayload {
 }
 
 export interface TeamMessagePayload {
+  client_message_id?: string | null
   id: string
   workspace_id: string
   member_id: string

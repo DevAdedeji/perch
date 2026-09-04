@@ -102,6 +102,7 @@ export type AutomationRuleConfig
     | { hours: number }
 
 export interface MessageDTO {
+  client_message_id?: string | null
   id: string
   conversation_id: string
   sender_type: SenderType
@@ -115,6 +116,7 @@ export interface MessageDTO {
 }
 
 export interface VisitorMessageDTO {
+  client_message_id?: string | null
   id: string
   conversation_id: string
   sender_type: SenderType

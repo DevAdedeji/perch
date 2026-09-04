@@ -232,6 +232,13 @@
       "when": 1788432984996,
       "tag": "0032_resend_suppression_reconciliation",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1788563222291,
+      "tag": "0033_message_request_deduplication",
+      "breakpoints": true
     }
   ]
 }

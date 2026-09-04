@@ -17,6 +17,23 @@ type VisitorIdentity = Pick<Visitor, 'id' | 'workspaceId' | 'externalId' | 'iden
 type ReadableDatabase = Pick<Database, 'select' | 'query'>
 type ExecutableDatabase = Pick<Database, 'execute'>
 
+/** One moderation lookup for an eligible roster batch, including verified sibling sessions. */
+export async function blockedVisitorIds(db: ReadableDatabase, workspaceId: string, candidates: VisitorIdentity[]): Promise<Set<string>> {
+  if (!candidates.length) return new Set()
+  const externalIds = [...new Set(candidates.filter(visitor => visitor.identityVerified && visitor.externalId).map(visitor => visitor.externalId!))]
+  const blocked = await db.select({ id: visitors.id, externalId: visitors.externalId, identityVerified: visitors.identityVerified })
+    .from(visitorBlocks).innerJoin(visitors, eq(visitorBlocks.visitorRef, visitors.id)).where(and(
+      eq(visitorBlocks.workspaceId, workspaceId), eq(visitors.workspaceId, workspaceId), isNull(visitorBlocks.unblockedAt),
+      or(inArray(visitors.id, candidates.map(visitor => visitor.id)), externalIds.length
+        ? and(eq(visitors.identityVerified, true), inArray(visitors.externalId, externalIds))
+        : undefined)
+    ))
+  const direct = new Set(blocked.map(visitor => visitor.id))
+  const identities = new Set(blocked.filter(visitor => visitor.identityVerified).map(visitor => visitor.externalId))
+  return new Set(candidates.filter(visitor => direct.has(visitor.id)
+    || (visitor.identityVerified && !!visitor.externalId && identities.has(visitor.externalId))).map(visitor => visitor.id))
+}
+
 /**
  * A signed host identity may legitimately acquire a new browser session. Only
  * verified external ids are linked; self-reported email/name must never block

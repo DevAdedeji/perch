@@ -94,6 +94,6 @@ describe('team roster consumers', () => {
     expect(memberInterface).toContain('presence: \'online\' | \'offline\' | \'away\'')
     expect(memberInterface).not.toContain('email')
     expect(memberInterface).not.toContain('userId')
-    expect(nestPage).toContain('`/api/workspaces/${wid.value}/members`')
+    expect(nestPage).toContain('`/api/workspaces/${workspaceId}/members`')
   })
 })

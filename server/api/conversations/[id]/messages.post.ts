@@ -2,6 +2,7 @@ import { and, eq, inArray, workspaceMembers } from '@perch/db'
 import { z } from 'zod'
 
 const bodySchema = z.object({
+  client_message_id: z.string().uuid().optional(),
   content: z.string().trim().max(5000).default(''),
   attachment_url: z.string().url().max(500).optional(),
   attachment_type: z.string().regex(/^image\//).max(100).optional(),
@@ -46,6 +47,7 @@ export default defineEventHandler(async (event) => {
   const mentionRecipientIds = targets.map(target => target.id)
 
   const message = await addAgentMessage({
+    clientMessageId: result.data.client_message_id,
     conversationId,
     workspaceId: conversation.workspaceId,
     senderMemberId: member.id,
