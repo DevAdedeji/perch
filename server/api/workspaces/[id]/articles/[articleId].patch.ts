@@ -38,7 +38,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'An article needs a body or a link' })
   }
 
-  const patch: Record<string, unknown> = { updatedAt: new Date() }
+  const patch: Partial<Pick<typeof articles.$inferInsert, 'title' | 'body' | 'url' | 'status' | 'groupId' | 'updatedAt'>> = { updatedAt: new Date() }
   if (result.data.title !== undefined) patch.title = result.data.title
   if (result.data.body !== undefined) patch.body = result.data.body
   if (result.data.url !== undefined) patch.url = result.data.url || null

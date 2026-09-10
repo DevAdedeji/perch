@@ -20,7 +20,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Invalid input' })
   }
 
-  const patch: Record<string, unknown> = {}
+  const patch: Partial<Pick<typeof articleGroups.$inferInsert, 'name' | 'description' | 'sortOrder'>> = {}
   if (result.data.name !== undefined) patch.name = result.data.name
   if (result.data.description !== undefined) patch.description = result.data.description || null
   if (result.data.sort_order !== undefined) patch.sortOrder = result.data.sort_order
