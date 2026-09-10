@@ -1,3 +1,6 @@
+import { requireReplyContinuation } from '@@/server/domains/visitors/email-continuity'
+import { useDb } from '@@/server/database/client'
+import { serializeVisitorMessage } from '@@/server/domains/conversations/messages'
 import { and, desc, eq, messages, visitorConversationReads } from '@perch/db'
 
 export default defineEventHandler(async (event) => {

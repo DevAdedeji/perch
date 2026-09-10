@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ATTACHMENT_MAX_BYTES, validateImageAttachment } from '../packages/shared/src/constants'
+import { ATTACHMENT_MAX_BYTES, validateImageAttachment } from '@@/packages/shared/src/constants'
 
 describe('image attachment validation', () => {
   it.each(['image/jpeg', 'image/png', 'image/gif', 'image/webp'])(

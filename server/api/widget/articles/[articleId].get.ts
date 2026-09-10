@@ -1,3 +1,5 @@
+import { PUBLIC_HELP_ARTICLE_ID_PATTERN, PUBLIC_HELP_SITE_ID_PATTERN, findPublicHelpWorkspaceId, findPublishedHelpArticle } from '@@/server/domains/help-center/articles'
+import { useDb } from '@@/server/database/client'
 import { z } from 'zod'
 
 export default defineEventHandler(async (event) => {

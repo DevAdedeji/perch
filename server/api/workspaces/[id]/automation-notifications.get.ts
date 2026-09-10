@@ -1,3 +1,5 @@
+import { requireMembership } from '@@/server/domains/workspaces/access'
+import { useDb } from '@@/server/database/client'
 import { and, automationNotifications, conversations, desc, eq, isNull } from '@perch/db'
 
 export default defineEventHandler(async (event) => {

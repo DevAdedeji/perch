@@ -10,7 +10,7 @@ import {
   MAX_API_REQUEST_BYTES,
   requiresTrustedMutationOrigin,
   safeErrorSummary
-} from '../server/utils/request-security'
+} from '@@/server/utils/request-security'
 
 const middlewareSource = readFileSync(
   new URL('../server/middleware/request-boundaries.ts', import.meta.url),
@@ -62,6 +62,14 @@ describe('API request boundaries', () => {
 })
 
 describe('browser security policy', () => {
+  it('allows the installation preview to embed its own widget without permitting third-party frames', () => {
+    const preview = contentSecurityPolicy('\'none\'', false, { allowSameOriginFrames: true })
+    expect(preview.split('; ')).toContain('frame-src \'self\'')
+    expect(preview.split('; ')).toContain('frame-ancestors \'none\'')
+    expect(contentSecurityPolicy('\'none\'').split('; ')).toContain('frame-src \'none\'')
+    expect(contentSecurityPolicy('\'self\'').split('; ')).toContain('frame-src \'none\'')
+  })
+
   it('keeps active content and framing locked down without blocking approved widget ancestors', () => {
     const dashboard = contentSecurityPolicy('\'none\'')
     expect(dashboard).toContain('default-src \'self\'')

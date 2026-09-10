@@ -1,3 +1,5 @@
+import { useDb } from '@@/server/database/client'
+import { requireVisitorSession } from '@@/server/domains/visitors/session'
 import { and, conversations, desc, eq, sql, supportOutcomeEvents } from '@perch/db'
 import { z } from 'zod'
 

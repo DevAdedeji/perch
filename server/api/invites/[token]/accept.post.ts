@@ -1,3 +1,7 @@
+import { requireUser } from '@@/server/domains/auth/require-user'
+import { useDb } from '@@/server/database/client'
+import { workspaceEntitlement } from '@@/server/domains/billing/subscriptions'
+import { logAudit } from '@@/server/domains/workspaces/audit'
 import { and, count, eq, invites, sql, users, workspaceMembers, workspaces } from '@perch/db'
 
 /** Accept an invite: the logged-in user joins the workspace as the invited role. */

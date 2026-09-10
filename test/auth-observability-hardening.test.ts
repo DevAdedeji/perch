@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { sanitizeSentryUrl, scrubSentryBreadcrumb, scrubSentryEvent } from '../config/sentry-privacy'
-import { contentSecurityPolicy } from '../server/utils/request-security'
+import { sanitizeSentryUrl, scrubSentryBreadcrumb, scrubSentryEvent } from '@@/config/sentry-privacy'
+import { contentSecurityPolicy } from '@@/server/utils/request-security'
 
 const source = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8')
 

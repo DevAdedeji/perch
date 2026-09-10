@@ -1,6 +1,9 @@
+import { getEnabledTriggers, matchesTriggerUrl } from '@@/server/domains/automations/triggers'
+import { useDb } from '@@/server/database/client'
 import { and, eq, inArray, triggerFires, visitors } from '@perch/db'
-import { safeErrorSummary } from '../utils/request-security'
-import { blockedVisitorIds } from '../utils/spam-control'
+import { safeErrorSummary } from '@@/server/utils/request-security'
+import { blockedVisitorIds } from '@@/server/domains/conversations/spam-control'
+import { startBackgroundSweep } from '@@/server/infrastructure/background-sweep'
 
 /**
  * Proactive-trigger sweep. Every 5s, look at who's live (visitor-presence
@@ -16,13 +19,11 @@ const SWEEP_INTERVAL = 5_000
 // shield only, never the source of truth. Cleared when it grows silly.
 const fired = new Set<string>()
 
-export default defineNitroPlugin(() => {
-  let running = false
-
-  setInterval(async () => {
-    if (running) return // a slow DB round shouldn't stack sweeps
-    running = true
-    try {
+export default defineNitroPlugin((app) => {
+  if (import.meta.prerender) return
+  const stop = startBackgroundSweep({
+    intervalMs: SWEEP_INTERVAL,
+    run: async () => {
       for (const workspaceId of liveWorkspaceIds()) {
         const rules = await getEnabledTriggers(workspaceId)
         if (!rules.length) continue
@@ -74,10 +75,8 @@ export default defineNitroPlugin(() => {
           }
         }
       }
-    } catch (error) {
-      console.error('[trigger-sweep] pass failed', safeErrorSummary(error))
-    } finally {
-      running = false
-    }
-  }, SWEEP_INTERVAL).unref()
+    },
+    onError: error => console.error('[trigger-sweep] pass failed', safeErrorSummary(error))
+  })
+  app.hooks.hook('close', stop)
 })

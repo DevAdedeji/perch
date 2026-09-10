@@ -1,3 +1,6 @@
+import { useDb } from '@@/server/database/client'
+import { createDbSession } from '@@/server/domains/auth/sessions'
+import { sendVerificationEmail } from '@@/server/domains/auth/verification'
 import { eq, users } from '@perch/db'
 
 export default defineEventHandler(async (event) => {

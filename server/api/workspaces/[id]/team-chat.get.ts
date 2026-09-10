@@ -1,3 +1,5 @@
+import { requireMembership } from '@@/server/domains/workspaces/access'
+import { useDb } from '@@/server/database/client'
 import { desc, eq, teamMessages, users, workspaceMembers } from '@perch/db'
 
 /** The team lounge thread — last 100 messages, oldest first. Agents only, by nature. */

@@ -3,8 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   attachmentCleanupRetryAt,
   destroyAttachmentAsset
-} from '../server/utils/attachment-lifecycle'
-import { signCloudinaryParams } from '../server/utils/cloudinary'
+} from '@@/server/domains/attachments/lifecycle'
+import { signCloudinaryParams } from '@@/server/integrations/cloudinary'
 
 describe('attachment cleanup provider boundary', () => {
   beforeEach(() => {

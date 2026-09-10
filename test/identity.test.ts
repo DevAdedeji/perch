@@ -1,6 +1,6 @@
 import { createHmac } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
-import { verifyIdentitySignature } from '../server/utils/identity'
+import { verifyIdentitySignature } from '@@/server/utils/identity'
 
 const SECRET = 'workspace-identity-secret'
 

@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { Webhook } from 'svix'
-import { verifyResendWebhook } from '../server/utils/resend-webhooks'
+import { verifyResendWebhook } from '@@/server/domains/notifications/resend-events'
 
 function signedEvent(payload: string, timestamp = new Date()) {
   const secret = `whsec_${randomBytes(32).toString('base64')}`

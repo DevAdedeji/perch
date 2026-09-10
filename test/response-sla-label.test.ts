@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ResponseSlaDTO } from '@perch/shared/models'
-import { responseSlaLabel } from '../app/utils/response-sla'
+import { responseSlaLabel } from '@/utils/response-sla'
 
 function waitingSla(overrides: Partial<ResponseSlaDTO> = {}): ResponseSlaDTO {
   return {

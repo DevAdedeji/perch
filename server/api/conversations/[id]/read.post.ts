@@ -1,3 +1,5 @@
+import { requireConversationMember } from '@@/server/domains/workspaces/access'
+import { useDb } from '@@/server/database/client'
 import { conversationReads } from '@perch/db'
 
 /** Mark a conversation read for the current agent (updates unread state). */

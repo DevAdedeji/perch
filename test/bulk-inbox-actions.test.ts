@@ -4,15 +4,16 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { drizzle } from '../packages/db/node_modules/drizzle-orm/postgres-js/index.js'
 import { and, eq, inArray } from '../packages/db/node_modules/drizzle-orm/index.js'
 import postgres from '../packages/db/node_modules/postgres/src/index.js'
-import type { Database } from '../packages/db/src/client'
-import * as schema from '../packages/db/src/schema'
-import { MAX_BULK_CONVERSATIONS } from '../packages/shared/src/constants'
+import type { Database } from '@@/packages/db/src/client'
+import * as schema from '@@/packages/db/src/schema'
+import { MAX_BULK_CONVERSATIONS } from '@@/packages/shared/src/constants'
 import {
   bulkConversationActionSchema,
   canBulkAssignConversation,
   mutateConversationsInBulk,
   type BulkConversationAction
-} from '../server/utils/bulk-conversations'
+} from '@@/server/domains/conversations/bulk-actions'
+import { getTestDatabaseUrl } from '@@/test/helpers/database'
 
 const uuid = () => randomUUID()
 
@@ -58,7 +59,7 @@ describe('bulk inbox action boundary', () => {
   })
 })
 
-const databaseUrl = process.env.TEST_DATABASE_URL
+const databaseUrl = getTestDatabaseUrl()
 
 describe.skipIf(!databaseUrl)('bulk inbox database integration', () => {
   const client = postgres(databaseUrl!, { max: 1 })

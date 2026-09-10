@@ -4,7 +4,7 @@ import {
   parseInboxFilters,
   savedInboxFiltersSchema,
   validateSnoozeDate
-} from '../server/utils/inbox-filters'
+} from '@@/server/domains/conversations/filters'
 
 describe('inbox filters', () => {
   it('uses safe defaults for the ordinary inbox', () => {

@@ -1,27 +1,21 @@
-import { safeErrorSummary } from '../utils/request-security'
-import { requireResendWebhookSecret, runResendSuppressionSweep } from '../utils/resend-webhooks'
+import { safeErrorSummary } from '@@/server/utils/request-security'
+import { startBackgroundSweep } from '@@/server/infrastructure/background-sweep'
+import { requireResendWebhookSecret, runResendSuppressionSweep } from '@@/server/domains/notifications/resend-events'
 
 const RESEND_SUPPRESSION_SWEEP_INTERVAL_MS = 60_000
 
-export default defineNitroPlugin(() => {
+export default defineNitroPlugin((app) => {
   if (import.meta.prerender) return
   try {
     requireResendWebhookSecret()
   } catch {
     return
   }
-  let running = false
-  const sweep = async () => {
-    if (running) return
-    running = true
-    try {
-      await runResendSuppressionSweep()
-    } catch (error) {
-      console.error('[resend] suppression sweep failed', safeErrorSummary(error))
-    } finally {
-      running = false
-    }
-  }
-  setTimeout(sweep, 10_000).unref()
-  setInterval(sweep, RESEND_SUPPRESSION_SWEEP_INTERVAL_MS).unref()
+  const stop = startBackgroundSweep({
+    intervalMs: RESEND_SUPPRESSION_SWEEP_INTERVAL_MS,
+    initialDelayMs: 10_000,
+    run: () => runResendSuppressionSweep(),
+    onError: error => console.error('[resend] suppression sweep failed', safeErrorSummary(error))
+  })
+  app.hooks.hook('close', stop)
 })

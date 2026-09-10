@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { inactivityExecutionKey, isInactivityCandidate, reminderExecutionKey, resolveEntryConversation, roundRobinIndex } from '../server/utils/automation-engine'
-import { matchesPageRule, matchesVipRule, parseAutomationConfig } from '../server/utils/automation-rules'
-import { serializeVisitorConversation, serializeVisitorMessage } from '../server/utils/conversations'
+import { inactivityExecutionKey, isInactivityCandidate, reminderExecutionKey, resolveEntryConversation, roundRobinIndex } from '@@/server/domains/automations/engine'
+import { matchesPageRule, matchesVipRule, parseAutomationConfig } from '@@/server/domains/automations/rules'
+import { serializeVisitorConversation, serializeVisitorMessage } from '@@/server/domains/conversations/messages'
 
 describe('automation rule validation', () => {
   it('accepts each launch template with safe ranges', () => {

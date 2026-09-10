@@ -9,7 +9,7 @@ import {
   verifyReplyPayload,
   visitorEmailHash,
   visitorReplyEmailHtml
-} from '../server/utils/visitor-email-continuity'
+} from '@@/server/domains/visitors/email-continuity'
 
 describe('visitor email continuity security helpers', () => {
   const secret = 'visitor-reply-test-secret-with-32-characters'

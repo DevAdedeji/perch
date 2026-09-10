@@ -1,3 +1,4 @@
+import { useDb } from '@@/server/database/client'
 import { eq, sql, users } from '@perch/db'
 import { z } from 'zod'
 

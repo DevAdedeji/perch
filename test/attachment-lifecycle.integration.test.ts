@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { drizzle } from '../packages/db/node_modules/drizzle-orm/postgres-js/index.js'
 import { and, eq, inArray } from '../packages/db/node_modules/drizzle-orm/index.js'
 import postgres from '../packages/db/node_modules/postgres/src/index.js'
-import * as schema from '../packages/db/src/schema'
+import * as schema from '@@/packages/db/src/schema'
 import {
   ATTACHMENT_ABANDONED_AFTER_MS,
   ATTACHMENT_CLEANUP_MAX_ATTEMPTS,
@@ -16,9 +16,10 @@ import {
   registerAttachmentAsset,
   retryFailedAttachmentCleanup,
   runAttachmentCleanupSweep
-} from '../server/utils/attachment-lifecycle'
+} from '@@/server/domains/attachments/lifecycle'
+import { getTestDatabaseUrl } from '@@/test/helpers/database'
 
-const databaseUrl = process.env.TEST_DATABASE_URL
+const databaseUrl = getTestDatabaseUrl()
 
 describe.skipIf(!databaseUrl)('secure attachment lifecycle', () => {
   const client = postgres(databaseUrl!, { max: 12 })

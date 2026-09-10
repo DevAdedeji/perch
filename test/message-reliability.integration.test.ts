@@ -1,21 +1,25 @@
+import * as databaseClient from '@@/server/database/client'
+import * as authentication from '@@/server/domains/auth/require-user'
 import { randomUUID } from 'node:crypto'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { drizzle } from '../packages/db/node_modules/drizzle-orm/postgres-js/index.js'
 import postgres from '../packages/db/node_modules/postgres/src/index.js'
 import { and, eq, inArray, sql } from '@perch/db'
-import * as schema from '../packages/db/src/schema'
-import { addAgentMessage, assignConversation, ingestVisitorMessage, startAgentConversation } from '../server/utils/conversations'
-import { assertVisitorCanMessage, blockedVisitorIds, isVisitorMessagingBlocked } from '../server/utils/spam-control'
-import { createWorkspaceTag, createWorkspaceTrigger } from '../server/utils/workspace-resources'
-import { runEntryAutomations } from '../server/utils/automation-engine'
-import { getEnabledAutomationRules } from '../server/utils/automation-rules'
-import { getEnabledTriggers, matchesTriggerUrl } from '../server/utils/triggers'
+import * as schema from '@@/packages/db/src/schema'
+import { addAgentMessage, assignConversation, ingestVisitorMessage, startAgentConversation } from '@@/server/domains/conversations/messages'
+import { assertVisitorCanMessage, blockedVisitorIds, isVisitorMessagingBlocked } from '@@/server/domains/conversations/spam-control'
+import { createWorkspaceTag, createWorkspaceTrigger } from '@@/server/domains/workspaces/resources'
+import { runEntryAutomations } from '@@/server/domains/automations/engine'
+import { getEnabledAutomationRules } from '@@/server/domains/automations/rules'
+import { getEnabledTriggers, matchesTriggerUrl } from '@@/server/domains/automations/triggers'
+import { getTestDatabaseUrl } from '@@/test/helpers/database'
 
-const databaseUrl = process.env.TEST_DATABASE_URL
+const databaseUrl = getTestDatabaseUrl()
 
 describe.skipIf(!databaseUrl)('message and workspace mutation reliability', () => {
   const client = postgres(databaseUrl!, { max: 8 })
   const db = drizzle(client, { schema })
+  vi.spyOn(databaseClient, 'useDb').mockReturnValue(db)
   const workspaceIds: string[] = []
   const userIds: string[] = []
 
@@ -31,7 +35,6 @@ describe.skipIf(!databaseUrl)('message and workspace mutation reliability', () =
   }
 
   beforeAll(() => {
-    vi.stubGlobal('useDb', () => db)
     vi.stubGlobal('useRuntimeConfig', () => ({ outboundWebhooksEnabled: false }))
     vi.stubGlobal('assertVisitorCanMessage', assertVisitorCanMessage)
     vi.stubGlobal('isVisitorMessagingBlocked', isVisitorMessagingBlocked)
@@ -153,12 +156,12 @@ describe.skipIf(!databaseUrl)('message and workspace mutation reliability', () =
     const f = await fixture()
     vi.stubGlobal('defineEventHandler', (handler: unknown) => handler)
     vi.stubGlobal('getRouterParam', () => f.workspace.id)
-    vi.stubGlobal('requireMembership', () => ({ user: f.users[1], member: f.members[1] }))
+    vi.spyOn(authentication, 'requireUser').mockResolvedValue(f.users[1]!)
     vi.stubGlobal('assertRateLimit', vi.fn())
     vi.stubGlobal('setResponseStatus', vi.fn())
     let body = { content: 'Please check', mentioned_member_ids: [f.members[2]!.id], client_message_id: randomUUID() }
     vi.stubGlobal('readValidatedBody', (_event: unknown, validate: (body: unknown) => unknown) => validate(body))
-    const { default: handler } = await import('../server/api/workspaces/[id]/team-chat.post')
+    const { default: handler } = await import('@@/server/api/workspaces/[id]/team-chat.post')
     const results = await Promise.all(Array.from({ length: 4 }, () => handler({} as never)))
     expect(new Set(results.map(message => message.id)).size).toBe(1)
     expect(await db.query.teamMessages.findMany({ where: eq(schema.teamMessages.workspaceId, f.workspace.id) })).toHaveLength(1)
@@ -185,8 +188,10 @@ describe.skipIf(!databaseUrl)('message and workspace mutation reliability', () =
     vi.stubGlobal('liveVisitors', () => roster)
     const send = vi.fn(() => true)
     vi.stubGlobal('sendToVisitor', send)
-    const { default: plugin } = await import('../server/plugins/trigger-sweep')
-    plugin({} as never)
+    const { default: plugin } = await import('@@/server/plugins/trigger-sweep')
+    const hook = vi.fn()
+    plugin({ hooks: { hook } } as never)
+    expect(hook).toHaveBeenCalledWith('close', expect.any(Function))
     const select = vi.spyOn(db, 'select')
     await sweep()
     expect(select).not.toHaveBeenCalled()

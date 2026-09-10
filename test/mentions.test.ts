@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { activeMention, insertMention, mentionSegments, selectedMentionIds } from '../app/utils/mentions'
+import { activeMention, insertMention, mentionSegments, selectedMentionIds } from '@/utils/mentions'
 
 describe('mention composer helpers', () => {
   it('finds a mention after whitespace and supports full-name searches', () => {

@@ -1,6 +1,6 @@
 import { createHmac } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
-import { signTicket, verifyTicket } from '../server/utils/ws-ticket'
+import { signTicket, verifyTicket } from '@@/server/utils/ws-ticket'
 
 const SECRET = 'test-secret-at-least-32-characters-long'
 const HOST_ORIGIN = 'https://customer.example'

@@ -1,3 +1,8 @@
+import { requireConversationMember } from '@@/server/domains/workspaces/access'
+import { customerProfileUpdateSchema, getCustomerContext } from '@@/server/domains/visitors/profiles'
+import { useDb } from '@@/server/database/client'
+import { logAudit } from '@@/server/domains/workspaces/audit'
+import { inboxScope } from '@@/server/domains/conversations/messages'
 import { and, eq, inArray, sql, tags, visitorTags, visitors } from '@perch/db'
 import { channels } from '@perch/shared'
 

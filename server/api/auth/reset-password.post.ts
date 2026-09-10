@@ -1,3 +1,5 @@
+import { useDb } from '@@/server/database/client'
+import { forgetSessions } from '@@/server/domains/auth/sessions'
 import { createHash } from 'node:crypto'
 import { and, eq, isNull, passwordResetTokens, sessions, users } from '@perch/db'
 import { z } from 'zod'

@@ -8,7 +8,7 @@ import {
   webhookDeliveryEnabled,
   webhookEnvelope,
   webhookRetryAt
-} from '../server/utils/webhooks'
+} from '@@/server/domains/webhooks/delivery'
 import {
   isPublicIp,
   isSafeWebhookUrl,
@@ -17,7 +17,7 @@ import {
   safeWebhookError,
   webhookAuditTarget,
   webhookTargetPolicy
-} from '../server/utils/webhook-security'
+} from '@@/server/domains/webhooks/endpoints'
 
 const SECRET = 'whsec_test_secret'
 

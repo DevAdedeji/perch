@@ -1,18 +1,13 @@
-import { safeErrorSummary } from '../utils/request-security'
+import { runAutomationSweep } from '@@/server/domains/automations/engine'
+import { safeErrorSummary } from '@@/server/utils/request-security'
+import { startBackgroundSweep } from '@@/server/infrastructure/background-sweep'
 
-const AUTOMATION_SWEEP_INTERVAL = 60_000
-
-export default defineNitroPlugin(() => {
-  let running = false
-  setInterval(async () => {
-    if (running) return
-    running = true
-    try {
-      await runAutomationSweep()
-    } catch (error) {
-      console.error('[automation] sweep failed', safeErrorSummary(error))
-    } finally {
-      running = false
-    }
-  }, AUTOMATION_SWEEP_INTERVAL).unref()
+export default defineNitroPlugin((app) => {
+  if (import.meta.prerender) return
+  const stop = startBackgroundSweep({
+    intervalMs: 60_000,
+    run: () => runAutomationSweep(),
+    onError: error => console.error('[automation] sweep failed', safeErrorSummary(error))
+  })
+  app.hooks.hook('close', stop)
 })

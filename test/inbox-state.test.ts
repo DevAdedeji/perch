@@ -1,10 +1,10 @@
 import { createRequire } from 'node:module'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { MessageDTO, ServerEvent } from '@perch/shared'
-import type { AuthUser, Membership } from '../app/composables/useAuth'
-import { useControlRoom } from '../app/composables/useControlRoom'
-import type { VisitorContext } from '../app/composables/useControlRoom'
-import { InboxOutbox, inboxOutboxFor } from '../app/utils/inbox-outbox'
+import type { AuthUser, Membership } from '@/composables/useAuth'
+import { useControlRoom } from '@/composables/useControlRoom'
+import type { VisitorContext } from '@/composables/useControlRoom'
+import { InboxOutbox, inboxOutboxFor } from '@/utils/inbox-outbox'
 
 const { ref, computed, watch, effectScope, nextTick }: typeof import('vue') = createRequire(import.meta.resolve('nuxt/package.json'))('vue')
 

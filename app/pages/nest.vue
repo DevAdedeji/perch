@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ServerEvent } from '@perch/shared'
-import { activeMention, insertMention, mentionSegments, selectedMentionIds } from '~/utils/mentions'
+import { activeMention, insertMention, mentionSegments, selectedMentionIds } from '@/utils/mentions'
 
 definePageMeta({ layout: 'dashboard' })
 useHead({ title: 'Nest · Perch' })

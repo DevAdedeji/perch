@@ -1,3 +1,5 @@
+import { requireUser } from '@@/server/domains/auth/require-user'
+import { currentSessionId } from '@@/server/domains/auth/sessions'
 /** Issue a short-lived WS auth ticket for the current agent. */
 export default defineEventHandler(async (event) => {
   const user = await requireUser(event)

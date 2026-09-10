@@ -1,21 +1,14 @@
-import { safeErrorSummary } from '../utils/request-security'
+import { runPrivacyRetentionSweep } from '@@/server/domains/privacy/retention'
+import { safeErrorSummary } from '@@/server/utils/request-security'
+import { startBackgroundSweep } from '@@/server/infrastructure/background-sweep'
 
-const PRIVACY_SWEEP_INTERVAL = 60 * 60 * 1000
-
-export default defineNitroPlugin(() => {
+export default defineNitroPlugin((app) => {
   if (import.meta.prerender) return
-  let running = false
-  const sweep = async () => {
-    if (running) return
-    running = true
-    try {
-      await runPrivacyRetentionSweep()
-    } catch (error) {
-      console.error('[privacy-retention] sweep failed', safeErrorSummary(error))
-    } finally {
-      running = false
-    }
-  }
-  setTimeout(sweep, 30_000).unref()
-  setInterval(sweep, PRIVACY_SWEEP_INTERVAL).unref()
+  const stop = startBackgroundSweep({
+    intervalMs: 60 * 60 * 1000,
+    initialDelayMs: 30_000,
+    run: () => runPrivacyRetentionSweep(),
+    onError: error => console.error('[privacy-retention] sweep failed', safeErrorSummary(error))
+  })
+  app.hooks.hook('close', stop)
 })

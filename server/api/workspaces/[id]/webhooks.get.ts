@@ -1,3 +1,5 @@
+import { requireMembership } from '@@/server/domains/workspaces/access'
+import { useDb } from '@@/server/database/client'
 import { desc, eq, webhookEndpoints } from '@perch/db'
 
 /** List webhook endpoints (admin). Secrets are masked — shown once at creation. */

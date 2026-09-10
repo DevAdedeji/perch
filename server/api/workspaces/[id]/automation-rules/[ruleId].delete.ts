@@ -1,3 +1,7 @@
+import { requireMembership } from '@@/server/domains/workspaces/access'
+import { useDb } from '@@/server/database/client'
+import { invalidateAutomationRuleCache } from '@@/server/domains/automations/rules'
+import { logAudit } from '@@/server/domains/workspaces/audit'
 import { and, automationRules, eq } from '@perch/db'
 
 export default defineEventHandler(async (event) => {

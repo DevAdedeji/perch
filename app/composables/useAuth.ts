@@ -27,6 +27,7 @@ interface AuthState {
  * (with SSR cookie forwarding) and every component reads the same snapshot.
  */
 export function useAuth() {
+  const realtime = useRealtime()
   const state = useState<AuthState>('auth', () => ({ user: null, workspaces: [], platformAdmin: false }))
   const loaded = useState<boolean>('auth:loaded', () => false)
 
@@ -59,6 +60,7 @@ export function useAuth() {
 
   async function logout() {
     await $fetch('/api/auth/logout', { method: 'POST' })
+    realtime.disconnect()
     state.value = { user: null, workspaces: [], platformAdmin: false }
     loaded.value = true
     await navigateTo('/login')

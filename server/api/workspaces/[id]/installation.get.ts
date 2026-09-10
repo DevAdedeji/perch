@@ -1,3 +1,5 @@
+import { requireMembership, serializeWorkspace } from '@@/server/domains/workspaces/access'
+import { useDb } from '@@/server/database/client'
 import { and, conversations, desc, eq, messages, sql, visitors, widgetInstallationSignals, workspaces } from '@perch/db'
 
 export default defineEventHandler(async (event) => {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { WidgetAppearance } from '~/utils/widget'
+import type { WidgetAppearance } from '@/utils/widget'
 
 /**
  * The visitor-facing widget controls, shared by Settings and the install

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { channels } from '@perch/shared'
 import { afterEach, describe, expect, it } from 'vitest'
-import { inboxScope } from '../server/utils/conversations'
+import { inboxScope } from '@@/server/domains/conversations/messages'
 import {
   authorizeAgentConversation,
   authorizeAgentWorkspace,
@@ -14,7 +14,7 @@ import {
   subscribe,
   unsubscribeAll,
   unregisterPeer
-} from '../server/utils/realtime'
+} from '@@/server/utils/realtime'
 
 interface FakePeer {
   context: Record<string, unknown>
@@ -167,7 +167,7 @@ describe('live authorization invalidation', () => {
       new URL('../server/api/workspaces/[id]/members/[memberId].delete.ts', import.meta.url),
       'utf8'
     )
-    const sessions = readFileSync(new URL('../server/utils/db-sessions.ts', import.meta.url), 'utf8')
+    const sessions = readFileSync(new URL('../server/domains/auth/sessions.ts', import.meta.url), 'utf8')
     const ticketRoute = readFileSync(new URL('../server/api/realtime/ticket.get.ts', import.meta.url), 'utf8')
     const websocket = readFileSync(new URL('../server/routes/api/ws.ts', import.meta.url), 'utf8')
 

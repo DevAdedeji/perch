@@ -1,3 +1,5 @@
+import { currentSessionId, forgetSessions } from '@@/server/domains/auth/sessions'
+import { useDb } from '@@/server/database/client'
 import { eq, sessions } from '@perch/db'
 
 export default defineEventHandler(async (event) => {

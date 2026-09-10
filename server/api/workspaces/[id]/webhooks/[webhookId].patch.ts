@@ -1,6 +1,10 @@
+import { WEBHOOK_EVENTS, cancelWebhookJobsForEndpoint } from '@@/server/domains/webhooks/delivery'
+import { requireMembership } from '@@/server/domains/workspaces/access'
+import { useDb } from '@@/server/database/client'
+import { logAudit } from '@@/server/domains/workspaces/audit'
 import { and, eq, webhookEndpoints } from '@perch/db'
 import { z } from 'zod'
-import { isSafeWebhookUrl, webhookAuditTarget } from '../../../../utils/webhook-security'
+import { isSafeWebhookUrl, webhookAuditTarget } from '@@/server/domains/webhooks/endpoints'
 
 const schema = z.object({
   url: z.string().trim().url().max(500).optional(),

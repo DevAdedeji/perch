@@ -1,3 +1,4 @@
+import { useDb } from '@@/server/database/client'
 import { sql } from '@perch/db'
 
 /**

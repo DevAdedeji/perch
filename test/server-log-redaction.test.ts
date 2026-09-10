@@ -1,17 +1,17 @@
 import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { sendEmailDetailed } from '../server/utils/email'
-import { safeErrorSummary } from '../server/utils/request-security'
+import { sendEmailDetailed } from '@@/server/integrations/email'
+import { safeErrorSummary } from '@@/server/utils/request-security'
 
 const rawErrorLogFiles = [
   '../server/plugins/trigger-sweep.ts',
   '../server/plugins/automation-sweep.ts',
   '../server/plugins/unanswered-reminder-sweep.ts',
   '../server/plugins/webhook-delivery-sweep.ts',
-  '../server/utils/automation-engine.ts',
-  '../server/utils/installation.ts',
-  '../server/utils/audit.ts',
-  '../server/utils/conversations.ts',
+  '../server/domains/automations/engine.ts',
+  '../server/domains/workspaces/installation.ts',
+  '../server/domains/workspaces/audit.ts',
+  '../server/domains/conversations/messages.ts',
   '../server/api/widget/identify.post.ts'
 ]
 

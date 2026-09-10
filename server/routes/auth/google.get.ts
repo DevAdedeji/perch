@@ -1,4 +1,6 @@
-import { findOrCreateGoogleUser } from '../../services/google-auth'
+import { consumeGoogleOAuthContext, googleOAuthFailurePath } from '@@/server/integrations/google-oauth'
+import { createDbSession } from '@@/server/domains/auth/sessions'
+import { findOrCreateGoogleUser } from '@@/server/services/google-auth'
 
 const googleOAuthHandler = defineOAuthGoogleEventHandler({
   config: {

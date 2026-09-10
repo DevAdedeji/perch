@@ -1,3 +1,5 @@
+import { requireMembership } from '@@/server/domains/workspaces/access'
+import { useDb } from '@@/server/database/client'
 import { asc, cannedResponses, eq } from '@perch/db'
 
 /** Canned responses for the composer's `/shortcut` picker + settings management. */

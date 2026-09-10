@@ -1,16 +1,18 @@
+import * as databaseClient from '@@/server/database/client'
 import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { drizzle } from '../packages/db/node_modules/drizzle-orm/postgres-js/index.js'
 import { and, eq, inArray, isNull, ne } from '../packages/db/node_modules/drizzle-orm/index.js'
 import postgres from '../packages/db/node_modules/postgres/src/index.js'
-import * as schema from '../packages/db/src/schema'
-import { addAgentMessage } from '../server/utils/conversations'
+import * as schema from '@@/packages/db/src/schema'
+import { addAgentMessage } from '@@/server/domains/conversations/messages'
 import {
   isVisitorMessagingBlocked,
   linkedVisitorIds,
   lockVisitorModerationIdentity
-} from '../server/utils/spam-control'
+} from '@@/server/domains/conversations/spam-control'
+import { getTestDatabaseUrl } from '@@/test/helpers/database'
 
 describe('spam-control security boundary', () => {
   const markSource = readFileSync(new URL('../server/api/conversations/[id]/spam.post.ts', import.meta.url), 'utf8')
@@ -34,16 +36,18 @@ describe('spam-control security boundary', () => {
     expect(messageSource).toContain('await assertVisitorCanMessage(visitor)')
     expect(uploadSource).toContain('await assertVisitorCanMessage(visitor)')
     expect(websocketSource).toContain('await isVisitorMessagingBlocked(visitor)')
-    expect(messageSource).not.toContain('spam')
-    expect(messageSource).not.toContain('blocked')
+    const handler = messageSource.slice(messageSource.indexOf('export default'))
+    expect(handler).not.toContain('spam')
+    expect(handler).not.toContain('blocked')
   })
 })
 
-const databaseUrl = process.env.TEST_DATABASE_URL
+const databaseUrl = getTestDatabaseUrl()
 
 describe.skipIf(!databaseUrl)('spam-control database integration', () => {
   const client = postgres(databaseUrl!, { max: 4 })
   const db = drizzle(client, { schema })
+  vi.spyOn(databaseClient, 'useDb').mockReturnValue(db)
   const workspaceId = randomUUID()
   const otherWorkspaceId = randomUUID()
   const userId = randomUUID()
@@ -55,7 +59,6 @@ describe.skipIf(!databaseUrl)('spam-control database integration', () => {
   const externalId = `customer-${randomUUID()}`
 
   beforeAll(async () => {
-    Object.assign(globalThis, { useDb: () => db })
     await db.insert(schema.users).values({ id: userId, email: `${userId}@example.com`, name: 'Spam test admin' })
     await db.insert(schema.workspaces).values([
       { id: workspaceId, name: 'Spam test', siteId: `ws_${randomUUID().replaceAll('-', '').slice(0, 10)}` },

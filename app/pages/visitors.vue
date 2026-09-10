@@ -13,6 +13,11 @@ const wid = computed(() => currentWorkspace.value?.workspaceId ?? null)
 
 // cached across navigation — the roster re-renders instantly on return
 const roster = useState<LiveVisitorDTO[]>('visitors:live', () => [])
+const rosterWorkspace = useState<string | null>('visitors:workspace', () => null)
+if (rosterWorkspace.value !== wid.value) {
+  roster.value = []
+  rosterWorkspace.value = wid.value
+}
 const loading = ref(false)
 let generation = 0
 let alive = true
@@ -75,6 +80,7 @@ onBeforeUnmount(() => {
   clearInterval(tick)
 })
 watch(wid, (next, prev) => {
+  rosterWorkspace.value = next
   generation++
   if (prev) rt.unsubscribe(channels.visitors(prev))
   if (next) rt.subscribe(channels.visitors(next))

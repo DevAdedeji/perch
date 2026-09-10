@@ -13,7 +13,7 @@ async function response(environment: string, key: string) {
   vi.stubGlobal('useRuntimeConfig', () => ({ bachsEnvironment: environment, bachsSecretKey: key }))
   vi.stubEnv('BACHS_ENV', '')
   vi.stubEnv('BACHS_SECRET_KEY', '')
-  const { default: handler } = await import('../server/api/payment-environment.get')
+  const { default: handler } = await import('@@/server/api/payment-environment.get')
   const result = handler({} as never)
   return { result, setHeader }
 }

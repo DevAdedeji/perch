@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
-import { confirmSubscriptionWillNotRenew } from '../server/utils/billing-deletion'
-import type { BachsSubscription } from '../server/utils/bachs'
+import { confirmSubscriptionWillNotRenew } from '@@/server/domains/billing/deletion'
+import type { BachsSubscription } from '@@/server/integrations/bachs'
 
 function subscription(
   id: string,
