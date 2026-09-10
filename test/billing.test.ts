@@ -289,6 +289,27 @@ describe('Bachs environment boundary', () => {
     vi.unstubAllGlobals()
   })
 
+  it.each(['null', '[]', '42', '"checkout"', '<html>Unavailable</html>', ''])('rejects a non-object or invalid JSON success response: %s', async (body) => {
+    Object.assign(globalThis, {
+      useRuntimeConfig: () => ({
+        bachsEnvironment: 'sandbox',
+        bachsSecretKey: 'sk_sandbox_example',
+        bachsWebhookSecret: 'whsec_example'
+      })
+    })
+    const provider = vi.fn(async () => new Response(body, { status: 200 }))
+    vi.stubGlobal('fetch', provider)
+    try {
+      await expect(getBachsCheckoutSession('checkout_invalid')).rejects.toMatchObject({
+        statusCode: 502,
+        statusMessage: 'Bachs returned an invalid checkout session.'
+      })
+      expect(provider).toHaveBeenCalledOnce()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('classifies malformed and permanent provider responses without retrying them', async () => {
     Object.assign(globalThis, {
       useRuntimeConfig: () => ({
