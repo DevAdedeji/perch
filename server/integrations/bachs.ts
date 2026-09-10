@@ -136,7 +136,7 @@ interface BachsRequest {
   idempotencyKey?: string
 }
 
-async function bachsFetch<T>(path: string, options: BachsRequest = {}): Promise<T> {
+async function bachsFetch(path: string, options: BachsRequest = {}): Promise<unknown> {
   const url = new URL(`${apiBase()}${path}`)
   for (const [key, value] of Object.entries(options.query ?? {})) {
     if (value !== undefined) url.searchParams.set(key, String(value))
@@ -160,7 +160,7 @@ async function bachsFetch<T>(path: string, options: BachsRequest = {}): Promise<
       })
       const text = await response.text()
       const payload = text ? safeJson(text) : null
-      if (response.ok) return payload as T
+      if (response.ok) return payload
       const retryable = response.status === 429 || response.status >= 500
       if (!retryable || attempt === maxAttempts) {
         throw createError({
@@ -193,9 +193,9 @@ function parseProviderResponse<T>(schema: z.ZodType<T>, payload: unknown, resour
   return parsed.data
 }
 
-function safeJson(text: string): Record<string, unknown> | null {
+function safeJson(text: string): unknown {
   try {
-    return JSON.parse(text) as Record<string, unknown>
+    return JSON.parse(text)
   } catch {
     return null
   }
@@ -262,11 +262,6 @@ export function inspectBachsCheckoutUrl(value: string | undefined): BachsCheckou
   }
 }
 
-interface ProductPage {
-  items?: BachsProduct[]
-  pagination?: { has_more?: boolean, next_cursor?: string | null }
-}
-
 const productPageSchema = z.object({
   items: z.array(bachsProductSchema).optional(),
   pagination: z.object({
@@ -289,9 +284,9 @@ async function findProduct(interval: BillingInterval) {
   do {
     const page = parseProviderResponse(
       productPageSchema,
-      await bachsFetch<unknown>('/products', { query: { limit: 100, cursor } }),
+      await bachsFetch('/products', { query: { limit: 100, cursor } }),
       'product list'
-    ) as ProductPage
+    )
     const match = (page.items ?? []).find(product => productMatchesPerchPlan(product, interval))
     if (match) return match
     cursor = page.pagination?.has_more ? page.pagination.next_cursor ?? undefined : undefined
@@ -308,7 +303,7 @@ export async function ensurePerchProProduct(interval: BillingInterval) {
     productCache.set(interval, existing.id)
     return existing.id
   }
-  const product = parseProviderResponse(bachsProductSchema, await bachsFetch<unknown>('/products', {
+  const product = parseProviderResponse(bachsProductSchema, await bachsFetch('/products', {
     method: 'POST',
     idempotencyKey: `perch-${planKey}`,
     body: {
@@ -338,7 +333,7 @@ export async function createSubscriptionCheckout(input: {
   cancelUrl: string
   metadata: Record<string, string>
 }) {
-  return parseProviderResponse(checkoutCreatedSchema, await bachsFetch<unknown>('/checkout-sessions', {
+  return parseProviderResponse(checkoutCreatedSchema, await bachsFetch('/checkout-sessions', {
     method: 'POST',
     idempotencyKey: input.reference,
     body: {
@@ -356,7 +351,7 @@ export async function createSubscriptionCheckout(input: {
 export async function getBachsCheckoutSession(checkoutId: string) {
   return parseProviderResponse(
     bachsCheckoutSessionSchema,
-    await bachsFetch<unknown>(`/checkout-sessions/${encodeURIComponent(checkoutId)}`),
+    await bachsFetch(`/checkout-sessions/${encodeURIComponent(checkoutId)}`),
     'checkout session'
   )
 }
@@ -364,13 +359,13 @@ export async function getBachsCheckoutSession(checkoutId: string) {
 export async function getBachsSubscription(subscriptionId: string) {
   return parseProviderResponse(
     bachsSubscriptionSchema,
-    await bachsFetch<unknown>(`/subscriptions/${encodeURIComponent(subscriptionId)}`),
+    await bachsFetch(`/subscriptions/${encodeURIComponent(subscriptionId)}`),
     'subscription'
   )
 }
 
 export async function cancelBachsSubscription(subscriptionId: string, idempotencyKey: string) {
-  return parseProviderResponse(bachsSubscriptionSchema, await bachsFetch<unknown>(`/subscriptions/${encodeURIComponent(subscriptionId)}`, {
+  return parseProviderResponse(bachsSubscriptionSchema, await bachsFetch(`/subscriptions/${encodeURIComponent(subscriptionId)}`, {
     method: 'DELETE',
     idempotencyKey,
     body: { cancel_at_period_end: true }
