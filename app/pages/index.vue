@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { PERCH_PRODUCTION_ORIGIN } from '@perch/shared'
-import { buildEmbedSnippet } from '~/utils/embed'
+import { buildEmbedSnippet } from '@/utils/embed'
 
 const config = useRuntimeConfig()
 const { copy } = useCopyToClipboard()

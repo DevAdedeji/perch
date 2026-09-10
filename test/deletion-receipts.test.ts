@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
-import { deletionReceipt, logDeletionReceipt } from '../server/utils/deletion-receipts'
+import { deletionReceipt, logDeletionReceipt } from '@@/server/utils/deletion-receipts'
 
 describe('data deletion recovery receipts', () => {
   it('records only recovery identifiers in a deterministic shape', () => {

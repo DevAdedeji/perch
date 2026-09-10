@@ -1,5 +1,7 @@
+import { requireMembership } from '@@/server/domains/workspaces/access'
+import { useDb } from '@@/server/database/client'
 import { z } from 'zod'
-import { createWorkspaceTag } from '../../../utils/workspace-resources'
+import { createWorkspaceTag } from '@@/server/domains/workspaces/resources'
 
 const schema = z.object({
   name: z.string().trim().min(1, 'Name the tag').max(40).transform(v => v.toLowerCase())

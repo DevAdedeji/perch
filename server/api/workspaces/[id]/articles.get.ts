@@ -1,3 +1,5 @@
+import { requireMembership } from '@@/server/domains/workspaces/access'
+import { useDb } from '@@/server/database/client'
 import { articleGroups, articles, asc, eq } from '@perch/db'
 
 /** All help-center groups + articles (drafts included) for the dashboard. */

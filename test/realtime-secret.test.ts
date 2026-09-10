@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { resolveRealtimeSecret } from '../server/utils/realtime-secret'
+import { resolveRealtimeSecret } from '@@/server/utils/realtime-secret'
 
 const RUNTIME_SECRET = 'runtime-secret-that-is-at-least-32-characters'
 const REALTIME_SECRET = 'realtime-secret-that-is-at-least-32-characters'

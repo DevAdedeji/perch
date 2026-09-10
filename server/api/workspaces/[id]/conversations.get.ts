@@ -1,7 +1,11 @@
+import { requireMembership } from '@@/server/domains/workspaces/access'
+import { parseInboxFilters } from '@@/server/domains/conversations/filters'
+import { useDb } from '@@/server/database/client'
+import { breachedResponseSlaCondition, calculateResponseSla, effectiveResponseTargetMinutes, responseSlaMessageTimes } from '@@/server/domains/conversations/response-sla'
+import { workspaceEntitlement } from '@@/server/domains/billing/subscriptions'
 import { and, conversationReads, conversations, desc, eq, inArray, isNull, messages, or, sql, visitors } from '@perch/db'
 
 const DEFAULT_LIMIT = 30
-const MAX_LIMIT = 100
 
 /**
  * Inbox list for a workspace with per-agent unread, optionally filtered by
@@ -21,8 +25,7 @@ export default defineEventHandler(async (event) => {
   if (member.role === 'agent' && !['any', 'me', 'unassigned', member.id].includes(filters.assignee)) {
     throw createError({ statusCode: 403, statusMessage: 'You cannot view another agent\'s inbox' })
   }
-  const limit = Math.min(Math.max(Number(query.limit) || DEFAULT_LIMIT, 1), MAX_LIMIT)
-  const beforeId = typeof query.before === 'string' ? query.before : null
+  const { limit, beforeId } = parseCursorPagination(query, DEFAULT_LIMIT)
 
   // Agents see the unassigned pool, their own chats, and chats where they were
   // brought in as a collaborator; admins see everything.

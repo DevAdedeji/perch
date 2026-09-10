@@ -1,3 +1,5 @@
+import { requireMembership } from '@@/server/domains/workspaces/access'
+import { useDb } from '@@/server/database/client'
 import { and, articleGroups, eq } from '@perch/db'
 
 /** Delete a help-center group and everything in it (admin only). */

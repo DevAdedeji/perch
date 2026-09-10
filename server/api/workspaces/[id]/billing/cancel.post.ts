@@ -1,3 +1,7 @@
+import { requireMembership } from '@@/server/domains/workspaces/access'
+import { cancelWorkspacePlan } from '@@/server/domains/billing/subscriptions'
+import { logAudit } from '@@/server/domains/workspaces/audit'
+
 export default defineEventHandler(async (event) => {
   const workspaceId = getRouterParam(event, 'id')!
   const { user } = await requireMembership(event, workspaceId, { admin: true })

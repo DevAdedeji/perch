@@ -1,4 +1,4 @@
-import { applyResendVisitorSuppression, requireResendWebhookSecret, verifyResendWebhook } from '../../utils/resend-webhooks'
+import { applyResendVisitorSuppression, requireResendWebhookSecret, verifyResendWebhook } from '@@/server/domains/notifications/resend-events'
 
 export default defineEventHandler(async (event) => {
   const rawBody = await readRawBody(event, 'utf8')

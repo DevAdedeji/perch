@@ -1,7 +1,9 @@
+import { requireConversationMember } from '@@/server/domains/workspaces/access'
+import { useDb } from '@@/server/database/client'
+import { serializeMessage } from '@@/server/domains/conversations/messages'
 import { and, desc, eq, messages, sql } from '@perch/db'
 
 const DEFAULT_LIMIT = 50
-const MAX_LIMIT = 100
 
 /**
  * Message thread for agents (includes internal notes), newest page first.
@@ -13,8 +15,7 @@ export default defineEventHandler(async (event) => {
   await requireConversationMember(event, conversationId)
 
   const query = getQuery(event)
-  const limit = Math.min(Math.max(Number(query.limit) || DEFAULT_LIMIT, 1), MAX_LIMIT)
-  const beforeId = typeof query.before === 'string' ? query.before : null
+  const { limit, beforeId } = parseCursorPagination(query, DEFAULT_LIMIT)
 
   const db = useDb()
 

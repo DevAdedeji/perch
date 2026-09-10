@@ -1,3 +1,8 @@
+import { cloudinaryConfig, isOwnCloudinaryImageUrl } from '@@/server/integrations/cloudinary'
+import { requireVisitorSession } from '@@/server/domains/visitors/session'
+import { assertVisitorCanMessage } from '@@/server/domains/conversations/spam-control'
+import { ingestVisitorMessage, serializeVisitorMessage } from '@@/server/domains/conversations/messages'
+import { visitorReplyEmailFeatureEnabled } from '@@/server/domains/visitors/email-continuity'
 import { z } from 'zod'
 
 const schema = z.object({

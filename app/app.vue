@@ -2,6 +2,10 @@
 import { isPerchIndexablePath } from '@perch/shared'
 
 const route = useRoute()
+const { user, currentWorkspace } = useAuth()
+const pageKey = computed(() => route.meta.layout === 'dashboard'
+  ? `${route.path}:${user.value?.id ?? ''}:${currentWorkspace.value?.workspaceId ?? ''}`
+  : route.path)
 const { url: siteUrl, indexable: productionSite } = useSiteUrl()
 const title = 'Perch — Live chat support that feels instant'
 const description
@@ -50,7 +54,7 @@ useSeoMeta({
   <UApp>
     <div class="min-h-screen bg-default text-default antialiased">
       <NuxtLayout>
-        <NuxtPage />
+        <NuxtPage :page-key="pageKey" />
       </NuxtLayout>
     </div>
   </UApp>

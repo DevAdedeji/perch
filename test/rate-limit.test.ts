@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { assertRateLimit, consumeRateLimit } from '../server/utils/rate-limit'
+import { assertRateLimit, consumeRateLimit } from '@@/server/utils/rate-limit'
 
 describe('assertRateLimit', () => {
   beforeEach(() => {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { CustomerProfileUpdate, VisitorContext, WorkspaceTag } from '~/composables/useControlRoom'
+import type { CustomerProfileUpdate, VisitorContext, WorkspaceTag } from '@/composables/useControlRoom'
 
 const props = defineProps<{
   context: VisitorContext | null

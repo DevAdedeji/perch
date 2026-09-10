@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isWithinBusinessHours, isValidTimezone, nextOpeningLabel } from '../server/utils/business-hours'
+import { isWithinBusinessHours, isValidTimezone, nextOpeningLabel } from '@@/server/utils/business-hours'
 import type { BusinessHours } from '@perch/shared'
 
 // Mon 9-17, Tue closed, Wed 9-17, weekend closed

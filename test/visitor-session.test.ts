@@ -4,7 +4,7 @@ import {
   signVisitorSession,
   verifyEmbedTicket,
   verifyVisitorSession
-} from '../server/utils/visitor-session'
+} from '@@/server/domains/visitors/session'
 
 describe('visitor session tokens', () => {
   const secret = 'a-long-test-secret-that-never-leaves-the-server'

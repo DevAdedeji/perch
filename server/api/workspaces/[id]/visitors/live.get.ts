@@ -1,3 +1,4 @@
+import { requireMembership } from '@@/server/domains/workspaces/access'
 /**
  * Roster bootstrap: everyone on the site right now, straight from the
  * in-memory visitor-presence registry (no DB hit — the registry carries an

@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 describe('public help API boundary', () => {
   const listSource = readFileSync(new URL('../server/api/widget/articles.get.ts', import.meta.url), 'utf8')
   const detailSource = readFileSync(new URL('../server/api/widget/articles/[articleId].get.ts', import.meta.url), 'utf8')
-  const serviceSource = readFileSync(new URL('../server/utils/help-center.ts', import.meta.url), 'utf8')
+  const serviceSource = readFileSync(new URL('../server/domains/help-center/articles.ts', import.meta.url), 'utf8')
   const sitemapSource = readFileSync(new URL('../server/routes/sitemap.xml.ts', import.meta.url), 'utf8')
   const agentSearchSource = readFileSync(new URL('../server/api/workspaces/[id]/articles/search.get.ts', import.meta.url), 'utf8')
   const indexPageSource = readFileSync(new URL('../app/pages/help/[siteId]/index.vue', import.meta.url), 'utf8')

@@ -1,3 +1,5 @@
+import { requireMembership } from '@@/server/domains/workspaces/access'
+import { useDb } from '@@/server/database/client'
 import { and, cannedResponses, eq } from '@perch/db'
 
 /** Delete a canned response. */

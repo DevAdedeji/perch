@@ -1,3 +1,6 @@
+import { requireMembership } from '@@/server/domains/workspaces/access'
+import { useDb } from '@@/server/database/client'
+import { logAudit } from '@@/server/domains/workspaces/audit'
 import { and, eq, tags } from '@perch/db'
 
 /** Delete a tag everywhere it's applied (admin only — it's cross-conversation). */

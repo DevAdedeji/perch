@@ -1,3 +1,6 @@
+import { useDb } from '@@/server/database/client'
+import { requireVisitorSession } from '@@/server/domains/visitors/session'
+import { getMemberName } from '@@/server/domains/workspaces/access'
 import { and, conversations, eq } from '@perch/db'
 import { z } from 'zod'
 

@@ -1,6 +1,6 @@
 import { createHmac } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
-import { PERCH_PRO_PLAN, proPriceCents, toDecimalString } from '../packages/shared/src/billing'
+import { PERCH_PRO_PLAN, proPriceCents, toDecimalString } from '@@/packages/shared/src/billing'
 import {
   bachsCheckoutSessionSchema,
   bachsConfigurationError,
@@ -13,9 +13,9 @@ import {
   inspectBachsCheckoutUrl,
   isApprovedBachsCheckoutUrl,
   verifyBachsWebhookSignature
-} from '../server/utils/bachs'
-import { effectiveReminderSettings, reminderIsDue, reminderRetryAt } from '../server/utils/unanswered-reminders'
-import { billingCheckoutEnabled, checkoutCanBeSafelyReplaced, checkoutMatchesInvoice, checkoutPaymentState, invoiceMatchesPerchPlan, providerAmountCents, providerPaidThroughEnd, providerSubscriptionIdentity, subscriptionHasPaidAccess } from '../server/utils/billing'
+} from '@@/server/integrations/bachs'
+import { effectiveReminderSettings, reminderIsDue, reminderRetryAt } from '@@/server/domains/notifications/unanswered-reminders'
+import { billingCheckoutEnabled, checkoutCanBeSafelyReplaced, checkoutMatchesInvoice, checkoutPaymentState, invoiceMatchesPerchPlan, providerAmountCents, providerPaidThroughEnd, providerSubscriptionIdentity, subscriptionHasPaidAccess } from '@@/server/domains/billing/subscriptions'
 
 describe('Perch plan pricing', () => {
   it('keeps the yearly plan cheaper than twelve monthly payments', () => {

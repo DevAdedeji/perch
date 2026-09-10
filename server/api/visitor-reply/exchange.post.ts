@@ -1,3 +1,5 @@
+import { issueReplySession, setReplySession, verifyReplyLinkToken, visitorEmailHash } from '@@/server/domains/visitors/email-continuity'
+import { useDb } from '@@/server/database/client'
 import { and, eq, sql, visitorReplyDeliveries, visitors } from '@perch/db'
 import { z } from 'zod'
 

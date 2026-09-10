@@ -5,6 +5,8 @@ export default defineConfig({
   resolve: {
     // workspace packages export TS sources — alias them so vitest transforms them
     alias: {
+      '@': fileURLToPath(new URL('./app', import.meta.url)),
+      '@@': fileURLToPath(new URL('.', import.meta.url)),
       '@perch/db': fileURLToPath(new URL('./packages/db/src/index.ts', import.meta.url)),
       '@perch/shared': fileURLToPath(new URL('./packages/shared/src/index.ts', import.meta.url))
     }

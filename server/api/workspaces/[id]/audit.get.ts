@@ -1,5 +1,7 @@
+import { requireMembership } from '@@/server/domains/workspaces/access'
+import { useDb } from '@@/server/database/client'
 import { auditLogs, desc, eq } from '@perch/db'
-import { webhookAuditTarget } from '../../../utils/webhook-security'
+import { webhookAuditTarget } from '@@/server/domains/webhooks/endpoints'
 
 /** The workspace audit trail, newest first (admin only). */
 export default defineEventHandler(async (event) => {

@@ -1,3 +1,4 @@
+import { useDb } from '@@/server/database/client'
 import { createHash } from 'node:crypto'
 import { and, emailVerificationTokens, eq, isNull, ne, users } from '@perch/db'
 import { z } from 'zod'

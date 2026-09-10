@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { explicitlyEnabled } from '../config/launch'
-import { cloudinaryUploadAvailable } from '../server/utils/cloudinary'
+import { explicitlyEnabled } from '@@/config/launch'
+import { cloudinaryUploadAvailable } from '@@/server/integrations/cloudinary'
 
 const checkoutRoute = readFileSync(new URL('../server/api/workspaces/[id]/billing/checkout.post.ts', import.meta.url), 'utf8')
 const billingPage = readFileSync(new URL('../app/pages/billing.vue', import.meta.url), 'utf8')

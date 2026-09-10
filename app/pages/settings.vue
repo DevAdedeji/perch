@@ -51,6 +51,7 @@ const origin = useRequestURL().origin
 const wid = computed(() => currentWorkspace.value?.workspaceId ?? null)
 const workspace = ref<WorkspaceDetail | null>(null)
 const loading = ref(true)
+const loadFailed = ref(false)
 const isAdmin = computed(() => workspace.value?.role === 'admin')
 
 const name = ref('')
@@ -92,10 +93,13 @@ ${closeScript}`
 async function load() {
   if (!wid.value) return
   loading.value = true
+  loadFailed.value = false
   try {
     const w = await $fetch<WorkspaceDetail>(`/api/workspaces/${wid.value}`)
     workspace.value = w
     name.value = w.name
+  } catch {
+    loadFailed.value = true
   } finally {
     loading.value = false
   }
@@ -570,6 +574,15 @@ async function removeLogo() {
           class="h-40 w-full rounded-2xl"
         />
       </div>
+
+      <UAlert
+        v-else-if="loadFailed"
+        color="error"
+        variant="soft"
+        title="Could not load workspace settings"
+        description="Check your connection and try again. Your settings have not been changed."
+        :actions="[{ label: 'Try again', color: 'error', variant: 'outline', onClick: load }]"
+      />
 
       <template v-else>
         <!-- General -->

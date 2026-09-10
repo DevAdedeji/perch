@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
-import { normalizeInstallationOrigin } from './installation'
+import { normalizeInstallationOrigin } from '@@/server/utils/embedding-origin'
 
 /**
  * Short-lived, HMAC-signed WebSocket auth ticket. Two subjects:

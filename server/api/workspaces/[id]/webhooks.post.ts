@@ -1,3 +1,6 @@
+import { WEBHOOK_EVENTS } from '@@/server/domains/webhooks/delivery'
+import { requireMembership } from '@@/server/domains/workspaces/access'
+import { logAudit } from '@@/server/domains/workspaces/audit'
 import { randomBytes } from 'node:crypto'
 import { z } from 'zod'
 import {
@@ -5,7 +8,7 @@ import {
   isSafeWebhookUrl,
   WebhookEndpointLimitError,
   webhookAuditTarget
-} from '../../../utils/webhook-security'
+} from '@@/server/domains/webhooks/endpoints'
 
 const schema = z.object({
   url: z.string().trim().url().max(500),

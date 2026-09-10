@@ -1,3 +1,6 @@
+import { requireUser } from '@@/server/domains/auth/require-user'
+import { currentSessionId, forgetSessions } from '@@/server/domains/auth/sessions'
+import { useDb } from '@@/server/database/client'
 import { and, eq, ne, sessions } from '@perch/db'
 
 /** "Sign out everywhere else" — revoke every session except the current one. */

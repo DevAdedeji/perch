@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { messageTextSegments } from '~/utils/message-links'
+import { messageTextSegments } from '@/utils/message-links'
 
 const props = defineProps<{ content: string }>()
 const segments = computed(() => messageTextSegments(props.content))

@@ -1,3 +1,6 @@
+import { requireUser } from '@@/server/domains/auth/require-user'
+import { currentSessionId } from '@@/server/domains/auth/sessions'
+import { useDb } from '@@/server/database/client'
 import { and, desc, eq, gt, sessions } from '@perch/db'
 
 /** List the signed-in user's active sessions (devices), current one flagged. */

@@ -1,3 +1,7 @@
+import { requireMembership } from '@@/server/domains/workspaces/access'
+import { useDb } from '@@/server/database/client'
+import { invalidateTriggerCache } from '@@/server/domains/automations/triggers'
+import { logAudit } from '@@/server/domains/workspaces/audit'
 import { and, eq, triggers } from '@perch/db'
 
 /** Delete a proactive trigger (admin). Fire history cascades away with it. */

@@ -1,3 +1,5 @@
+import { requireConversationMember } from '@@/server/domains/workspaces/access'
+import { claimConversation, serializeConversation } from '@@/server/domains/conversations/messages'
 /** Claim an unassigned conversation — first writer wins (§6.4). */
 export default defineEventHandler(async (event) => {
   const conversationId = getRouterParam(event, 'id')!

@@ -1,21 +1,14 @@
-import { safeErrorSummary } from '../utils/request-security'
+import { runUnansweredReminderSweep } from '@@/server/domains/notifications/unanswered-reminders'
+import { safeErrorSummary } from '@@/server/utils/request-security'
+import { startBackgroundSweep } from '@@/server/infrastructure/background-sweep'
 
-const REMINDER_SWEEP_INTERVAL = 60_000
-
-export default defineNitroPlugin(() => {
+export default defineNitroPlugin((app) => {
   if (import.meta.prerender) return
-  let running = false
-  const sweep = async () => {
-    if (running) return
-    running = true
-    try {
-      await runUnansweredReminderSweep()
-    } catch (error) {
-      console.error('[reminders] sweep failed', safeErrorSummary(error))
-    } finally {
-      running = false
-    }
-  }
-  setTimeout(sweep, 10_000).unref()
-  setInterval(sweep, REMINDER_SWEEP_INTERVAL).unref()
+  const stop = startBackgroundSweep({
+    intervalMs: 60_000,
+    initialDelayMs: 10_000,
+    run: () => runUnansweredReminderSweep(),
+    onError: error => console.error('[reminders] sweep failed', safeErrorSummary(error))
+  })
+  app.hooks.hook('close', stop)
 })

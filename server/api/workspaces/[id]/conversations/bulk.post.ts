@@ -1,3 +1,9 @@
+import { requireMembership } from '@@/server/domains/workspaces/access'
+import { bulkConversationActionSchema, mutateConversationsInBulk } from '@@/server/domains/conversations/bulk-actions'
+import { useDb } from '@@/server/database/client'
+import { inboxScope, publishConversationUpdate } from '@@/server/domains/conversations/messages'
+import { publishMemberNotification } from '@@/server/domains/notifications/member-notifications'
+import { logAudit } from '@@/server/domains/workspaces/audit'
 import { channels } from '@perch/shared'
 
 export default defineEventHandler(async (event) => {

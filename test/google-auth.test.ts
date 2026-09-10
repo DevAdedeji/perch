@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import type { H3Event } from 'h3'
 import { safeAuthRedirect } from '@perch/shared'
-import { normalizeGoogleProfile } from '../server/services/google-auth'
+import { normalizeGoogleProfile } from '@@/server/services/google-auth'
 import {
   consumeGoogleOAuthContext,
   setGoogleOAuthContext,
   validateGoogleOAuthCredentials
-} from '../server/utils/google-oauth'
+} from '@@/server/integrations/google-oauth'
 
 /** Minimal cookie jar standing in for Nitro's auto-imported h3 cookie helpers. */
 function cookieJar() {

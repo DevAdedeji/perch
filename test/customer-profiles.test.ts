@@ -1,11 +1,13 @@
+import * as databaseClient from '@@/server/database/client'
 import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { drizzle } from '../packages/db/node_modules/drizzle-orm/postgres-js/index.js'
 import { eq } from '../packages/db/node_modules/drizzle-orm/index.js'
 import postgres from '../packages/db/node_modules/postgres/src/index.js'
-import * as schema from '../packages/db/src/schema'
-import { customerProfileUpdateSchema, getCustomerContext } from '../server/utils/customer-profiles'
+import * as schema from '@@/packages/db/src/schema'
+import { customerProfileUpdateSchema, getCustomerContext } from '@@/server/domains/visitors/profiles'
+import { getTestDatabaseUrl } from '@@/test/helpers/database'
 
 describe('customer profile input', () => {
   const updateRouteSource = readFileSync(
@@ -47,11 +49,12 @@ describe('customer profile input', () => {
   })
 })
 
-const databaseUrl = process.env.TEST_DATABASE_URL
+const databaseUrl = getTestDatabaseUrl()
 
 describe.skipIf(!databaseUrl)('customer context database integration', () => {
   const client = postgres(databaseUrl!, { max: 1 })
   const db = drizzle(client, { schema })
+  vi.spyOn(databaseClient, 'useDb').mockReturnValue(db)
   const adminUserId = randomUUID()
   const agentUserId = randomUUID()
   const otherUserId = randomUUID()
@@ -63,7 +66,7 @@ describe.skipIf(!databaseUrl)('customer context database integration', () => {
 
   beforeAll(async () => {
     Object.assign(globalThis, {
-      useDb: () => db,
+
       useRuntimeConfig: () => ({ visitorReplyEmailFeatureEnabled: false })
     })
     await db.insert(schema.users).values([

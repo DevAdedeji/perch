@@ -1,20 +1,23 @@
+import * as databaseClient from '@@/server/database/client'
 import { randomUUID } from 'node:crypto'
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { drizzle } from '../packages/db/node_modules/drizzle-orm/postgres-js/index.js'
 import postgres from '../packages/db/node_modules/postgres/src/index.js'
-import * as schema from '../packages/db/src/schema'
+import * as schema from '@@/packages/db/src/schema'
 import { eq } from '../packages/db/node_modules/drizzle-orm/index.js'
-import { emailLayout, escapeHtml } from '../server/utils/email'
-import { isWithinBusinessHours } from '../server/utils/business-hours'
-import { workspaceEntitlement } from '../server/utils/billing'
-import { reminderDeliveryIsActionable, runUnansweredReminderSweep } from '../server/utils/unanswered-reminders'
-import { notificationChannelEnabled } from '../server/utils/notification-preferences'
+import { emailLayout, escapeHtml } from '@@/server/integrations/email'
+import { isWithinBusinessHours } from '@@/server/utils/business-hours'
+import { workspaceEntitlement } from '@@/server/domains/billing/subscriptions'
+import { reminderDeliveryIsActionable, runUnansweredReminderSweep } from '@@/server/domains/notifications/unanswered-reminders'
+import { notificationChannelEnabled } from '@@/server/domains/notifications/preferences'
+import { getTestDatabaseUrl } from '@@/test/helpers/database'
 
-const databaseUrl = process.env.TEST_DATABASE_URL
+const databaseUrl = getTestDatabaseUrl()
 
 describe.skipIf(!databaseUrl)('billing and reminder database integration', () => {
   const client = postgres(databaseUrl!, { max: 1 })
   const db = drizzle(client, { schema })
+  vi.spyOn(databaseClient, 'useDb').mockReturnValue(db)
   const userId = randomUUID()
   const workspaceId = randomUUID()
   const memberId = randomUUID()
@@ -24,7 +27,7 @@ describe.skipIf(!databaseUrl)('billing and reminder database integration', () =>
 
   beforeAll(async () => {
     Object.assign(globalThis, {
-      useDb: () => db,
+
       useRuntimeConfig: () => ({ publicBaseUrl: 'https://useperch.xyz' }),
       emailLayout,
       escapeHtml,

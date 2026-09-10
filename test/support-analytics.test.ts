@@ -6,7 +6,7 @@ import {
   supportAnalyticsMissedCutoff,
   toFiniteNumber,
   toNullableFiniteNumber
-} from '../server/utils/support-analytics'
+} from '@@/server/utils/support-analytics'
 
 describe('support analytics range', () => {
   const now = new Date('2026-08-30T01:30:00.000Z')
@@ -56,8 +56,8 @@ describe('missed conversation threshold', () => {
 describe('immutable support outcomes', () => {
   const analyticsSource = readFileSync(new URL('../server/api/workspaces/[id]/analytics.get.ts', import.meta.url), 'utf8')
   const teamQuery = analyticsSource.slice(analyticsSource.indexOf('db.execute<MemberRow>'))
-  const conversationsSource = readFileSync(new URL('../server/utils/conversations.ts', import.meta.url), 'utf8')
-  const automationsSource = readFileSync(new URL('../server/utils/automation-engine.ts', import.meta.url), 'utf8')
+  const conversationsSource = readFileSync(new URL('../server/domains/conversations/messages.ts', import.meta.url), 'utf8')
+  const automationsSource = readFileSync(new URL('../server/domains/automations/engine.ts', import.meta.url), 'utf8')
   const resolveSource = readFileSync(new URL('../server/api/conversations/[id]/resolve.post.ts', import.meta.url), 'utf8')
   const csatSource = readFileSync(new URL('../server/api/widget/csat.post.ts', import.meta.url), 'utf8')
   const widgetSource = readFileSync(new URL('../app/composables/useWidget.ts', import.meta.url), 'utf8')

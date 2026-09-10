@@ -2,8 +2,9 @@ import { randomUUID } from 'node:crypto'
 import { readFileSync, readdirSync } from 'node:fs'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import postgres from '../packages/db/node_modules/postgres/src/index.js'
+import { getTestDatabaseUrl } from '@@/test/helpers/database'
 
-const databaseUrl = process.env.TEST_DATABASE_URL
+const databaseUrl = getTestDatabaseUrl()
 
 describe.skipIf(!databaseUrl)('billing migration chain', () => {
   const client = postgres(databaseUrl!, { max: 1 })

@@ -1,18 +1,20 @@
+import * as databaseClient from '@@/server/database/client'
 import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { drizzle } from '../packages/db/node_modules/drizzle-orm/postgres-js/index.js'
 import { eq } from '../packages/db/node_modules/drizzle-orm/index.js'
 import postgres from '../packages/db/node_modules/postgres/src/index.js'
-import * as schema from '../packages/db/src/schema'
+import * as schema from '@@/packages/db/src/schema'
 import {
   decodeSessionClientContext,
   encodeSessionClientContext,
   isEncodedSessionClientContext,
   parseClientContext
-} from '../server/utils/client-context'
-import { assertSessionAlive } from '../server/utils/db-sessions'
-import { runPrivacyRetentionSweep } from '../server/utils/privacy-retention'
+} from '@@/server/utils/client-context'
+import { assertSessionAlive } from '@@/server/domains/auth/sessions'
+import { runPrivacyRetentionSweep } from '@@/server/domains/privacy/retention'
+import { getTestDatabaseUrl } from '@@/test/helpers/database'
 
 const chromeMacUa = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36'
 const safariPhoneUa = 'Mozilla/5.0 (iPhone; CPU iPhone OS 19_0 like Mac OS X) AppleWebKit/605.1.15 Version/19.0 Mobile/15E148 Safari/604.1'
@@ -52,11 +54,12 @@ describe('privacy-safe client context', () => {
   })
 })
 
-const databaseUrl = process.env.TEST_DATABASE_URL
+const databaseUrl = getTestDatabaseUrl()
 
 describe.skipIf(!databaseUrl)('privacy retention database integration', () => {
   const client = postgres(databaseUrl!, { max: 1 })
   const db = drizzle(client, { schema })
+  vi.spyOn(databaseClient, 'useDb').mockReturnValue(db)
   const userId = randomUUID()
   const workspaceId = randomUUID()
   const expiredSessionId = randomUUID()
@@ -68,7 +71,7 @@ describe.skipIf(!databaseUrl)('privacy retention database integration', () => {
 
   beforeAll(async () => {
     Object.assign(globalThis, {
-      useDb: () => db,
+
       clearUserSession,
       createError: (input: { statusCode: number, statusMessage: string }) => Object.assign(new Error(input.statusMessage), input)
     })

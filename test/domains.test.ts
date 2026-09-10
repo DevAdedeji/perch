@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isDomainAllowed, normalizeDomain } from '../server/utils/domains'
+import { isDomainAllowed, normalizeDomain } from '@@/server/utils/domains'
 
 describe('normalizeDomain', () => {
   it('lowercases and strips www', () => {

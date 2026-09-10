@@ -1,9 +1,10 @@
+import * as databaseClient from '@@/server/database/client'
 import { randomUUID } from 'node:crypto'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { drizzle } from '../packages/db/node_modules/drizzle-orm/postgres-js/index.js'
 import { eq, inArray } from '../packages/db/node_modules/drizzle-orm/index.js'
 import postgres from '../packages/db/node_modules/postgres/src/index.js'
-import * as schema from '../packages/db/src/schema'
+import * as schema from '@@/packages/db/src/schema'
 import {
   confirmSubscriptionWillNotRenew,
   finalizeAccountDeletion,
@@ -11,14 +12,16 @@ import {
   prepareAccountDeletion,
   prepareWorkspaceDeletion,
   recordBillingDeletionConfirmation
-} from '../server/utils/billing-deletion'
-import { startWorkspaceCheckout } from '../server/utils/billing'
+} from '@@/server/domains/billing/deletion'
+import { startWorkspaceCheckout } from '@@/server/domains/billing/subscriptions'
+import { getTestDatabaseUrl } from '@@/test/helpers/database'
 
-const databaseUrl = process.env.TEST_DATABASE_URL
+const databaseUrl = getTestDatabaseUrl()
 
 describe.skipIf(!databaseUrl)('billing-safe deletion database integration', () => {
   const client = postgres(databaseUrl!, { max: 4 })
   const db = drizzle(client, { schema })
+  vi.spyOn(databaseClient, 'useDb').mockReturnValue(db)
   const userIds: string[] = []
   const workspaceIds: string[] = []
   const attachmentIds: string[] = []
@@ -117,7 +120,7 @@ describe.skipIf(!databaseUrl)('billing-safe deletion database integration', () =
 
   beforeAll(() => {
     Object.assign(globalThis, {
-      useDb: () => db,
+
       useRuntimeConfig: () => ({ billingCheckoutEnabled: true, cloudinaryCloudName: 'perch-test' })
     })
   })

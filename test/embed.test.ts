@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildEmbedSnippet } from '../app/utils/embed'
+import { buildEmbedSnippet } from '@/utils/embed'
 
 describe('buildEmbedSnippet', () => {
   it('builds the canonical asynchronous loader tag', () => {

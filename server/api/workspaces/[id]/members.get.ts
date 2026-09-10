@@ -1,3 +1,5 @@
+import { requireMembership } from '@@/server/domains/workspaces/access'
+import { useDb } from '@@/server/database/client'
 import { conversations, eq, sql, users, workspaceMembers } from '@perch/db'
 
 /** Role-aware roster used by assignment, mentions, presence, and Team management. */

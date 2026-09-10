@@ -1,3 +1,5 @@
+import { requireMembership } from '@@/server/domains/workspaces/access'
+import { useDb } from '@@/server/database/client'
 import { and, eq, memberNotifications } from '@perch/db'
 
 /** Acknowledge one notification; ownership is enforced in the update itself. */

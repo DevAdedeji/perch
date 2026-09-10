@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { inboxRemovalScope, inboxScope } from '../server/utils/conversations'
-import { authorizeAgentWorkspace } from '../server/utils/realtime'
-import { canMemberAccessConversation, canMemberReassignConversation } from '../server/utils/workspace'
+import { inboxRemovalScope, inboxScope } from '@@/server/domains/conversations/messages'
+import { authorizeAgentWorkspace } from '@@/server/utils/realtime'
+import { canMemberAccessConversation, canMemberReassignConversation } from '@@/server/domains/workspaces/access'
 
 describe('inboxScope — agent visibility on the workspace channel', () => {
   const workspaceId = 'workspace-a'

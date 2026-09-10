@@ -1,10 +1,12 @@
+import { requireMembership } from '@@/server/domains/workspaces/access'
+import { useDb } from '@@/server/database/client'
 import { conversations, eq, messages, sql, supportOutcomeEvents, users, workspaceMembers, workspaces } from '@perch/db'
 import {
   resolveSupportAnalyticsWindow,
   supportAnalyticsMissedCutoff,
   toFiniteNumber,
   toNullableFiniteNumber
-} from '../../../utils/support-analytics'
+} from '@@/server/utils/support-analytics'
 
 interface SummaryRow extends Record<string, unknown> {
   conversations: unknown
