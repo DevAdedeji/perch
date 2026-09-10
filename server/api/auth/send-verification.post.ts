@@ -1,3 +1,6 @@
+import { requireUser } from '@@/server/domains/auth/require-user'
+import { useDb } from '@@/server/database/client'
+import { sendVerificationEmail } from '@@/server/domains/auth/verification'
 import { eq, users } from '@perch/db'
 
 /** Resend the verification email for the signed-in (still unverified) user. */

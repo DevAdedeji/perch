@@ -307,6 +307,7 @@ onMounted(() => {
   memberNotificationPoll = setInterval(loadMemberNotifications, 60_000)
 })
 onBeforeUnmount(() => {
+  rt.disconnect()
   off?.()
   if (automationPoll) clearInterval(automationPoll)
   if (memberNotificationPoll) clearInterval(memberNotificationPoll)

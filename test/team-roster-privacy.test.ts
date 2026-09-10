@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { adminTeamRosterMemberDto, teamRosterMemberDto } from '../server/utils/team-roster'
+import { adminTeamRosterMemberDto, teamRosterMemberDto } from '@@/server/utils/team-roster'
 
 const fullMember = {
   id: 'member-1',

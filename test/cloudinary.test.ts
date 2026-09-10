@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
-import { cloudinaryPublicIdFromUrl, isOwnCloudinaryImageUrl, signCloudinaryParams } from '../server/utils/cloudinary'
+import { cloudinaryPublicIdFromUrl, isOwnCloudinaryImageUrl, signCloudinaryParams } from '@@/server/integrations/cloudinary'
 
 describe('signCloudinaryParams', () => {
   it('signs sorted params exactly as Cloudinary expects', () => {

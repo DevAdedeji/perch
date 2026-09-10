@@ -30,12 +30,16 @@ const publicHelpUrl = computed(() => currentWorkspace.value
 const isAdmin = computed(() => currentWorkspace.value?.role === 'admin')
 const groups = ref<Group[]>([])
 const loading = ref(true)
+const loadFailed = ref(false)
 
 async function load() {
   if (!wid.value) return
   loading.value = true
+  loadFailed.value = false
   try {
     groups.value = await $fetch<Group[]>(`/api/workspaces/${wid.value}/articles`)
+  } catch {
+    loadFailed.value = true
   } finally {
     loading.value = false
   }
@@ -229,6 +233,15 @@ async function togglePublish(article: Article) {
           class="h-36 w-full rounded-2xl"
         />
       </div>
+
+      <UAlert
+        v-else-if="loadFailed"
+        color="error"
+        variant="soft"
+        title="Could not load your articles"
+        description="Check your connection and try again. Your articles have not been changed."
+        :actions="[{ label: 'Try again', color: 'error', variant: 'outline', onClick: load }]"
+      />
 
       <div
         v-else-if="!groups.length"

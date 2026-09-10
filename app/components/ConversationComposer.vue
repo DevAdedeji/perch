@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { validateImageAttachment } from '@perch/shared'
-import type { CannedResponse, TeamMember } from '~/composables/useControlRoom'
-import { activeMention, insertMention, selectedMentionIds } from '~/utils/mentions'
+import type { CannedResponse, TeamMember } from '@/composables/useControlRoom'
+import { activeMention, insertMention, selectedMentionIds } from '@/utils/mentions'
 
 const props = defineProps<{
   workspaceId: string | null

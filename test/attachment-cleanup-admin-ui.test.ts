@@ -9,7 +9,7 @@ describe('attachment cleanup operator surface', () => {
   const page = source('../app/pages/admin/metrics.vue')
   const sidebar = source('../app/components/DashboardSidebar.vue')
   const authRoute = source('../server/api/auth/me.get.ts')
-  const platformAdmin = source('../server/utils/platform-admin.ts')
+  const platformAdmin = source('../server/domains/auth/platform-admin.ts')
   const queueRoute = source('../server/api/admin/attachment-cleanup.get.ts')
   const retryRoute = source('../server/api/admin/attachment-cleanup/[id]/retry.post.ts')
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { messageTextSegments } from '../app/utils/message-links'
+import { messageTextSegments } from '@/utils/message-links'
 
 describe('message links', () => {
   it('turns public HTTP(S) URLs into safe link segments', () => {

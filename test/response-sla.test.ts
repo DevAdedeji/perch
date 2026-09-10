@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { calculateResponseSla, effectiveResponseTargetMinutes } from '../server/utils/response-sla'
+import { calculateResponseSla, effectiveResponseTargetMinutes } from '@@/server/domains/conversations/response-sla'
 
 const now = new Date('2026-09-01T10:15:00.000Z')
 

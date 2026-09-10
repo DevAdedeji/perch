@@ -1,3 +1,8 @@
+import { requireMembership } from '@@/server/domains/workspaces/access'
+import { bachsConfigured } from '@@/server/integrations/bachs'
+import { reconcileWorkspaceBilling } from '@@/server/domains/billing/subscriptions'
+import { logAudit } from '@@/server/domains/workspaces/audit'
+
 export default defineEventHandler(async (event) => {
   const workspaceId = getRouterParam(event, 'id')!
   const { user, member } = await requireMembership(event, workspaceId, { admin: true })

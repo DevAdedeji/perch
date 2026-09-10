@@ -1,3 +1,7 @@
+import { useDb } from '@@/server/database/client'
+import { requireMembership } from '@@/server/domains/workspaces/access'
+import { issueEmbedTicket, requireEmbedTicket } from '@@/server/domains/visitors/session'
+import { observedEmbedOrigin } from '@@/server/domains/workspaces/installation'
 /**
  * The dashboard refuses framing. The widget is the deliberate exception and
  * receives a workspace-specific frame policy after its embed origin is proven.
@@ -11,7 +15,10 @@ export default defineEventHandler(async (event) => {
   event.context.requestId = requestId
   setResponseHeader(event, 'X-Request-Id', requestId)
   setResponseHeader(event, 'X-Frame-Options', 'DENY')
-  setResponseHeader(event, 'Content-Security-Policy', contentSecurityPolicy('\'none\'', import.meta.dev))
+  // SPA navigation retains this document's policy when opening the widget preview.
+  setResponseHeader(event, 'Content-Security-Policy', contentSecurityPolicy('\'none\'', import.meta.dev, {
+    allowSameOriginFrames: true
+  }))
   setResponseHeader(event, 'Cross-Origin-Opener-Policy', 'same-origin')
   setResponseHeader(event, 'X-Content-Type-Options', 'nosniff')
   setResponseHeader(event, 'Referrer-Policy', path.startsWith('/reply') ? 'no-referrer' : 'strict-origin-when-cross-origin')

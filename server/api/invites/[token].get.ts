@@ -1,3 +1,4 @@
+import { useDb } from '@@/server/database/client'
 import { eq, invites, workspaces } from '@perch/db'
 
 /** Public: fetch invite details so the /join page can render before login. */

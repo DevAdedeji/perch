@@ -1,3 +1,4 @@
+import { googleOAuthConfigured, setGoogleOAuthContext } from '@@/server/integrations/google-oauth'
 import { safeAuthRedirect } from '@perch/shared'
 
 export default defineEventHandler((event) => {

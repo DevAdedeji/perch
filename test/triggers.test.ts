@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { matchesTriggerUrl } from '../server/utils/triggers'
+import { matchesTriggerUrl } from '@@/server/domains/automations/triggers'
 
 describe('matchesTriggerUrl', () => {
   it('matches a substring of the URL', () => {

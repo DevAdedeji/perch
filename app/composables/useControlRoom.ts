@@ -1,8 +1,8 @@
 import { channels } from '@perch/shared'
 import type { ConversationPriority, ConversationStatus, MessageDTO, ResponseSlaDTO, SavedInboxFilters, ServerEvent } from '@perch/shared'
-import { inboxOutboxFor } from '../utils/inbox-outbox'
-import type { InboxMessage } from '../utils/inbox-outbox'
-import { claimInboxRequests } from '../utils/inbox-requests'
+import { inboxOutboxFor } from '@/utils/inbox-outbox'
+import type { InboxMessage } from '@/utils/inbox-outbox'
+import { claimInboxRequests } from '@/utils/inbox-requests'
 
 export interface InboxItem {
   id: string

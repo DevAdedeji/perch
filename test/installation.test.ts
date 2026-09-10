@@ -8,9 +8,9 @@ import {
   installationPageForOrigin,
   installationPageHash,
   installationPageMatches,
-  normalizeInstallationPage,
   observedEmbedOrigin
-} from '../server/utils/installation'
+} from '@@/server/domains/workspaces/installation'
+import { normalizeInstallationPage } from '@@/server/utils/embedding-origin'
 
 describe('installation page normalization', () => {
   it('keeps the public origin and path while dropping query strings and fragments', () => {

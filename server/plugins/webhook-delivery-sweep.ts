@@ -1,21 +1,14 @@
-import { safeErrorSummary } from '../utils/request-security'
+import { runWebhookDeliverySweep, webhookDeliveryEnabled } from '@@/server/domains/webhooks/delivery'
+import { safeErrorSummary } from '@@/server/utils/request-security'
+import { startBackgroundSweep } from '@@/server/infrastructure/background-sweep'
 
-const WEBHOOK_SWEEP_INTERVAL = 15_000
-
-export default defineNitroPlugin(() => {
+export default defineNitroPlugin((app) => {
   if (import.meta.prerender || !webhookDeliveryEnabled()) return
-  let running = false
-  const sweep = async () => {
-    if (running) return
-    running = true
-    try {
-      await runWebhookDeliverySweep()
-    } catch (error) {
-      console.error('[webhooks] delivery sweep failed', safeErrorSummary(error))
-    } finally {
-      running = false
-    }
-  }
-  setTimeout(sweep, 5_000).unref()
-  setInterval(sweep, WEBHOOK_SWEEP_INTERVAL).unref()
+  const stop = startBackgroundSweep({
+    intervalMs: 15_000,
+    initialDelayMs: 5_000,
+    run: () => runWebhookDeliverySweep(),
+    onError: error => console.error('[webhooks] sweep failed', safeErrorSummary(error))
+  })
+  app.hooks.hook('close', stop)
 })

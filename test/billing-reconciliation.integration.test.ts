@@ -1,16 +1,19 @@
+import * as databaseClient from '@@/server/database/client'
 import { randomUUID } from 'node:crypto'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { drizzle } from '../packages/db/node_modules/drizzle-orm/postgres-js/index.js'
 import { eq } from '../packages/db/node_modules/drizzle-orm/index.js'
 import postgres from '../packages/db/node_modules/postgres/src/index.js'
-import * as schema from '../packages/db/src/schema'
-import { cancelWorkspacePlan, claimBillingWebhook, failBillingWebhook, finishBillingWebhook, reconcileWorkspaceBilling, reconcileWorkspaceSubscriptionEvent, requireBillingWebhookFinish, runBillingReconciliationSweep, startWorkspaceCheckout, workspaceBillingCustomer, workspaceEntitlement } from '../server/utils/billing'
+import * as schema from '@@/packages/db/src/schema'
+import { cancelWorkspacePlan, claimBillingWebhook, failBillingWebhook, finishBillingWebhook, reconcileWorkspaceBilling, reconcileWorkspaceSubscriptionEvent, requireBillingWebhookFinish, runBillingReconciliationSweep, startWorkspaceCheckout, workspaceBillingCustomer, workspaceEntitlement } from '@@/server/domains/billing/subscriptions'
+import { getTestDatabaseUrl } from '@@/test/helpers/database'
 
-const databaseUrl = process.env.TEST_DATABASE_URL
+const databaseUrl = getTestDatabaseUrl()
 
 describe.skipIf(!databaseUrl)('billing reconciliation database integration', () => {
   const client = postgres(databaseUrl!, { max: 1 })
   const db = drizzle(client, { schema })
+  vi.spyOn(databaseClient, 'useDb').mockReturnValue(db)
   const workspaceId = randomUUID()
   const checkoutId = `checkout_${randomUUID()}`
   const subscriptionId = `subscription_${randomUUID()}`
@@ -64,7 +67,7 @@ describe.skipIf(!databaseUrl)('billing reconciliation database integration', () 
 
   beforeAll(async () => {
     Object.assign(globalThis, {
-      useDb: () => db,
+
       useRuntimeConfig: () => ({
         bachsEnvironment: 'sandbox',
         bachsSecretKey: 'sk_sandbox_test',

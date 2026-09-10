@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import type { PublicHelpGroup } from '~/utils/help-center'
-import { helpArticleExcerpt } from '~/utils/help-center'
+import type { PublicHelpGroup } from '@/utils/help-center'
+import { helpArticleExcerpt } from '@/utils/help-center'
 
 definePageMeta({ layout: 'help-center' })
 

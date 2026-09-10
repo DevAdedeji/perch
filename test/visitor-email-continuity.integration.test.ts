@@ -1,17 +1,20 @@
+import * as databaseClient from '@@/server/database/client'
 import { randomUUID } from 'node:crypto'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { drizzle } from '../packages/db/node_modules/drizzle-orm/postgres-js/index.js'
 import { and, eq } from '../packages/db/node_modules/drizzle-orm/index.js'
 import postgres from '../packages/db/node_modules/postgres/src/index.js'
-import * as schema from '../packages/db/src/schema'
-import { applyResendVisitorSuppression } from '../server/utils/resend-webhooks'
-import { runVisitorReplyEmailSweep, visitorEmailHash } from '../server/utils/visitor-email-continuity'
+import * as schema from '@@/packages/db/src/schema'
+import { applyResendVisitorSuppression } from '@@/server/domains/notifications/resend-events'
+import { runVisitorReplyEmailSweep, visitorEmailHash } from '@@/server/domains/visitors/email-continuity'
+import { getTestDatabaseUrl } from '@@/test/helpers/database'
 
-const databaseUrl = process.env.TEST_DATABASE_URL
+const databaseUrl = getTestDatabaseUrl()
 
 describe.skipIf(!databaseUrl)('visitor email continuity database integration', () => {
   const client = postgres(databaseUrl!, { max: 2 })
   const db = drizzle(client, { schema })
+  vi.spyOn(databaseClient, 'useDb').mockReturnValue(db)
   const workspaceId = randomUUID()
   const visitorId = randomUUID()
   const conversationId = randomUUID()
@@ -19,7 +22,7 @@ describe.skipIf(!databaseUrl)('visitor email continuity database integration', (
 
   beforeAll(async () => {
     Object.assign(globalThis, {
-      useDb: () => db,
+
       useRuntimeConfig: () => ({
         publicBaseUrl: 'https://useperch.xyz',
         visitorReplySecret: 'integration-visitor-reply-secret-849201',

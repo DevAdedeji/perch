@@ -1,3 +1,5 @@
+import { requireMembership } from '@@/server/domains/workspaces/access'
+import { useDb } from '@@/server/database/client'
 import { and, articles, eq } from '@perch/db'
 
 /** Delete a help-center article (admin only). */

@@ -1,3 +1,4 @@
+import { useDb } from '@@/server/database/client'
 import { sql } from '@perch/db'
 
 /**
@@ -12,8 +13,9 @@ type G = typeof globalThis & { __perchLastApiActivity?: number }
 const PING_INTERVAL = 4 * 60 * 1000
 const ACTIVE_WINDOW = 12 * 60 * 1000
 
-export default defineNitroPlugin(() => {
-  setInterval(async () => {
+export default defineNitroPlugin((app) => {
+  if (import.meta.prerender) return
+  const interval = setInterval(async () => {
     const last = (globalThis as G).__perchLastApiActivity ?? 0
     if (Date.now() - last > ACTIVE_WINDOW) return
     try {
@@ -22,4 +24,5 @@ export default defineNitroPlugin(() => {
       // transient — the next real query will reconnect
     }
   }, PING_INTERVAL).unref()
+  app.hooks.hook('close', () => clearInterval(interval))
 })

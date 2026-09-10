@@ -1,3 +1,8 @@
+import { requireUser } from '@@/server/domains/auth/require-user'
+import { useDb } from '@@/server/database/client'
+import { canMemberAccessConversation } from '@@/server/domains/workspaces/access'
+import { linkedVisitorIds, lockVisitorModerationIdentity } from '@@/server/domains/conversations/spam-control'
+import { inboxScope, publishConversationUpdate, serializeConversation } from '@@/server/domains/conversations/messages'
 import {
   and,
   auditLogs,

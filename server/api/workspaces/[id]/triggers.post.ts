@@ -1,5 +1,8 @@
+import { requireMembership } from '@@/server/domains/workspaces/access'
+import { useDb } from '@@/server/database/client'
+import { invalidateTriggerCache } from '@@/server/domains/automations/triggers'
 import { z } from 'zod'
-import { createWorkspaceTrigger } from '../../../utils/workspace-resources'
+import { createWorkspaceTrigger } from '@@/server/domains/workspaces/resources'
 
 const schema = z.object({
   name: z.string().trim().min(1).max(60),

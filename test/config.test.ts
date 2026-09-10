@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { PERCH_PRODUCTION_ORIGIN } from '@perch/shared'
-import { normalizePublicOrigin } from '../server/utils/email'
+import { normalizePublicOrigin } from '@@/server/integrations/email'
 
 describe('production configuration', () => {
   it('uses the current canonical public origin', () => {

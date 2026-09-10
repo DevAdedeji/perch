@@ -1,5 +1,8 @@
+import { requireMembership } from '@@/server/domains/workspaces/access'
+import { useDb } from '@@/server/database/client'
+import { memberNotificationPreferences } from '@@/server/domains/notifications/preferences'
 import { notificationPreferences, sql } from '@perch/db'
-import { notificationPreferenceUpdateSchema } from '../../../utils/notification-preference-validation'
+import { notificationPreferenceUpdateSchema } from '@@/server/utils/notification-preference-validation'
 
 export default defineEventHandler(async (event) => {
   const workspaceId = getRouterParam(event, 'id')!

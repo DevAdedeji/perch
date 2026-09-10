@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { useCopyToClipboard } from '../app/composables/useCopyToClipboard'
+import { useCopyToClipboard } from '@/composables/useCopyToClipboard'
 
 describe('useCopyToClipboard', () => {
   afterEach(() => {

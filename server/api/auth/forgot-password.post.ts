@@ -1,3 +1,5 @@
+import { useDb } from '@@/server/database/client'
+import { emailLayout, escapeHtml, publicOrigin, sendEmail, shouldLogEmailPreview } from '@@/server/integrations/email'
 import { createHash, randomBytes } from 'node:crypto'
 import { eq, passwordResetTokens, users } from '@perch/db'
 import { z } from 'zod'

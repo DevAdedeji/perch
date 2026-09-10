@@ -1,3 +1,5 @@
+import { requirePlatformAdmin } from '@@/server/domains/auth/platform-admin'
+import { retryFailedAttachmentCleanup } from '@@/server/domains/attachments/lifecycle'
 /** Requeue one exhausted cleanup job. Repeating the request fails closed. */
 export default defineEventHandler(async (event) => {
   const user = await requirePlatformAdmin(event)

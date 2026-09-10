@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { helpArticleExcerpt } from '../app/utils/help-center'
-import { normalizePublicArticleUrl, publicHelpSitemapPaths } from '../server/utils/help-center'
+import { helpArticleExcerpt } from '@/utils/help-center'
+import { normalizePublicArticleUrl, publicHelpSitemapPaths } from '@@/server/domains/help-center/articles'
 
 describe('public help center', () => {
   it('creates short, whitespace-normalized excerpts', () => {

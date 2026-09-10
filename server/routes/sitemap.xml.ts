@@ -1,3 +1,6 @@
+import { publicOrigin } from '@@/server/integrations/email'
+import { listPublishedHelpSitemapEntries, publicHelpSitemapPaths } from '@@/server/domains/help-center/articles'
+import { useDb } from '@@/server/database/client'
 import { PERCH_INDEXABLE_PATHS } from '@perch/shared'
 
 const MAX_SITEMAP_URLS = 50_000

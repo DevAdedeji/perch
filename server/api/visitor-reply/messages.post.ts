@@ -1,3 +1,6 @@
+import { requireReplyContinuation } from '@@/server/domains/visitors/email-continuity'
+import { isVisitorMessagingBlocked } from '@@/server/domains/conversations/spam-control'
+import { ingestVisitorMessage, serializeVisitorMessage } from '@@/server/domains/conversations/messages'
 import { z } from 'zod'
 
 const schema = z.object({ content: z.string().trim().min(1).max(5000) })

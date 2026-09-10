@@ -1,3 +1,5 @@
+import { PUBLIC_HELP_SEARCH_MAX_LENGTH, PUBLIC_HELP_SITE_ID_PATTERN, findPublicHelpWorkspaceId, listPublishedHelpGroups } from '@@/server/domains/help-center/articles'
+import { useDb } from '@@/server/database/client'
 import { z } from 'zod'
 
 /**

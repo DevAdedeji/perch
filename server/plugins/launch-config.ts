@@ -1,4 +1,4 @@
-import { assertProductionConfig } from '../../config/launch'
+import { assertProductionConfig } from '@@/config/launch'
 
 /** Refuse traffic when a deployed server has unsafe or incomplete core configuration. */
 export default defineNitroPlugin(() => {

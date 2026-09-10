@@ -1,3 +1,6 @@
+import { normalizeInstallationOrigin } from '@@/server/utils/embedding-origin'
+import { useDb } from '@@/server/database/client'
+import { issueEmbedTicket } from '@@/server/domains/visitors/session'
 import { eq, workspaces } from '@perch/db'
 
 export default defineEventHandler(async (event) => {

@@ -1,10 +1,12 @@
+import { requireMembership } from '@@/server/domains/workspaces/access'
+import { useDb } from '@@/server/database/client'
 import { and, eq, widgetInstallationSignals, workspaces } from '@perch/db'
 import { z } from 'zod'
 import {
   evaluateInstallationSignal,
-  installationPageHash,
-  normalizeInstallationPage
-} from '../../../../utils/installation'
+  installationPageHash
+} from '@@/server/domains/workspaces/installation'
+import { normalizeInstallationPage } from '@@/server/utils/embedding-origin'
 
 const schema = z.object({
   url: z.string().trim().min(1).max(2_000)

@@ -50,7 +50,11 @@ export function acceptsApiContentType(path: string, contentType: unknown): boole
     : mediaType === 'application/json'
 }
 
-export function contentSecurityPolicy(frameAncestors: string, development = false): string {
+export function contentSecurityPolicy(
+  frameAncestors: string,
+  development = false,
+  options: { allowSameOriginFrames?: boolean } = {}
+): string {
   const scriptSources = development
     ? '\'self\' \'unsafe-inline\' \'unsafe-eval\''
     : '\'self\' \'unsafe-inline\''
@@ -68,7 +72,7 @@ export function contentSecurityPolicy(frameAncestors: string, development = fals
     'font-src \'self\' data:',
     `connect-src ${connectSources}`,
     'media-src \'none\'',
-    'frame-src \'none\'',
+    options.allowSameOriginFrames ? 'frame-src \'self\'' : 'frame-src \'none\'',
     'worker-src \'self\' blob:',
     'manifest-src \'self\'',
     'form-action \'self\'',

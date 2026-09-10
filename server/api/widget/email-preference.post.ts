@@ -1,3 +1,6 @@
+import { visitorEmailHash, visitorReplyEmailFeatureEnabled } from '@@/server/domains/visitors/email-continuity'
+import { requireVisitorSession } from '@@/server/domains/visitors/session'
+import { useDb } from '@@/server/database/client'
 import { and, eq, ne, visitorEmailSuppressions, visitors } from '@perch/db'
 import { z } from 'zod'
 

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { MessageDTO } from '@perch/shared'
-import { mentionSegments } from '~/utils/mentions'
+import { mentionSegments } from '@/utils/mentions'
 
 type ThreadMessage = MessageDTO & { pending?: boolean, failed?: boolean }
 interface MessageRow { kind: 'message', message: ThreadMessage, first: boolean, last: boolean }

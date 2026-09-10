@@ -1,9 +1,9 @@
 import { readFileSync } from 'node:fs'
 import type { NotificationPreference } from '@perch/shared'
 import { describe, expect, it } from 'vitest'
-import { defaultNotificationPreference, defaultNotificationPreferences } from '../packages/shared/src/notifications'
-import { mergeNotificationPreferences } from '../server/utils/notification-preferences'
-import { notificationPreferenceUpdateSchema } from '../server/utils/notification-preference-validation'
+import { defaultNotificationPreference, defaultNotificationPreferences } from '@@/packages/shared/src/notifications'
+import { mergeNotificationPreferences } from '@@/server/domains/notifications/preferences'
+import { notificationPreferenceUpdateSchema } from '@@/server/utils/notification-preference-validation'
 import {
   coalescedNotificationPreferenceLoad,
   drainPendingReminders,
@@ -15,7 +15,7 @@ import {
   queuePendingReminder,
   replacedPreferenceEntry,
   updatedNotificationPreferences
-} from '../app/composables/usePersonalNotificationPreferences'
+} from '@/composables/usePersonalNotificationPreferences'
 
 describe('personal notification preferences', () => {
   it('keeps operational in-app alerts on while browser delivery is opt-in', () => {
@@ -191,7 +191,7 @@ describe('personal notification preferences', () => {
   })
 
   it('rechecks reminder responsibility and latest-message state before realtime delivery', () => {
-    const source = readFileSync(new URL('../server/utils/unanswered-reminders.ts', import.meta.url), 'utf8')
+    const source = readFileSync(new URL('../server/domains/notifications/unanswered-reminders.ts', import.meta.url), 'utf8')
     const guard = source.indexOf('if (!await reminderDeliveryIsActionable(delivery, now)) continue')
     const publish = source.indexOf('publishFiltered(channels.workspace(delivery.workspaceId)', guard)
     expect(guard).toBeGreaterThan(-1)

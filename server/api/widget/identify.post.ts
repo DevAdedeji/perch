@@ -1,7 +1,12 @@
+import { useDb } from '@@/server/database/client'
+import { requireVisitorSession } from '@@/server/domains/visitors/session'
+import { isVisitorMessagingBlocked } from '@@/server/domains/conversations/spam-control'
+import { runEntryAutomations } from '@@/server/domains/automations/engine'
+import { inboxScope, publishConversationUpdate } from '@@/server/domains/conversations/messages'
 import { and, conversations, desc, eq, ne, visitors } from '@perch/db'
 import { channels } from '@perch/shared'
 import { z } from 'zod'
-import { safeErrorSummary } from '../../utils/request-security'
+import { safeErrorSummary } from '@@/server/utils/request-security'
 
 const schema = z.object({
   site_id: z.string().min(1),

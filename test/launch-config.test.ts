@@ -5,7 +5,7 @@ import {
   normalizeLaunchOrigin,
   productionConfigErrors,
   type LaunchEnvironment
-} from '../config/launch'
+} from '@@/config/launch'
 
 const validEnvironment: LaunchEnvironment = {
   NODE_ENV: 'production',

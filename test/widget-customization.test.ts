@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { widgetCustomizationSchema } from '../server/utils/validators'
+import { widgetCustomizationSchema } from '@@/server/utils/validators'
 
 describe('widget customization validation', () => {
   it('accepts a complete safe customization payload', () => {

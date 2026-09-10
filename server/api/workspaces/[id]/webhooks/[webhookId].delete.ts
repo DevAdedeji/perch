@@ -1,5 +1,8 @@
+import { requireMembership } from '@@/server/domains/workspaces/access'
+import { useDb } from '@@/server/database/client'
+import { logAudit } from '@@/server/domains/workspaces/audit'
 import { and, eq, inArray, sql, webhookEndpoints, webhookEvents, webhookJobs } from '@perch/db'
-import { webhookAuditTarget } from '../../../../utils/webhook-security'
+import { webhookAuditTarget } from '@@/server/domains/webhooks/endpoints'
 
 /** Delete a webhook endpoint (admin). Its delivery log cascades away. */
 export default defineEventHandler(async (event) => {

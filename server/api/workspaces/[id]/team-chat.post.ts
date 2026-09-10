@@ -1,8 +1,11 @@
+import { requireMembership } from '@@/server/domains/workspaces/access'
+import { useDb } from '@@/server/database/client'
+import { publishMemberNotification } from '@@/server/domains/notifications/member-notifications'
 import { and, eq, inArray, memberNotifications, teamMessages, workspaceMembers } from '@perch/db'
 import { channels } from '@perch/shared'
 import { z } from 'zod'
-import { assertSameMessage, messageFingerprint } from '../../../utils/message-retries'
-import { currentMutationMember, lockWorkspaceMembership } from '../../../utils/mutation-membership'
+import { assertSameMessage, messageFingerprint } from '@@/server/utils/message-retries'
+import { currentMutationMember, lockWorkspaceMembership } from '@@/server/domains/workspaces/mutation-membership'
 
 /** Say something in the team lounge — broadcast to every online teammate. */
 export default defineEventHandler(async (event) => {

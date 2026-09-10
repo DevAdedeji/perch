@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { useWidget } from '../app/composables/useWidget'
+import { useWidget } from '@/composables/useWidget'
 
 const { ref }: typeof import('vue') = createRequire(import.meta.resolve('nuxt/package.json'))('vue')
 

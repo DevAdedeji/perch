@@ -208,13 +208,26 @@ authorization, and filtered delivery rules can remain unchanged.
 
 ## Monorepo layout
 
+Review expectations are in [PR standards](.github/PR_STANDARDS.md). Domain and
+database dependencies use explicit imports; lint prevents persistence imports
+inside `server/utils`.
+
+Use `@/` for imports from `app/` and `@@/` for imports from the repository root
+(for example, `@@/server/domains/workspaces/access`). Vitest uses the same aliases.
+Workspace packages keep their package imports; standalone scripts and bootstrap
+configuration keep runtime-compatible relative imports.
+
 ```
 perch/
 ├── app/                    # Nuxt dashboard + widget frame (pages, composables, components)
 ├── server/
 │   ├── api/                # REST endpoints (auth, workspaces, conversations, widget)
 │   ├── routes/api/ws.ts    # the WebSocket handler
-│   └── utils/              # db, realtime (publish/subscribe), presence, ws-ticket
+│   ├── domains/            # billing, conversations, workspaces, visitors, notifications and other business logic
+│   ├── database/           # shared database connection
+│   ├── infrastructure/     # process lifecycle and background-sweep scheduling
+│   ├── integrations/       # Bachs, email, Cloudinary and Google adapters
+│   └── utils/              # technical helpers; no database queries or business mutations
 ├── packages/
 │   ├── shared/             # the §6 event contract: events, models, enums (type-safe everywhere)
 │   ├── db/                 # Drizzle schema + migrations

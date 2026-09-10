@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { shouldLogEmailPreview } from '../server/utils/email'
+import { shouldLogEmailPreview } from '@@/server/integrations/email'
 
 describe('email preview logging', () => {
   it('never exposes sensitive preview links in production', () => {
