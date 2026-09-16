@@ -30,3 +30,6 @@ backups/
 backup.log
 
 OPERATIONS.md
+
+# Local documentation, not for publication
+/docs/
