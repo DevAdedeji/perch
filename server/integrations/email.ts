@@ -1,10 +1,11 @@
 import { PERCH_PRODUCTION_ORIGIN } from '@perch/shared'
+import { randomUUID } from 'node:crypto'
 
 /**
  * Transactional email via Resend's REST API (no SDK dependency).
  * Best-effort by design: callers treat email as a side channel — a failed
- * send never fails the request that triggered it. Without RESEND_API_KEY
- * (local dev), emails are logged to the server console instead.
+ * send never fails the request that triggered it. Development always logs a
+ * local preview instead of contacting Resend, even when credentials are set.
  */
 
 export interface SendEmailOptions {
@@ -58,6 +59,12 @@ export function publicOrigin(event: import('h3').H3Event): string {
 }
 
 export async function sendEmailDetailed({ to, subject, html, idempotencyKey }: SendEmailOptions): Promise<EmailDeliveryResult> {
+  if (import.meta.dev || process.env.NODE_ENV === 'development') {
+    // Local previews include private action links; never use this path in production.
+    console.info('[email:development] Preview only; no email sent', { to, subject, html })
+    return { accepted: true, providerMessageId: `dev-${randomUUID()}`, retryable: false, error: null }
+  }
+
   const config = useRuntimeConfig()
   const apiKey = config.resendApiKey || process.env.RESEND_API_KEY
   const from = config.emailFrom || process.env.RESEND_FROM || `Perch <no-reply@${new URL(PERCH_PRODUCTION_ORIGIN).hostname}>`
