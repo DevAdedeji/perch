@@ -24,6 +24,7 @@ import { channels } from '@perch/shared'
 import { enqueueWebhookEvent } from '@@/server/domains/webhooks/delivery'
 import { agentWorkspaceAuthorization } from '@@/server/utils/realtime'
 import { safeErrorSummary } from '@@/server/utils/request-security'
+import { wakeBackgroundSweeps } from '@@/server/infrastructure/background-sweep'
 
 type Database = ReturnType<typeof useDb>
 class AutomationSkipped extends Error {}
@@ -268,6 +269,27 @@ async function runAutoClose(rule: AutomationRule, candidate: Conversation, cutof
   })
   if (!closed) return
   publishConversationUpdate(closed)
+  wakeBackgroundSweeps()
+}
+
+export async function nextAutomationAt(): Promise<Date | null> {
+  const result = await useDb().execute(sql`
+    select min(greatest(c.snoozed_until, c.last_message_at + case
+      when r.type = 'inactivity_reminder' then (r.config->>'minutes')::double precision * interval '1 minute'
+      else (r.config->>'hours')::double precision * interval '1 hour'
+    end)) as due
+    from automation_rules r
+    join conversations c on c.workspace_id = r.workspace_id
+    where r.enabled = true and r.type in ('inactivity_reminder', 'auto_close')
+      and c.status = 'open' and c.assigned_agent_id is not null
+      and (r.type = 'auto_close' or not exists (
+        select 1 from automation_executions e where e.rule_id = r.id
+          and e.conversation_id = c.id and e.activity_at = c.last_message_at
+          and e.member_id = c.assigned_agent_id
+      ))
+  `)
+  const due = result[0]?.due as string | null
+  return due ? new Date(due) : null
 }
 
 export async function runAutomationSweep(now = new Date()) {

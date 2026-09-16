@@ -1269,6 +1269,16 @@ export async function reconcileWorkspaceSubscriptionEvent(subscriptionId: string
     : { applied: result!.subscriptionUpdated, workspaceId: identity.workspaceId }
 }
 
+export async function nextBillingReconciliationAt(): Promise<Date | null> {
+  if (!bachsConfigured()) return null
+  const [row] = await useDb().select({ due: sql<string | null>`min(case
+    when ${billingReconciliationJobs.status} in ('pending', 'retrying') then ${billingReconciliationJobs.nextAttemptAt}
+    when ${billingReconciliationJobs.status} = 'processing'
+      then coalesce(${billingReconciliationJobs.claimedAt} + ${RECONCILIATION_LEASE_MS} * interval '1 millisecond', now())
+    end)` }).from(billingReconciliationJobs).where(inArray(billingReconciliationJobs.status, ['pending', 'retrying', 'processing']))
+  return row?.due ? new Date(row.due) : null
+}
+
 export async function runBillingReconciliationSweep(options: { now?: Date, limit?: number } = {}) {
   if (!bachsConfigured()) return { checked: 0, failed: 0, skipped: true }
   const now = options.now ?? new Date()

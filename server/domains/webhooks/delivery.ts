@@ -332,6 +332,16 @@ async function pruneWebhookHistory(db: Database, now: Date) {
   ))
 }
 
+export async function nextWebhookDeliveryAt(): Promise<Date | null> {
+  const [row] = await useDb().select({ due: sql<string | null>`min(case
+    when ${webhookJobs.status} in ('pending', 'retrying') and ${webhookJobs.attempts} < ${MAX_WEBHOOK_ATTEMPTS}
+      then ${webhookJobs.nextAttemptAt}
+    when ${webhookJobs.status} = 'processing' and ${webhookJobs.attempts} <= ${MAX_WEBHOOK_ATTEMPTS}
+      then ${webhookJobs.lockedAt} + ${CLAIM_STALE_MS} * interval '1 millisecond'
+    end)` }).from(webhookJobs).where(inArray(webhookJobs.status, ['pending', 'retrying', 'processing']))
+  return row?.due ? new Date(row.due) : null
+}
+
 export async function runWebhookDeliverySweep(options: {
   db?: Database
   now?: Date
