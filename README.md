@@ -170,6 +170,17 @@ The REST API, the WebSocket handler, the in-process pub/sub bus, and the presenc
 **one Nitro process**. That's a deliberate v1 choice: in-memory fan-out needs no Redis, but it does
 mean the real-time layer is single-instance. The scaling path is documented below and isolated to one file.
 
+Database-backed workers wait for the next persisted deadline instead of polling empty queues every
+few seconds. API mutations wake them after the response; auto-close also wakes outgoing webhook
+delivery after its transaction commits. Bursts are coalesced using each worker's normal interval.
+Workers inspect persisted work on startup and recheck at least every 15 minutes to recover missed
+wake-ups or out-of-process writes. Claims, retries and deduplication stay in PostgreSQL. Due reminders
+restricted to business hours still use the existing one-minute eligibility check until hours open.
+Privacy retention remains hourly, and proactive widget triggers run only for connected visitors.
+This reduces idle database traffic, not traffic from active demos or recurring health monitors.
+Use `/api/live` for routine uptime checks that must not wake PostgreSQL. Keep `/api/health` for
+deployment readiness and deliberate database diagnostics; it intentionally executes a database query.
+
 ### Real-time event contract (the spine)
 Two channels carry everything:
 

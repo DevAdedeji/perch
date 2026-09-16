@@ -409,6 +409,15 @@ async function claimCleanupAssets(db: Database, now: Date) {
   })
 }
 
+export async function nextAttachmentCleanupAt(): Promise<Date | null> {
+  const [row] = await useDb().select({ due: sql<string | null>`min(case
+    when ${attachmentAssets.state} = 'pending' then ${attachmentAssets.createdAt} + ${ATTACHMENT_ABANDONED_AFTER_MS} * interval '1 millisecond'
+    when ${attachmentAssets.state} = 'retrying' then ${attachmentAssets.cleanupNextAttemptAt}
+    when ${attachmentAssets.state} = 'processing' then ${attachmentAssets.cleanupLockedAt} + ${ATTACHMENT_CLEANUP_STALE_MS} * interval '1 millisecond'
+    end)` }).from(attachmentAssets).where(inArray(attachmentAssets.state, ['pending', 'retrying', 'processing']))
+  return row?.due ? new Date(row.due) : null
+}
+
 export async function runAttachmentCleanupSweep(options: {
   db?: Database
   now?: Date

@@ -195,6 +195,12 @@ function suppressionRetryAt(attempt: number, now: Date) {
   return new Date(now.getTime() + delay)
 }
 
+export async function nextResendSuppressionAt(): Promise<Date | null> {
+  const [row] = await useDb().select({ due: sql<string | null>`min(${resendSuppressionEvents.nextAttemptAt})` })
+    .from(resendSuppressionEvents).where(eq(resendSuppressionEvents.status, 'pending'))
+  return row?.due ? new Date(row.due) : null
+}
+
 export async function runResendSuppressionSweep(
   options: { db?: Database, now?: Date } = {}
 ) {
