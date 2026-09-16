@@ -26,6 +26,7 @@ interface LatestVisitorCandidate {
   conversation_id: string
   workspace_id: string
   assigned_agent_id: string | null
+  snoozed_until: Date | string | null
   visitor_message_id: string
   message_at: Date | string
   reminder_delay: number
@@ -48,7 +49,7 @@ export function effectiveReminderSettings(input: {
   }
 }
 
-async function latestVisitorCandidates(now: Date) {
+async function latestVisitorCandidates(now: Date, includeSnoozed = false) {
   const result = await useDb().execute(sql`
     with latest_public as (
       select m.id, m.conversation_id, m.sender_type, m.created_at,
@@ -56,7 +57,7 @@ async function latestVisitorCandidates(now: Date) {
       from messages m
       where m.is_internal_note = false
     )
-    select c.id as conversation_id, c.workspace_id, c.assigned_agent_id,
+    select c.id as conversation_id, c.workspace_id, c.assigned_agent_id, c.snoozed_until,
       latest_public.id as visitor_message_id, latest_public.created_at as message_at,
       w.unanswered_reminder_delay_minutes as reminder_delay,
       w.unanswered_reminder_business_hours_only as business_hours_only,
@@ -75,11 +76,64 @@ async function latestVisitorCandidates(now: Date) {
       and latest_public.sender_type = 'visitor'
       and w.unanswered_reminder_enabled = true
       and c.status in ('unassigned', 'open')
-      and (c.snoozed_until is null or c.snoozed_until <= ${now.toISOString()}::timestamptz)
+      and (${includeSnoozed} or c.snoozed_until is null or c.snoozed_until <= ${now.toISOString()}::timestamptz)
+      and exists (
+        select 1 from workspace_members recipient
+        where recipient.workspace_id = c.workspace_id
+          and (recipient.id = c.assigned_agent_id or (c.assigned_agent_id is null and recipient.role = 'admin'))
+          and not exists (
+            select 1 from unanswered_reminder_deliveries delivery
+            where delivery.visitor_message_id = latest_public.id and delivery.recipient_member_id = recipient.id
+          )
+      )
     order by latest_public.created_at asc
     limit ${CANDIDATE_LIMIT}
   `)
   return result as unknown as LatestVisitorCandidate[]
+}
+
+export async function nextUnansweredReminderAt(now = new Date()): Promise<Date | null> {
+  const [queued] = await useDb().select({ due: sql<string | null>`min(case
+    when ${unansweredReminderDeliveries.status} in ('pending', 'failed') then ${unansweredReminderDeliveries.nextAttemptAt}
+    when ${unansweredReminderDeliveries.status} = 'processing'
+      then ${unansweredReminderDeliveries.lockedAt} + ${STALE_LOCK_MS} * interval '1 millisecond'
+    end)` }).from(unansweredReminderDeliveries)
+    .where(and(
+      lt(unansweredReminderDeliveries.attempts, MAX_ATTEMPTS),
+      inArray(unansweredReminderDeliveries.status, ['pending', 'failed', 'processing'])
+    ))
+  let earliest = queued?.due ? new Date(queued.due).getTime() : Infinity
+  const candidates = await latestVisitorCandidates(now, true)
+  // A capped batch cannot prove that later rows have no earlier deadlines.
+  if (candidates.length === CANDIDATE_LIMIT) earliest = Math.min(earliest, now.getTime())
+  for (const candidate of candidates) {
+    const settings = candidateReminderSettings(candidate, now)
+    const due = Math.max(
+      new Date(candidate.message_at).getTime() + settings.delayMinutes * 60_000,
+      candidate.snoozed_until ? new Date(candidate.snoozed_until).getTime() : -Infinity
+    )
+    earliest = Math.min(earliest, due)
+    // An expiring subscription can change the applicable delay without a request.
+    if (candidate.subscription_period_end) {
+      const expiry = new Date(candidate.subscription_period_end).getTime()
+      if (expiry > now.getTime()) earliest = Math.min(earliest, expiry)
+    }
+  }
+  return Number.isFinite(earliest) ? new Date(earliest) : null
+}
+
+function candidateReminderSettings(candidate: LatestVisitorCandidate, now: Date) {
+  const isPro = candidate.subscription_status
+    ? subscriptionHasPaidAccess({
+        status: candidate.subscription_status,
+        currentPeriodEnd: candidate.subscription_period_end ? new Date(candidate.subscription_period_end) : null
+      }, candidate.subscription_invoice_status === 'paid', now)
+    : false
+  return effectiveReminderSettings({
+    delayMinutes: candidate.reminder_delay,
+    businessHoursOnly: candidate.business_hours_only,
+    isPro
+  })
 }
 
 async function reminderRecipients(workspaceId: string, assignedAgentId: string | null) {
@@ -93,17 +147,7 @@ async function reminderRecipients(workspaceId: string, assignedAgentId: string |
 async function enqueueDueReminders(now: Date) {
   for (const candidate of await latestVisitorCandidates(now)) {
     const messageAt = new Date(candidate.message_at)
-    const isPro = candidate.subscription_status
-      ? subscriptionHasPaidAccess({
-          status: candidate.subscription_status,
-          currentPeriodEnd: candidate.subscription_period_end ? new Date(candidate.subscription_period_end) : null
-        }, candidate.subscription_invoice_status === 'paid', now)
-      : false
-    const settings = effectiveReminderSettings({
-      delayMinutes: candidate.reminder_delay,
-      businessHoursOnly: candidate.business_hours_only,
-      isPro
-    })
+    const settings = candidateReminderSettings(candidate, now)
     if (!reminderIsDue(messageAt, settings.delayMinutes, now)) continue
     if (settings.businessHoursOnly && !isWithinBusinessHours(candidate.business_hours, candidate.timezone, now)) continue
     const recipients = await reminderRecipients(candidate.workspace_id, candidate.assigned_agent_id)

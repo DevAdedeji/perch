@@ -1,6 +1,6 @@
 import { safeErrorSummary } from '@@/server/utils/request-security'
 import { startBackgroundSweep } from '@@/server/infrastructure/background-sweep'
-import { requireResendWebhookSecret, runResendSuppressionSweep } from '@@/server/domains/notifications/resend-events'
+import { nextResendSuppressionAt, requireResendWebhookSecret, runResendSuppressionSweep } from '@@/server/domains/notifications/resend-events'
 
 const RESEND_SUPPRESSION_SWEEP_INTERVAL_MS = 60_000
 
@@ -13,6 +13,7 @@ export default defineNitroPlugin((app) => {
   }
   const stop = startBackgroundSweep({
     intervalMs: RESEND_SUPPRESSION_SWEEP_INTERVAL_MS,
+    nextRunAt: nextResendSuppressionAt,
     initialDelayMs: 10_000,
     run: () => runResendSuppressionSweep(),
     onError: error => console.error('[resend] suppression sweep failed', safeErrorSummary(error))
