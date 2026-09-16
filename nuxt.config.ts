@@ -60,7 +60,7 @@ export default defineNuxtConfig({
     databaseUrl: '',
     // HMAC secret for short-lived WebSocket auth tickets (reuse the session secret)
     realtimeSecret: '',
-    // transactional email (password reset, invites) — optional; logs in dev without it
+    // Transactional email: development previews are logged, never sent.
     resendApiKey: '',
     emailFrom: '',
     resendWebhookSecret: '',
